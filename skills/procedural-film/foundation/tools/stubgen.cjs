@@ -5,13 +5,25 @@
 //   node tools/stubgen.cjs      writes src/scenes/NN-<id>.js for every shot in src/timeline.js
 //
 // Overwrites existing scene files — run it before scene work starts, never after.
+// A shot listed in a profile or outline entry of src/geo.js draws that silhouette instead of the placeholder
+// ellipse, so the draft already shows every match cut landing and check 7 measures it from the first run.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const C = require('./common.cjs');
 const TL = C.loadTimeline(path.join(C.SRC, 'timeline.js'));
 const dir = path.join(C.SRC, 'scenes');
+const geoFile = path.join(C.SRC, 'geo.js');
+const GEO = fs.existsSync(geoFile) ? C.loadGeo(geoFile) : {};
+const shapeOf = (id) => Object.keys(GEO).find((k) => GEO[k] && /^(profile|outline)$/.test(GEO[k].kind) && (GEO[k].shots || []).includes(id));
 fs.mkdirSync(dir, { recursive: true });
+
+const shape = (id, opts) => {
+  const g = shapeOf(id);
+  return g
+    ? `L.inkPath(ctx, L.geo('${g}').outline(), { closed: true, smooth: false, ${opts} }); // ${g} from src/geo.js`
+    : `L.inkPath(ctx, L.ellipsePts(540, 860, 300, 400, 72), { closed: true, ${opts} });`;
+};
 
 const illustrated = (nn, id) => `// STUB
 // Placeholder for shot ${nn} '${id}' (illustrated). The scene agent replaces this whole file.
@@ -23,7 +35,7 @@ FILM.scene({
     const q = L.clamp(L.onTwos(t) / info.dur);
     const seed = L.hash('${id}');
     L.paper(ctx);
-    L.inkPath(ctx, L.ellipsePts(540, 860, 300, 400, 72), { closed: true, width: 5, seed: seed + 1, double: true });
+    ${shape(id, 'width: 5, seed: seed + 1, double: true')}
     L.inkLine(ctx, 140, 1300, 940, 1300, { width: 3, seed: seed + 2 });
     L.inkCircle(ctx, 240 + 600 * q, 1230, 44, { width: 3, seed: seed + 3, fill: P.orange });
     L.text(ctx, 'STUB ${nn}', 540, 330, { size: 60, weight: 600, align: 'center', color: P.annMagenta });
@@ -43,6 +55,7 @@ FILM.scene({
     const p = L.clamp(t / info.dur);
     L.blueprint(ctx);
     L.guideCircle(ctx, 540, 860, 340, { alpha: 0.4 });
+    ${shapeOf(id) ? shape(id, `width: 3, color: P.lavender, seed: L.hash('${id}')`) : '// (no shared silhouette)'}
     L.glowDot(ctx, 540, 860, 10 + 8 * p, { rays: 12, rot: p * Math.PI });
     L.text(ctx, 'STUB ${nn}', 540, 330, { size: 60, weight: 600, align: 'center', color: P.magenta });
     L.text(ctx, info.shot.title || '${id}', 540, 1420, { size: 44, align: 'center', color: P.lavender });
@@ -59,5 +72,5 @@ for (const s of TL.shots) {
   const code = /schem|blue/.test(mode) ? schematic(nn, s.id) : illustrated(nn, s.id);
   const out = path.join(dir, path.basename(s.file));
   fs.writeFileSync(out, code);
-  console.log(`${path.basename(s.file)}  ${mode}`);
+  console.log(`${path.basename(s.file)}  ${mode}${shapeOf(s.id) ? `  ${shapeOf(s.id)}` : ''}`);
 }

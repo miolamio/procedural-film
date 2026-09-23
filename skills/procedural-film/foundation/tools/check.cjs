@@ -3,8 +3,14 @@
 //
 //   node tools/check.cjs              the real film (src)
 //   node tools/check.cjs --fixtures   the tool fixtures
+//   node tools/check.cjs --shot <id>  one shot, loaded alone (core, lib, timeline, geo and its file): what a scene agent
+//                                     runs while sibling scenes are half-written. Sources, draw, cost, determinism and
+//                                     geometry cover that shot only; cost only warns (parallel agents load the machine).
+//                                     The director runs the whole gate.
 //
-//   1 media        the built HTML contains no forbidden media patterns
+// Every run loads a snapshot of the source files taken at its start, so an edit saved mid-run cannot fail it.
+//
+//   1 media        the built HTML contains no forbidden media patterns, and no page requested any URL at run time
 //   2 determinism  the first, middle and last frame of every shot, plus one frame inside each non-cut transition,
 //                  hash identically warm forward, warm reversed, in a fresh page shuffled with decoys, cold (the first
 //                  draw in a fresh page) and sequential (drawn straight after the frame before it)
@@ -14,13 +20,16 @@
 //   4 timeline     coverage, ids, transitions; warns on off-grid hits and cuts, a bpm whose 16ths
 //                  miss the frame grid, and a duration that is not whole bars
 //   5 draw         every checked frame draws without throwing and is not one flat colour
-//   4 timeline     shots cover 0..duration with no gaps or overlaps; every shot's file registers its id
-//   5 draw         first, middle and last frame of every shot draw without throwing
-//   6 cost         frame times from a sweep across the film; slowest frames listed
+//   6 cost         frame times from a sweep across the film; slowest frames listed; warns when a repeat of the
+//                  sweep creates canvases again (a cache keyed by time, or one too small to hold the film)
+//   7 geometry     src/geo.js (optional) is well formed and names real shots, and every profile or outline is
+//                  measured on the rendered frames either side of each declared match cut: its edges must sit
+//                  within --geo-tol px (default 12) of the table on most rows, or the cut jumps
 //
 // Options: --scale s (default 1), --sweep N (every Nth frame, default 4), --det N (add N evenly spaced determinism
 //          frames on top of the per-shot ones, default 0; never fewer than every shot),
-//          --budget ms (fail if the slowest swept frame exceeds this; default: warn above 150 ms)
+//          --budget ms (fail if the slowest swept frame exceeds this; default: warn above 150 ms),
+//          --geo-tol px (median edge offset allowed for check 7, in 1080-wide px; default 12)
 'use strict';
 
 const fs = require('fs');
@@ -122,19 +131,30 @@ async function main() {
   const sweepStep = Math.max(1, Number(args.sweep || 4));
   const detExtra = Math.max(0, Math.floor(Number(args.det || 0)));
   const budget = args.budget ? Number(args.budget) : null;
+  const geoTol = args['geo-tol'] ? Number(args['geo-tol']) : 12;
   const FPS = C.FPS;
   const t0 = Date.now();
 
-  const src = C.sources({ fixtures, player: true, lenient: true });
+  const shotId = typeof args.shot === 'string' ? args.shot : null;
+  if (args.shot && !shotId) C.die('--shot needs a shot id');
+  const src = C.sources({ fixtures, only: shotId, player: !shotId, lenient: true });
   const TL = src.timeline;
-  console.log(`check ${fixtures ? '(fixtures)' : '(src)'}: ${TL.shots.length} shots, ${TL.duration}s, scale ${scale}`);
+  // the shots this run is about: all of them, or the one scene agent's shot
+  const SHOTS = shotId ? TL.shots.filter((s) => s.id === shotId) : TL.shots;
+  const mine = (id) => !shotId || id === shotId;
+  console.log(`check ${fixtures ? '(fixtures)' : '(src)'}${shotId ? ` --shot ${shotId}` : ''}: ${shotId ? `1 of ${TL.shots.length} shots` : `${TL.shots.length} shots`}, ${TL.duration}s, scale ${scale}`);
   for (const w of src.warnings) console.log(`[warn] ${w}`);
+  if (shotId) console.log(`only '${shotId}' is loaded and checked; the full gate (no --shot) covers the film, its media and every other shot`);
 
   // ---------------------------------------------------------------- 3 sources (static)
   {
-    const files = [path.join(C.SRC, 'core.js'), path.join(C.SRC, 'lib.js'), path.join(src.base, 'timeline.js'), ...src.sceneFiles];
-    if (src.musicFile) files.push(src.musicFile);
-    files.push(path.join(C.SRC, 'player.js'));
+    const files = shotId
+      ? [src.shotFile(SHOTS[0])]
+      : [path.join(C.SRC, 'core.js'), path.join(C.SRC, 'lib.js'), path.join(src.base, 'timeline.js'), ...(src.geoFile ? [src.geoFile] : []), ...src.sceneFiles];
+    if (!shotId) {
+      if (src.musicFile) files.push(src.musicFile);
+      files.push(path.join(C.SRC, 'player.js'));
+    }
     const hits = [];
     for (const f of files) {
       if (!fs.existsSync(f)) continue;
@@ -158,7 +178,7 @@ async function main() {
     // colours come from lib.pal (art bible 2.2): a literal hex in a scene or timeline file drifts from the palette
     const hexWarns = [];
     const literalColour = /#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})\b|['"`]\s*(?:rgba?|hsla?)\(/gi;
-    for (const f of [...src.sceneFiles, path.join(src.base, 'timeline.js')]) {
+    for (const f of shotId ? files : [...src.sceneFiles, path.join(src.base, 'timeline.js')]) {
       if (!fs.existsSync(f)) continue;
       stripComments(fs.readFileSync(f, 'utf8')).split('\n').forEach((line, i) => {
         for (const m of line.matchAll(literalColour)) {
@@ -178,7 +198,7 @@ async function main() {
   }
 
   // ---------------------------------------------------------------- 4 timeline (static part)
-  const tlProblems = [...src.problems];
+  const tlProblems = src.problems.filter((p) => !shotId || p.includes(`'${shotId}'`));
   const tlWarnings = [];
   const sixteenth = TL.bpm > 0 ? 15 / TL.bpm : 0; // 60/bpm is a beat; a 16th is a quarter of it
   const offGrid = (t) => sixteenth > 0 && Math.abs(t / sixteenth - Math.round(t / sixteenth)) > 1e-3;
@@ -229,12 +249,17 @@ async function main() {
     }
   }
 
-  // ---------------------------------------------------------------- 1 media
+  // ---------------------------------------------------------------- 1 media (static part; reported after the pages ran)
+  let mediaStatic = { hits: [], kb: '0' };
+  const pagesOpened = [];
   {
     const tmpOut = path.join(C.TMP, C.uniqueName('check-build') + '.html');
     let html = '';
     let hits = [];
-    try {
+    if (shotId) {
+      html = fs.readFileSync(src.shotFile(SHOTS[0]), 'utf8');
+      hits = C.scanForbidden(html);
+    } else try {
       const b = build({ fixtures, out: tmpOut, quiet: true, lenient: true });
       html = b.html;
       hits = b.hits;
@@ -243,19 +268,50 @@ async function main() {
     } finally {
       fs.rmSync(tmpOut, { force: true });
     }
-    report(1, 'media', hits.length === 0, hits.length ? `${hits.length} forbidden pattern(s) in the built HTML` : `no forbidden media patterns in the built HTML (${(html.length / 1024).toFixed(1)} KB)`, hits.map((h) => `line ${h.line}  ${h.pattern}  | ${h.text}`));
+    mediaStatic = { hits, kb: (html.length / 1024).toFixed(1) };
+  }
+
+  // ---------------------------------------------------------------- 7 geometry (static part)
+  let geo = null;
+  const geoProblems = [];
+  const geoWarnings = [];
+  const geoRows = [];
+  let geoFrames = [];
+  if (src.geoFile) {
+    try {
+      geo = C.loadGeo(src.geoFile);
+      const v = C.validateGeo(geo, TL);
+      geoProblems.push(...v.problems);
+      geoWarnings.push(...v.warnings);
+      geoFrames = v.problems.length ? [] : v.frames.filter((fr) => !shotId || fr.label.startsWith(`${shotId} `));
+      const hard = TL.shots.filter((s) => s.index > 0 && (!s.transitionIn || s.transitionIn.kind === 'cut' || !(s.transitionIn.dur > 0))).length;
+      const covered = new Set(v.frames.filter((fr) => fr.cut).map((fr) => fr.cut)).size;
+      if (!shotId) geoRows.push(`${covered} of ${hard} hard cuts are measured match cuts; every other cut is a free cut (list a match cut in an entry's cuts to hold it)`);
+    } catch (e) {
+      geoProblems.push(`${C.rel(src.geoFile)} failed to evaluate: ${e.message}`);
+    }
   }
 
   // ---------------------------------------------------------------- browser checks
-  const loadable = src.files.filter((f) => fs.existsSync(f));
+  // snapshot every source file now: pages load the copies, so an agent saving a file mid-run changes nothing here
+  const snapDir = path.join(C.TMP, C.uniqueName('check-src'));
+  fs.mkdirSync(snapDir, { recursive: true });
+  C.cleanupOnExit(snapDir);
+  const loadable = src.files.filter((f) => fs.existsSync(f)).map((f) => {
+    const copy = path.join(snapDir, path.basename(f)); // core names a scene's file by its basename, which stays
+    fs.copyFileSync(f, copy);
+    return copy;
+  });
+  const openOpts = (prefix) => ({ scale, prefix, only: shotId });
   const browser = await C.launch();
   try {
     browserChecks: {
-      const pg = await C.openPage(browser, loadable, { scale, prefix: 'check' });
+      const pg = await C.openPage(browser, loadable, openOpts('check'));
+      pagesOpened.push(pg);
       const loadErr = pg.loadErrors.map((e) => `script error ${e.file}:${e.line}:${e.col} ${e.message}`);
       // 4 registration
       const reg = pg.state.registered;
-      for (const shot of TL.shots) {
+      for (const shot of SHOTS) {
         if (!shot.file) continue;
         const want = path.basename(String(shot.file));
         const byId = reg.filter((r) => r.id === shot.id);
@@ -266,7 +322,7 @@ async function main() {
           tlProblems.push(`shot '${shot.id}' is registered by ${byId.map((r) => r.file).join(', ')}, not by its timeline file ${want}`);
         }
       }
-      for (const r of reg) if (!TL.shots.some((s) => s.id === r.id)) tlWarnings.push(`${r.file} registers '${r.id}', which is not in the timeline`);
+      for (const r of reg) if (mine(r.id) && !TL.shots.some((s) => s.id === r.id)) tlWarnings.push(`${r.file} registers '${r.id}', which is not in the timeline`);
       tlProblems.push(...pg.state.regErrors, ...loadErr);
       report(
         4,
@@ -274,7 +330,7 @@ async function main() {
         tlProblems.length ? false : tlWarnings.length ? 'WARN' : true,
         tlProblems.length
           ? `${tlProblems.length} problem(s)`
-          : `${TL.shots.length} shots cover 0..${TL.duration}s with no gaps or overlaps; every shot's file registers its id`,
+          : `${TL.shots.length} shots cover 0..${TL.duration}s with no gaps or overlaps; ${shotId ? `${path.basename(src.shotFile(SHOTS[0]))} registers '${shotId}'` : "every shot's file registers its id"}`,
         [...tlProblems, ...tlWarnings.map((w) => `warn: ${w}`)]
       );
       if (!pg.info) {
@@ -288,7 +344,7 @@ async function main() {
       const timings = new Map(); // frame -> ms (warm)
       const firstTouch = [];
       let drawn = 0;
-      for (const shot of TL.shots) {
+      for (const shot of SHOTS) {
         const f0 = Math.round(shot.start * FPS);
         const f1 = Math.round(shot.end * FPS) - 1;
         if (f1 < f0) continue;
@@ -309,25 +365,38 @@ async function main() {
         }
       }
       for (const e of pg.pageErrors) drawFails.push(`page error: ${e}`);
-      report(5, 'draw', drawFails.length === 0, drawFails.length ? `${drawFails.length} error(s)` : `${drawn} frames (first, middle, last of ${TL.shots.length} shots) drew without errors`, drawFails);
+      report(5, 'draw', drawFails.length === 0, drawFails.length ? `${drawFails.length} error(s)` : `${drawn} frames (first, middle, last of ${shotId ? `'${shotId}'` : `${TL.shots.length} shots`}) drew without errors`, drawFails);
 
       // ---------------------------------------------------------------- 6 cost
       const total = Math.round(TL.duration * FPS);
+      const sweepFrom = shotId ? Math.round(SHOTS[0].start * FPS) : 0;
+      const sweepTo = shotId ? Math.round(SHOTS[0].end * FPS) : total; // exclusive
       const sweep = [];
-      for (let f = 0; f < total; f += sweepStep) sweep.push(f);
-      if (sweep[sweep.length - 1] !== total - 1) sweep.push(total - 1);
+      for (let f = sweepFrom; f < sweepTo; f += sweepStep) sweep.push(f);
+      if (sweep[sweep.length - 1] !== sweepTo - 1) sweep.push(sweepTo - 1);
       const sweepErr = [];
+      const canvasesAt = () => pg.page.evaluate(() => window.__h.canvases());
+      const cv0 = await canvasesAt();
       for (const f of sweep) {
         const r = await pg.page.evaluate((T) => window.__h.render(T), f / FPS);
         timings.set(f, { ms: r.ms, shot: r.shot });
         for (const e of r.errors) sweepErr.push(`f${f} ${r.shot}: ${e.message}`);
+      }
+      // A warm repeat of the sweep should find every cache filled. Canvases created again mean a cache keyed
+      // by time (it grows with the film) or an LRU too small for the film (it rebuilds plates while playing).
+      const cvSweep = (await canvasesAt()) - cv0;
+      let cvRepeat = 0;
+      if (cvSweep > 0) {
+        const cv1 = await canvasesAt();
+        for (const f of sweep) await pg.page.evaluate((T) => window.__h.render(T), f / FPS);
+        cvRepeat = (await canvasesAt()) - cv1;
       }
       const arr = [...timings.entries()].map(([f, v]) => ({ f, ...v })).sort((a, b) => b.ms - a.ms);
       const ms = arr.map((a) => a.ms).sort((a, b) => a - b);
       const median = ms[Math.floor(ms.length / 2)];
       const mean = ms.reduce((a, b) => a + b, 0) / ms.length;
       const max = arr[0].ms;
-      const perShot = TL.shots.map((s) => {
+      const perShot = SHOTS.map((s) => {
         const xs = arr.filter((a) => a.shot === s.id).map((a) => a.ms);
         return xs.length ? `${s.id}: max ${Math.max(...xs).toFixed(0)}ms, mean ${(xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(0)}ms` : `${s.id}: not swept`;
       });
@@ -335,16 +404,52 @@ async function main() {
         'slowest: ' + arr.slice(0, 6).map((a) => `f${a.f} (${(a.f / FPS).toFixed(2)}s ${a.shot}) ${a.ms.toFixed(0)}ms`).join(', '),
         ...perShot,
         'first touch per shot (includes cache builds): ' + firstTouch.join(', '),
+        `canvases created: ${cvSweep} during the sweep, ${cvRepeat} on a warm repeat of it`,
+        ...(cvRepeat > 0 ? [`warn: ${cvRepeat} canvas(es) re-created on a warm repeat of the sweep: a cache keyed by time, or one too small for the film; key caches by shape, size and seed`] : []),
         ...sweepErr,
       ];
       const over = budget != null ? max > budget : false;
       report(
         6,
         'cost',
-        sweepErr.length ? false : over ? false : max > 150 ? 'WARN' : true,
+        sweepErr.length ? false : over && !shotId ? false : over || max > 150 || cvRepeat > 0 ? 'WARN' : true,
         `${sweep.length} frames swept (every ${sweepStep}): median ${median.toFixed(0)}ms, mean ${mean.toFixed(0)}ms, max ${max.toFixed(0)}ms${budget != null ? ` (budget ${budget}ms)` : ''}${max > 150 ? ' - above 150ms' : ''}`,
         costDetails
       );
+
+      // ---------------------------------------------------------------- 7 geometry (measured)
+      if (src.geoFile && !geoProblems.length) {
+        const K = 48;
+        const byCut = new Map();
+        for (const fr of geoFrames) {
+          const r = await pg.page.evaluate(([id, T, K]) => window.__h.geoMeasure(id, T, 40, K), [fr.id, fr.T, K]);
+          for (const e of r.errors) geoProblems.push(`${fr.id} at ${fr.label} (T=${C.fmtT(fr.T)}): draw error ${e}`);
+          const seen = r.rows.filter((o) => o.edge >= 10); // an edge weaker than this is paper grain or grid
+          const near = seen.filter((o) => Math.abs(o.off) <= geoTol);
+          const abs = seen.map((o) => Math.abs(o.off)).sort((a, b) => a - b);
+          const med = abs.length ? abs[Math.floor(abs.length / 2)] : Infinity;
+          const share = r.rows.length ? near.length / r.rows.length : 0;
+          const signed = (sd) => {
+            const xs = seen.filter((o) => o.side === sd).map((o) => o.off).sort((a, b) => a - b);
+            return xs.length ? xs[Math.floor(xs.length / 2)] : NaN;
+          };
+          const ok = share >= 0.8 && med <= geoTol; // real match cuts measure 85-100 %; a 6 % scale error, about 70 %
+          const sides = geo[fr.id].kind === 'profile' ? `left ${signed(-1).toFixed(1)}, right ${signed(1).toFixed(1)}` : `signed ${signed(0).toFixed(1)}`;
+          const line = `${`${fr.id} ${fr.label}`.padEnd(34)} T=${C.fmtT(fr.T)}  ${near.length}/${r.rows.length} samples within ${geoTol}px, median |offset| ${isFinite(med) ? med.toFixed(1) : '-'}px (${sides}, + = outside)`;
+          if (ok) geoRows.push(line);
+          else geoProblems.push(`${line}: the silhouette is not on ${fr.id}${fr.cut ? `, so the match cut ${fr.cut} jumps` : ''}; worst samples ${r.rows.slice().sort((a, b) => Math.abs(b.off) - Math.abs(a.off)).slice(0, 4).map((o) => `(${o.x},${o.y}) ${o.off}`).join(', ')}`);
+          if (fr.cut) {
+            if (!byCut.has(fr.cut)) byCut.set(fr.cut, []);
+            byCut.get(fr.cut).push({ l: signed(-1), r: signed(1), o: signed(0), label: fr.label });
+          }
+        }
+        // both sides of a cut should also agree with each other, not just each sit inside the tolerance
+        for (const [cut, [a, b]] of byCut) {
+          if (!a || !b) continue;
+          const jump = [Math.abs(a.l - b.l), Math.abs(a.r - b.r), Math.abs(a.o - b.o)].filter(isFinite).reduce((x, y) => Math.max(x, y), 0);
+          if (jump > geoTol / 2) geoWarnings.push(`cut ${cut}: the edges move ${jump.toFixed(1)}px across the cut (${a.label} vs ${b.label})`);
+        }
+      }
 
       // ---------------------------------------------------------------- 2 determinism
       // Every shot is always covered: first, middle and last frame, plus one frame inside each non-cut
@@ -352,7 +457,7 @@ async function main() {
       const tDet = Date.now();
       const candidates = [];
       let transitions = 0;
-      for (const s of TL.shots) {
+      for (const s of SHOTS) {
         const f0 = Math.round(s.start * FPS);
         const f1 = Math.round(s.end * FPS) - 1;
         if (f1 < f0) continue;
@@ -362,7 +467,7 @@ async function main() {
           transitions++;
         }
       }
-      for (let i = 0; i < detExtra; i++) candidates.push(Math.floor(((i + 0.5) * total) / detExtra));
+      for (let i = 0; i < detExtra; i++) candidates.push(sweepFrom + Math.floor(((i + 0.5) * (sweepTo - sweepFrom)) / detExtra));
       const frames = [...new Set(candidates)].filter((f) => f >= 0 && f < total).sort((a, b) => a - b);
       const render = (p, f) => p.page.evaluate((T) => window.__h.render(T), f / FPS);
       const hashOf = (p) => p.page.evaluate(() => window.__h.hash());
@@ -380,11 +485,12 @@ async function main() {
       }
       await pg.close();
       // C: fresh page, shuffled, each frame drawn straight after a random decoy frame
-      const pg2 = await C.openPage(browser, loadable, { scale, prefix: 'check2' });
+      const pg2 = await C.openPage(browser, loadable, openOpts('check2'));
+      pagesOpened.push(pg2);
       try {
         const { a: order, rand } = seededShuffle(frames, 0xb077e7f1);
         for (const f of order) {
-          await render(pg2, Math.floor(rand() * total));
+          await render(pg2, sweepFrom + Math.floor(rand() * (sweepTo - sweepFrom)));
           await render(pg2, f);
           hashC.set(f, await hashOf(pg2));
         }
@@ -396,7 +502,8 @@ async function main() {
       const K = Math.min(4, frames.length);
       const pool = [];
       try {
-        for (let i = 0; i < K; i++) pool.push(await C.openPage(browser, loadable, { scale, prefix: `check-cold${i}` }));
+        for (let i = 0; i < K; i++) pool.push(await C.openPage(browser, loadable, openOpts(`check-cold${i}`)));
+        pagesOpened.push(...pool);
         let next = 0;
         await Promise.all(
           pool.map(async (p) => {
@@ -447,12 +554,43 @@ async function main() {
           ? `${mism.length} of ${frames.length} frames differ between passes`
           : detErrors.length
             ? `${detErrors.length} error(s) while drawing determinism frames`
-            : `${frames.length} frames (first, middle, last of all ${TL.shots.length} shots${transitions ? `, ${transitions} transition(s)` : ''}${detExtra ? `, +${detExtra}` : ''}) hash identically: cold, sequential, warm forward, warm reverse, fresh shuffled with decoys (${((Date.now() - tDet) / 1000).toFixed(1)}s)`,
+            : `${frames.length} frames (first, middle, last of ${shotId ? `'${shotId}'` : `all ${TL.shots.length} shots`}${transitions ? `, ${transitions} transition(s)` : ''}${detExtra ? `, +${detExtra}` : ''}) hash identically: cold, sequential, warm forward, warm reverse, fresh shuffled with decoys (${((Date.now() - tDet) / 1000).toFixed(1)}s)`,
         [`frames: ${frames.join(', ')}`, ...mism, ...detErrors]
       );
     }
   } finally {
     await browser.close();
+  }
+
+  {
+    const blocked = [...new Set(pagesOpened.flatMap((p) => p.blocked))];
+    const { hits, kb } = mediaStatic;
+    const where = shotId ? path.basename(src.shotFile(SHOTS[0])) : 'the built HTML';
+    const details = [...hits.map((h) => `line ${h.line}  ${h.pattern}  | ${h.text}`), ...blocked.map((u) => `run-time request (blocked): ${u}`)];
+    report(
+      1,
+      'media',
+      details.length === 0,
+      details.length
+        ? `${hits.length} forbidden pattern(s) in ${where}, ${blocked.length} URL(s) requested at run time`
+        : `no forbidden media patterns in ${where} (${kb} KB); no URL requested at run time`,
+      details
+    );
+  }
+  if (!src.geoFile) {
+    report(7, 'geometry', true, `no ${fixtures ? 'fixtures' : 'src'}/geo.js (optional until a storyboard has shared geometry)`);
+  } else {
+    const kinds = geo ? Object.values(geo).map((g) => g && g.kind) : [];
+    const measured = geoProblems.length ? '' : `, ${geoFrames.length} frame(s) measured`;
+    report(
+      7,
+      'geometry',
+      geoProblems.length ? false : geoWarnings.length ? 'WARN' : true,
+      geoProblems.length
+        ? `${geoProblems.length} problem(s)`
+        : `${kinds.length} entr${kinds.length === 1 ? 'y' : 'ies'} (${kinds.filter((k) => k === 'profile' || k === 'outline').length} measurable)${measured}; every silhouette sits on its table`,
+      [...geoProblems, ...geoWarnings.map((w) => `warn: ${w}`), ...geoRows]
+    );
   }
 
   results.sort((a, b) => a.n - b.n);
