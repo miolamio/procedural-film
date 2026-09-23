@@ -27,6 +27,8 @@
 //                  within --geo-tol px (default 12) of the table on most rows, or the cut jumps
 //   8 lib          with --fixtures, run tools/fixtures/asserts/*.js (FILM.assert). No asserts directory → PASS
 //                  "no asserts". A film check (no --fixtures) always reports "no asserts".
+//   10 density     warns when a bare frame is empty or the subject is only a spark (safe-area edge detail, largest
+//                  empty block of a 3×5 grid). A warning does not fail the gate.
 //
 // Options: --scale s (default 1), --sweep N (every Nth frame, default 4), --det N (add N evenly spaced determinism
 //          frames on top of the per-shot ones, default 0; never fewer than every shot),
@@ -126,6 +128,94 @@ function seededShuffle(arr, seed) {
   return { a, rand };
 }
 
+// Largest all-empty rectangle in a 5×3 grid (row-major). Ties keep the topmost, then leftmost.
+function largestEmpty(cells, cut) {
+  const cols = 3;
+  const rows = 5;
+  const empty = cells.map((v) => v < cut);
+  let best = { area: 0, r0: 0, r1: -1, c0: 0, c1: -1 };
+  for (let r0 = 0; r0 < rows; r0++) {
+    for (let r1 = r0; r1 < rows; r1++) {
+      for (let c0 = 0; c0 < cols; c0++) {
+        for (let c1 = c0; c1 < cols; c1++) {
+          let ok = true;
+          for (let r = r0; r <= r1 && ok; r++) {
+            for (let c = c0; c <= c1; c++) if (!empty[r * cols + c]) ok = false;
+          }
+          const area = (r1 - r0 + 1) * (c1 - c0 + 1);
+          if (ok && area > best.area) best = { area, r0, r1, c0, c1 };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+function densityPct(frac) {
+  return (frac * 100).toFixed(1);
+}
+
+function emptyPct(area) {
+  const v = Math.round((area / 15) * 1000) / 10;
+  return Math.abs(v - Math.round(v)) < 1e-6 ? String(Math.round(v)) : v.toFixed(1);
+}
+
+function densityLine(id, density, rect) {
+  const where = rect.area ? `cells r${rect.r0}c${rect.c0}–r${rect.r1}c${rect.c1}` : 'none';
+  return `shot ${id}: density ${densityPct(density)}%, largest empty ${emptyPct(rect.area)}% of safe area (${where})`;
+}
+
+// Safe-area edge detail at scale 0.5, grain post off. `grad` is the luminance step that counts as an edge.
+function sampleDensity(page, T, grad) {
+  return page.evaluate(([T, grad]) => {
+    window.__h.render(T, { post: false });
+    const c = window.FILM.canvas;
+    const W = c.width;
+    const H = c.height;
+    const S = W / window.FILM.W;
+    const data = window.FILM.ctx.getImageData(0, 0, W, H).data;
+    const lum = new Float32Array(W * H);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      lum[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+    const x0 = Math.round(60 * S);
+    const x1 = Math.round(940 * S);
+    const y0 = Math.round(220 * S);
+    const y1 = Math.round(1540 * S);
+    const cols = 3;
+    const rows = 5;
+    const cw = (x1 - x0) / cols;
+    const ch = (y1 - y0) / rows;
+    const cellOn = new Uint32Array(rows * cols);
+    const cellTot = new Uint32Array(rows * cols);
+    let safeOn = 0;
+    let safeTot = 0;
+    // 2×2 box, stepped by 2px: paper grain and blueprint noise average out, an ink edge still moves the block
+    for (let y = 0; y + 3 < H; y += 2) {
+      for (let x = 0; x + 3 < W; x += 2) {
+        if (x < x0 || x + 3 >= x1 || y < y0 || y + 3 >= y1) continue;
+        const i00 = y * W + x;
+        const i10 = i00 + 2;
+        const i01 = i00 + 2 * W;
+        const a00 = (lum[i00] + lum[i00 + 1] + lum[i00 + W] + lum[i00 + W + 1]) * 0.25;
+        const a10 = (lum[i10] + lum[i10 + 1] + lum[i10 + W] + lum[i10 + W + 1]) * 0.25;
+        const a01 = (lum[i01] + lum[i01 + 1] + lum[i01 + W] + lum[i01 + W + 1]) * 0.25;
+        const on = Math.hypot(a10 - a00, a01 - a00) >= grad;
+        safeTot++;
+        if (on) safeOn++;
+        const ci = Math.min(cols - 1, ((x - x0) / cw) | 0);
+        const ri = Math.min(rows - 1, ((y - y0) / ch) | 0);
+        const k = ri * cols + ci;
+        cellTot[k]++;
+        if (on) cellOn[k]++;
+      }
+    }
+    const cells = [];
+    for (let k = 0; k < cellOn.length; k++) cells.push(cellTot[k] ? cellOn[k] / cellTot[k] : 0);
+    return { density: safeTot ? safeOn / safeTot : 0, cells };
+  }, [T, grad]);
+}
+
 async function main() {
   const args = C.parseArgs(process.argv.slice(2), ['fixtures']);
   const fixtures = typeof args.fixtures === 'string' ? args.fixtures : !!args.fixtures;
@@ -136,6 +226,7 @@ async function main() {
   const geoTol = args['geo-tol'] ? Number(args['geo-tol']) : 12;
   const FPS = C.FPS;
   const t0 = Date.now();
+  let densityReported = false;
 
   const shotId = typeof args.shot === 'string' ? args.shot : null;
   if (args.shot && !shotId) C.die('--shot needs a shot id');
@@ -493,6 +584,121 @@ async function main() {
         }
       }
 
+      // ---------------------------------------------------------------- 10 density
+      // WARN only: this check never fails the gate.
+      //
+      // Each shot's first, middle and last frame is drawn with the grain post off, on its own page at
+      // scale 0.5 (so a warm scale-1 cache cannot leak into the sample, and checks 1–8 are untouched).
+      // Detail is the fraction of safe-area samples (x 60–940, y 220–1540) whose 2×2-box luminance
+      // gradient is at least 24. Those samples also fill a 3×5 grid (3 columns, 5 rows). A cell is empty
+      // below 1% detail. Emptiness is the largest empty rectangle, as a fraction of the safe area.
+      // The line is the worst of the three frames. Warn when detail < 6% or the rectangle is at least
+      // 6 of the 15 cells (40%).
+      //
+      // The bar sits in the gap found on the per-frame pass: stub plates top out at 5.7% detail, the
+      // quietest fixture frame is fx-meadow at 6.2%, and the quietest butterfly frame that is not an
+      // opening hold is j-hang's last at 6.8%. Lines below are the check's own worst-frame line per shot.
+      //
+      // butterfly (5.9s, 51 frames). Five warnings, each a deliberate quiet opening:
+      //   egg-blueprint   shot 02, a spark on navyDeep; the blueprint plate fades in at T 2.0
+      //   instar-ladder   first frame, the five outlines draw on from an empty plate
+      //   eclosion        first frame is the cream flash (transitionIn flash, 0.125s)
+      //   wing-veins      first frame, the veins have not grown out from the wing bases
+      //   sun-compass     first frame is the draw-on, before the dome and dial fill in
+      //   shot hero-on-milkweed: density 19.6%, largest empty 0% of safe area (none)
+      //   warn: shot egg-blueprint: density 0.0%, largest empty 100% of safe area (cells r0c0–r4c2)
+      //   shot egg-hatch: density 24.2%, largest empty 20% of safe area (cells r4c0–r4c2)
+      //   shot larva-molts: density 17.4%, largest empty 0% of safe area (none)
+      //   warn: shot instar-ladder: density 2.6%, largest empty 13.3% of safe area (cells r0c0–r0c1)
+      //   shot j-hang: density 9.7%, largest empty 6.7% of safe area (cells r1c0–r1c0)
+      //   shot inside-chrysalis: density 9.9%, largest empty 20% of safe area (cells r2c0–r4c0)
+      //   shot chrysalis-days: density 17.5%, largest empty 0% of safe area (none)
+      //   warn: shot eclosion: density 0.0%, largest empty 100% of safe area (cells r0c0–r4c2)
+      //   warn: shot wing-veins: density 4.0%, largest empty 26.7% of safe area (cells r1c0–r4c0)
+      //   shot scale-mosaic: density 8.5%, largest empty 26.7% of safe area (cells r0c0–r3c0)
+      //   warn: shot sun-compass: density 5.2%, largest empty 13.3% of safe area (cells r2c0–r3c0)
+      //   shot pull-back-continent: density 13.3%, largest empty 13.3% of safe area (cells r0c0–r0c1)
+      //   shot migration-column: density 19.1%, largest empty 0% of safe area (none)
+      //   shot oyamel-winter: density 21.2%, largest empty 0% of safe area (none)
+      //   shot spring-egg: density 25.2%, largest empty 0% of safe area (none)
+      //   shot egg-loop: density 16.3%, largest empty 0% of safe area (none)
+      //
+      // arctic-tern (3.0s, 51 frames). Four warnings: the spark, a draw-on that never fills, a 40% hole, the flash.
+      //   shot hero-hover: density 9.8%, largest empty 0% of safe area (none)
+      //   warn: shot egg-blueprint: density 0.0%, largest empty 100% of safe area (cells r0c0–r4c2)
+      //   shot egg-hatch: density 23.3%, largest empty 20% of safe area (cells r0c0–r0c2)
+      //   shot chick-feeding: density 13.4%, largest empty 6.7% of safe area (cells r0c0–r0c0)
+      //   warn: shot growth-ladder: density 1.2%, largest empty 53.3% of safe area (cells r1c1–r4c2)
+      //   warn: shot wing-stretch: density 8.6%, largest empty 40% of safe area (cells r1c0–r2c2)
+      //   shot pin-feather: density 8.1%, largest empty 13.3% of safe area (cells r0c1–r1c1)
+      //   shot midnight-sun: density 15.9%, largest empty 20% of safe area (cells r1c0–r1c2)
+      //   warn: shot first-flight: density 0.0%, largest empty 100% of safe area (cells r0c0–r4c2)
+      //   shot wing-schematic: density 6.4%, largest empty 20% of safe area (cells r4c0–r4c2)
+      //   shot feather-mosaic: density 8.0%, largest empty 20% of safe area (cells r0c0–r0c2)
+      //   shot two-summers: density 10.6%, largest empty 13.3% of safe area (cells r0c0–r0c1)
+      //   shot pull-back-atlantic: density 15.5%, largest empty 13.3% of safe area (cells r0c0–r1c0)
+      //   shot ocean-flock: density 11.0%, largest empty 0% of safe area (none)
+      //   shot pack-ice: density 15.9%, largest empty 0% of safe area (none)
+      //   shot return-egg: density 18.7%, largest empty 0% of safe area (none)
+      //   shot egg-loop: density 12.4%, largest empty 6.7% of safe area (cells r4c1–r4c1)
+      //
+      // fixtures stay quiet (lib-showcase 24.8%/0%, fx-egg 13.0%/20%, fx-meadow 6.2%/20%, palette 12.9%/13.3%).
+      //
+      // stubgen placeholders, on a temp copy of the fixture timeline (not committed). Every shot warns:
+      //   warn: shot lib-showcase: density 5.1%, largest empty 6.7% of safe area (cells r0c0–r0c0)
+      //   warn: shot fx-egg: density 3.8%, largest empty 6.7% of safe area (cells r0c0–r0c0)
+      //   warn: shot fx-meadow: density 4.3%, largest empty 40% of safe area (cells r1c0–r2c2)
+      //   warn: shot palette: density 4.8%, largest empty 6.7% of safe area (cells r0c0–r0c0)
+      {
+        const GRAD = 24;
+        const MIN_DETAIL = 0.06;
+        const CELL_EMPTY = 0.01;
+        const HOLE = 6;
+        const tD = Date.now();
+        let pgD = null;
+        try {
+          pgD = await C.openPage(browser, loadable, { scale: 0.5, prefix: 'check-density', only: shotId });
+          pagesOpened.push(pgD);
+          if (!pgD.info) throw new Error('FILM did not initialise');
+          let warns = 0;
+          let framesN = 0;
+          const details = [];
+          for (const shot of SHOTS) {
+            const f0 = Math.round(shot.start * FPS);
+            const f1 = Math.round(shot.end * FPS) - 1;
+            if (f1 < f0) continue;
+            const fm = Math.floor((f0 + f1) / 2);
+            let worst = null;
+            for (const f of [f0, fm, f1]) {
+              const m = await sampleDensity(pgD.page, f / FPS, GRAD);
+              framesN++;
+              const rect = largestEmpty(m.cells, CELL_EMPTY);
+              const bad = m.density < MIN_DETAIL || rect.area >= HOLE;
+              const rank = (bad ? 0 : 1) * 100 - rect.area + m.density;
+              if (!worst || rank < worst.rank) worst = { m, rect, bad, rank };
+            }
+            if (!worst) continue;
+            if (worst.bad) warns++;
+            const text = densityLine(shot.id, worst.m.density, worst.rect);
+            details.push(worst.bad ? `warn: ${text}` : text);
+          }
+          const sec = ((Date.now() - tD) / 1000).toFixed(1);
+          report(
+            10,
+            'density',
+            warns ? 'WARN' : true,
+            `${SHOTS.length} shots, ${framesN} frames at scale 0.5 (${sec}s)${warns ? `: ${warns} under the bar` : ': none under the bar'}`,
+            details
+          );
+          densityReported = true;
+        } catch (e) {
+          report(10, 'density', 'WARN', `not measured: ${e.message}`, []);
+          densityReported = true;
+        } finally {
+          if (pgD) await pgD.close();
+        }
+      }
+
       // ---------------------------------------------------------------- 2 determinism
       // Every shot is always covered: first, middle and last frame, plus one frame inside each non-cut
       // transition. --det adds evenly spaced frames on top and can never drop a shot.
@@ -634,6 +840,8 @@ async function main() {
       [...geoProblems, ...geoWarnings.map((w) => `warn: ${w}`), ...geoRows]
     );
   }
+
+  if (!densityReported) report(10, 'density', 'WARN', 'not measured', []);
 
   results.sort((a, b) => a.n - b.n);
   const failed = results.filter((r) => r.ok === false);
