@@ -166,3 +166,5 @@ A rapid sequence of cards used to compress a list or a sequence of steps into on
 - Plate: paper or blueprint, matching the shot it cuts into
 - Camera: locked, or one small push per card
 - No example file in this repo yet; build it with the same draw helpers as the surrounding shot's plate
+
+Maps and plotted curves use `lib.projection` (equirect, mercator, ortho), `lib.graticule`, `lib.drawGeoLine` and `lib.plot`; an orthographic arc stops at the limb instead of crossing the far side.
