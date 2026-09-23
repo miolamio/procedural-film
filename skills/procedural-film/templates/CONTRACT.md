@@ -81,6 +81,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `camera(ctx, { x, y, zoom, rot }, fn)`: draws `fn` under a camera transform centred on the frame.
 - `pal`: named colours from the art bible.
 - `text(ctx, str, x, y, opts)`: a thin single-line wordmark drawn with system sans-serif (no font files).
+- `projection({ kind, lon0, lat0, scale, at, rot })` returns `{ project(lon, lat), invert(x, y) }` for `equirect`, `mercator` and `ortho` (a globe; `project` is null on the far side). `scale` is px per degree, or `[sx, sy]`; for `ortho` it is the radius. `graticule(ctx, proj, opts)` draws meridians and parallels through `inkPath`. `drawGeoLine(ctx, proj, [[lon, lat], ...], opts)` strokes a polyline and breaks it where the projection is invisible. `plot(ctx, opts)` draws axes, ticks on a 1-2-5 grid, and series curves sliced by `reveal`.
 - `geo(id)`: an entry of `FILM.GEO`, read-only. `profile` (symmetric about `cx`: `hw(y)`, `x(y, side)`, `side(sign)`, `outline()`, `widest`), `outline` (a closed silhouette sampled densely, drawn as it stands: `outline()`), `points` (`pt(name)`), `polyline` (`pts`).
 
 ### Shared geometry
