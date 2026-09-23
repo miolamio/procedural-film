@@ -11,7 +11,9 @@ FILM.scene({
     const CHIP = 126, GAPX = 18, GAPY = 76, X0 = 70;
     const PAPER_TOP = 250, BLUE_TOP = 1078; // both halves keep their labels inside the safe area
     const pages = Math.max(1, Math.ceil(names.length / PER));
-    const page = Math.min(pages - 1, Math.floor(L.clamp(t / info.dur, 0, 0.999) * pages));
+    // Page on a 2s clock. Holding this plate past 2s (the fixture film does, so a later
+    // showcase can sit on the grid) does not move the frames inside the original cut.
+    const page = Math.min(pages - 1, Math.floor(L.clamp(t / Math.min(info.dur, 2), 0, 0.999) * pages));
     const shown = names.slice(page * PER, page * PER + PER);
 
     // 1. plate: paper above the fold, blueprint below, so every colour is judged on both

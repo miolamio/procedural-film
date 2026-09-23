@@ -71,6 +71,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `clamp`, `lerp`, `invLerp`, `smoothstep`, `ease` (`inOutCubic`, `outBack`, `outExpo`, `inOutSine`, and so on), `mapRange`.
 - `boil(T, fps = 12)` returns the held drawing-frame index for line wobble.
 - `onTwos(t)` quantises time to 1/12 s for character motion.
+- `smear(ctx, draw, { from, to, n = 5, mode, alpha, falloff, seed })` paints `draw(ctx, u)` at `n` phases from `from` to `to`. `mode` is `'ghosts'` (fading copies), `'stretch'` (the leading pose elongated along the centroid shift) or `'lines'` (speed lines off the trailing edge). `n === 1` or `from === to` matches one `draw(ctx, to)`.
 - `inkPath(ctx, points, opts)`: a hand-drawn polyline or closed shape with seeded wobble, pressure-varying width, optional double stroke.
 - `hatch(ctx, clipFn, opts)`: parallel strokes at an angle and spacing, clipped by a path function, each stroke slightly jittered. `crossHatch` layers two.
 - `stipple(ctx, clipFn, opts)`: seeded dot fill with density control.

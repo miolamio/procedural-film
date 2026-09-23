@@ -33,6 +33,7 @@ Expect 1000+ lines for a dense shot — density is part of the look (hundreds of
 - Clamp first: `t = clamp(tIn, 0, info.dur)` — a transition asks the outgoing shot for `t` slightly beyond its duration; hold the final pose.
 - Frame 0 is a fully drawn pose and the last frame holds — the gate draws first/middle/last of every shot.
 - `tw = L.onTwos(t)` for anything drawn as a character or object; `bi = L.boil(info.T)` drives line wobble.
+- `lib.smear(ctx, draw, { from, to, mode })` smears a pose that jumps between drawings (`ghosts`, `stretch` or `lines`); pass `from === to` on a hold so the drawing stays one crisp pose.
 - Draw layers back to front under numbered comments; annotation overlays last, screen-fixed (no camera transform).
 - Beat events use `lead` so the event is visible on its beat frame, not one frame late.
 - `info.p` for whole-shot ramps; `info.T` (or `info.shot.start + t`) for cross-shot continuity like stripe drift and boil.
