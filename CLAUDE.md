@@ -26,7 +26,7 @@ Everything runs from a film folder (the example, or a copy of `foundation/`). Ou
 npm install --prefix examples/butterfly-life/tools
 npx --prefix examples/butterfly-life/tools playwright install chromium
 node examples/butterfly-life/tools/smoke.cjs            # Playwright + canvas + OfflineAudioContext work
-node examples/butterfly-life/tools/check.cjs            # the gate: eight checks, exit 0 = green
+node examples/butterfly-life/tools/check.cjs            # the gate: ten checks, exit 0 = green
 node examples/butterfly-life/tools/check.cjs --shot <id> # one shot loaded alone (what a scene agent runs)
 node examples/butterfly-life/tools/check.cjs --fixtures # gate against tools/fixtures/ (the foundation's only test film)
 node examples/butterfly-life/tools/snap.cjs --shot <id> --samples 6 --sheet   # contact sheet into .frames/

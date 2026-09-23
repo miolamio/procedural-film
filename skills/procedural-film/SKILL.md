@@ -17,7 +17,7 @@ Look first: `reference/example-contact-sheet.jpg` (the whole example film, 24 la
 
 ## The gate
 
-`node tools/check.cjs` is the gate: eight checks (media scan, determinism, source scan, timeline, draw, frame cost, shared geometry, lib asserts), and exit 0 means green. From the stub pass onward, no step is done while the gate is red. On real scenes it takes about a minute — let it finish. Check 8 runs `tools/fixtures/asserts/*.js` only under `--fixtures` (each file calls `FILM.assert`); a film with no asserts passes as "no asserts".
+`node tools/check.cjs` is the gate: ten checks (media scan, determinism, source scan, timeline, draw, frame cost, shared geometry, lib asserts, photosensitivity, empty frames), and exit 0 means green. From the stub pass onward, no step is done while the gate is red. On real scenes it takes about a minute — let it finish. Check 8 runs `tools/fixtures/asserts/*.js` only under `--fixtures` (each file calls `FILM.assert`); a film with no asserts passes as "no asserts". Check 9 fails more than three flashes in any one-second window. Check 10 warns on an empty frame or a tiny subject and does not fail the gate by itself.
 
 A scene agent gates its own shot with `node tools/check.cjs --shot <id>`. That run loads only that shot, so siblings caught half-written cannot fail it, and it finishes in seconds. The director runs the whole gate. Every run loads a snapshot of the sources taken at its start.
 
