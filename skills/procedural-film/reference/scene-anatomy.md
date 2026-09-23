@@ -16,16 +16,13 @@ Expect 1000+ lines for a dense shot — density is part of the look (hundreds of
 4. **Geometry data tables** — hand-authored point arrays. Shapes that survive a match cut come from `src/geo.js` through `L.geo('G1')` (`hw(y)`, `outline()`, `pt(name)`), never from copied numbers, and seed from the earlier shot's id (`const REF = 'egg-blueprint'; L.hash(REF, …)`) so the boil matches across the cut. Draw an `outline` as it stands (`smooth: false`). When a shared shape needs detail the table lacks (an inner edge, a pose), copy the constructor verbatim from the scene your brief names as its owner, and ask the director before drafting if the table looks wrong. Do not draw first and ask later.
 5. **Memoized geometry**: `function geo(L) { if (GEO) return GEO; … }` — module-level, built once, seeded, and strictly t-independent. Sprite canvases go through `L.cached(key, …)`.
 6. **Local draw helpers**: `stroke(ctx, path, color, alpha, width, dash?)`, `wob(L, path, pts, seed, amp, bi, closed)` (per-boil polyline wobble via `h3(i, bi, seed)`), stroke bucketing by alpha to batch fills.
-7. **Timing helpers** (nearly verbatim in every scene):
+7. **Timing helpers** — call `FILM.lib`, do not paste another copy (copies drift on `lead` and the frame grid):
 
-   ```js
-   const drawing = (a) => Math.floor((t - a) * 12 + 1e-6);            // drawings since beat a
-   const hit = (a, frames, e, lead = 1) =>
-     t < a ? 0 : (e || ((u) => u))(clamp((t - a) / (frames * FR) + lead / frames)); // visible ON the beat frame
-   const popTwos = (a) => (t < a ? 0 : [0.72, 1.08, 1][Math.min(2, drawing(a))]);   // 3-drawing pop with overshoot
-   ```
+   - `lib.drawing(t, a)` = `floor((t - a) * 12 + 1e-6)`, drawings since beat `a` (12 per second). Negative before `a`.
+   - `lib.hit(t, a, frames, ease?, lead = 1)` is `0` when `t < a`, otherwise `ease(clamp((t - a) / (frames / 24) + lead / frames))`. With `lead` 1 the value is already **> 0 at `t = a`**, so the hit is visible on the beat frame and not one frame late.
+   - `lib.popTwos(t, a)` is `0` before `a`, otherwise the three drawings `[0.72, 1.08, 1]` (overshoot, then settle).
 
-   plus named beat constants with global-T comments: `const B_DIV2 = 1.5; // T 3.0`.
+   `lib.beat`, `lib.onBeat`, `lib.cue`, `lib.nextCue` and `lib.pulse` read `FILM.TIMELINE` (bpm and cues). Plus named beat constants with global-T comments: `const B_DIV2 = 1.5; // T 3.0`.
 8. **`FILM.scene({ id: ID, draw(ctx, tIn, info) {…} })` at the very end.**
 
 ## Draw body discipline

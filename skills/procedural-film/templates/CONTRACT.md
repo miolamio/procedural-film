@@ -71,6 +71,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `clamp`, `lerp`, `invLerp`, `smoothstep`, `ease` (`inOutCubic`, `outBack`, `outExpo`, `inOutSine`, and so on), `mapRange`.
 - `boil(T, fps = 12)` returns the held drawing-frame index for line wobble.
 - `onTwos(t)` quantises time to 1/12 s for character motion.
+- `beat(T)` → `{ n, frac, bar, beatInBar }` from `FILM.TIMELINE.bpm` (4/4). `onBeat(T, div = 1)` is seconds since the last division (`1` a quarter, `4` a sixteenth). `drawing(t, a)`, `hit(t, a, frames, ease?, lead = 1)` and `popTwos(t, a)` are the shared scene clocks: `hit` is already above 0 at `t = a` when `lead` is 1, and `popTwos` steps through `[0.72, 1.08, 1]`. `cue(T, kind?)` → `{ since, cue }` (`since` is `Infinity` before the first); `nextCue(T, kind?)` → `{ until, cue }`; `pulse(T, kind, { decay, shape })` falls from 1 on that cue.
 - `inkPath(ctx, points, opts)`: a hand-drawn polyline or closed shape with seeded wobble, pressure-varying width, optional double stroke. `reveal` (0..1, or `[from, to]`) draws that fraction of the arc length, double included; omit it for the whole line, the same pixels as before. `nib: { r, color, blot }` is the pen drop on the tip while that span is unfinished.
 - `hatch(ctx, clipFn, opts)`: parallel strokes at an angle and spacing, clipped by a path function, each stroke slightly jittered. `crossHatch` layers two.
 - `stipple(ctx, clipFn, opts)`: seeded dot fill with density control.
