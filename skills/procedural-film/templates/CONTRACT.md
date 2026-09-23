@@ -142,6 +142,8 @@ node tools/render.cjs [--from 0 --to 30] [--scale 0.5] [--out exports/name.mp4]
 
 Check 8 «lib» loads `tools/fixtures/asserts/*.js` only when the gate runs with `--fixtures`, after the engine. Each file calls `FILM.assert(name, fn)`. The check page (not the shipped film) provides `FILM.expect.eq`, `FILM.expect.near(a, b, eps = 1e-6)`, `FILM.expect.true`, `FILM.expect.throws(fn, re?)` and `FILM.pixels(canvas)` with `count(pred)` and `hash()`. `pred` receives `(r, g, b, a, x, y)`. A run with no asserts directory passes as "no asserts". Assert files are scanned like sources and are not inlined by `build.cjs` or `render.cjs`.
 
+The gate is nine checks; check 9 «flash» is photosensitivity (WCAG 2.3.1) and fails when more than three general or saturated-red flashes fall in any one-second window.
+
 `snap.cjs` writes a unique temporary HTML page per run under `.tmp/`, so several agents can render at the same time without clashing.
 `--only` (snap) and `--shot` (check) exist so a shot can be rendered and gated while a sibling shot file is half-written; every check run also loads a snapshot of the sources taken at its start.
 Images go under `.frames/` (git-ignored). Look at them — reading the pixels is the review.
