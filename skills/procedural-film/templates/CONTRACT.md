@@ -76,6 +76,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `branch({ seed, root, clip, attractors, step, killDist, influence, maxNodes })`: a space-colonization tree (Runions 2007) inside `clip`, cached by its parameters. `root` is `[x, y]` or a trunk polyline; `attractors` is a count or a point list. Result `{ nodes, paths(minLen) }`: nodes are `{x, y, parent, depth, thickness}` (`parent` is `null` at the root; `thickness^2.5` sums toward the root) and `paths(minLen)` returns polylines longer than `minLen` pixels. `drawBranch(ctx, tree, { width, taper, reveal, color })` inks them through `inkPath` in growth order (`reveal` 0 draws nothing, 1 draws every path).
 - `hatch(ctx, clipFn, opts)`: parallel strokes at an angle and spacing, clipped by a path function, each stroke slightly jittered. `crossHatch` layers two.
 - `stipple(ctx, clipFn, opts)`: seeded dot fill with density control.
+- `wash(ctx, clip, opts)`: translucent watercolour inside a clip — noise-deformed layers, a darker rim, granulation modulated by paper grain, optional blooms. Cached by the clip, the options and the render scale; a frame only blits it. `boil: true` reuses three variants on the 12 fps clock and is never keyed by raw time.
 - `paper(ctx, opts)`: cream paper base with grain and fibres, cached.
 - `blueprint(ctx, opts)`: navy base, faint grid, guide circles and diagonals.
 - `hexLattice(ctx, clipFn, opts)`, `glowDot(ctx, x, y, r, opts)`, `ticks(ctx, ...)`, `bracket(ctx, ...)`, `guideCircle(ctx, ...)`, `arcAnnotation(ctx, ...)`.
