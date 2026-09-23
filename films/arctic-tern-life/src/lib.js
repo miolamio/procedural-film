@@ -2279,6 +2279,107 @@
   };
 
   // ===========================================================================
+  // Rhythm
+  // ===========================================================================
+
+  // bpm and cues come from FILM.TIMELINE, read at call time (this file loads before timeline.js).
+  // A bar is four quarters. drawing / hit / popTwos are the clocks from reference/scene-anatomy.md,
+  // one copy so scenes stop drifting on `lead` and the 12 Hz grid.
+
+  function filmBpm() {
+    const b = FILM.TIMELINE && Number(FILM.TIMELINE.bpm);
+    return b > 0 && isFinite(b) ? b : 120;
+  }
+
+  /** beat(T) : { n, frac, bar, beatInBar } of global time T. n is the quarter that has started (0 at T = 0). */
+  lib.beat = (T) => {
+    const spb = 60 / filmBpm();
+    let n = Math.floor(T / spb + 1e-6);
+    let into = T - n * spb;
+    if (!(into > 0)) into = 0;
+    const bar = Math.floor(n / 4);
+    return { n, frac: into / spb, bar, beatInBar: n - bar * 4 };
+  };
+
+  /** onBeat(T, div=1) : seconds since the last division. 1 = quarter, 2 = eighth, 4 = sixteenth. */
+  lib.onBeat = (T, div = 1) => {
+    const d = div > 0 ? div : 1;
+    const step = 60 / filmBpm() / d;
+    const k = Math.floor(T / step + 1e-6);
+    const since = T - k * step;
+    return since > 0 ? since : 0;
+  };
+
+  /** drawing(t, a) : drawings since beat a at 12 Hz. Negative before a. floor((t-a)*12+1e-6). */
+  lib.drawing = (t, a) => Math.floor((t - a) * 12 + 1e-6);
+
+  /**
+   * hit(t, a, frames, ease?, lead=1) : 0 before a, else an ease across `frames` film frames (1/24 s).
+   * lead 1 is already > 0 at t = a, so the hit reads on the beat frame rather than one frame late.
+   */
+  lib.hit = (t, a, frames, e, lead = 1) => {
+    if (t < a) return 0;
+    const u = clamp((t - a) / (frames / 24) + lead / frames);
+    return easeFn(e)(u);
+  };
+
+  /** popTwos(t, a) : 0 before a, else the three drawings [0.72, 1.08, 1] — overshoot, then settle. */
+  lib.popTwos = (t, a) => (t < a ? 0 : [0.72, 1.08, 1][Math.min(2, lib.drawing(t, a))]);
+
+  function cueRows(kind) {
+    const list = (FILM.TIMELINE && FILM.TIMELINE.cues) || [];
+    const out = [];
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || typeof c.t !== 'number' || !isFinite(c.t)) continue;
+      if (kind != null && c.kind !== kind) continue;
+      out.push(c);
+    }
+    return out;
+  }
+
+  /** cue(T, kind?) : { since, cue } of the latest cue at or before T. since is Infinity before the first. */
+  lib.cue = (T, kind) => {
+    const list = cueRows(kind);
+    let best = null;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.t > T + 1e-9) continue;
+      if (!best || c.t >= best.t) best = c;
+    }
+    if (!best) return { since: Infinity, cue: null };
+    const since = T - best.t;
+    return { since: since > 0 ? since : 0, cue: best };
+  };
+
+  /** nextCue(T, kind?) : { until, cue } of the first cue strictly after T. until is Infinity when none remain. */
+  lib.nextCue = (T, kind) => {
+    const list = cueRows(kind);
+    let best = null;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.t <= T + 1e-9) continue;
+      if (!best || c.t < best.t) best = c;
+    }
+    if (!best) return { until: Infinity, cue: null };
+    const until = best.t - T;
+    return { until: until > 0 ? until : 0, cue: best };
+  };
+
+  /**
+   * pulse(T, kind, { decay, shape }) : 0..1 fall from the latest cue of that kind (any kind when omitted).
+   * 1 on the cue frame. decay is seconds from 1 down to 0 (default one beat); shape is an ease name or function.
+   */
+  lib.pulse = (T, kind, o) => {
+    const opts = o || {};
+    const since = lib.cue(T, kind).since;
+    if (!isFinite(since)) return 0;
+    const decay = opts.decay != null ? opts.decay : 60 / filmBpm();
+    if (!(decay > 0)) return since <= 1e-9 ? 1 : 0;
+    return clamp(1 - easeFn(opts.shape)(clamp(since / decay)));
+  };
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
