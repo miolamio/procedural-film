@@ -47,6 +47,15 @@ function resolveOut(p) {
   return path.isAbsolute(p) ? p : path.join(ROOT, p);
 }
 
+// --fixtures=<dir> is often typed from the repo root (skills/.../tools/flash-negative). Prefer that
+// when it actually holds a timeline; otherwise keep the film-root relative path.
+function resolveFixtureDir(p) {
+  if (path.isAbsolute(p)) return p;
+  const fromCwd = path.resolve(process.cwd(), p);
+  if (fs.existsSync(path.join(fromCwd, 'timeline.js'))) return fromCwd;
+  return resolveOut(p);
+}
+
 function rel(p) {
   return path.relative(ROOT, p) || '.';
 }
@@ -236,7 +245,7 @@ function validateGeo(geo, tl, { W = 1080, H = 1920 } = {}) {
  */
 function sources({ fixtures = false, only = null, player = true, needMusic = false, lenient = false } = {}) {
   // fixtures may be true (tools/fixtures) or a directory path laid out the same way
-  const base = fixtures ? (typeof fixtures === 'string' ? resolveOut(fixtures) : FIX) : SRC;
+  const base = fixtures ? (typeof fixtures === 'string' ? resolveFixtureDir(fixtures) : FIX) : SRC;
   const label = fixtures ? rel(base) : 'src';
   const core = path.join(SRC, 'core.js');
   const lib = path.join(SRC, 'lib.js');

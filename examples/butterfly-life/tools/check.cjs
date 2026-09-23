@@ -27,14 +27,18 @@
 //                  within --geo-tol px (default 12) of the table on most rows, or the cut jumps
 //   8 lib          with --fixtures, run tools/fixtures/asserts/*.js (FILM.assert). No asserts directory → PASS
 //                  "no asserts". A film check (no --fixtures) always reports "no asserts".
+//   9 flash        photosensitivity (WCAG 2.3.1): more than three general or saturated-red flashes
+//                  in any one-second window fails
 //
 // Options: --scale s (default 1), --sweep N (every Nth frame, default 4), --det N (add N evenly spaced determinism
 //          frames on top of the per-shot ones, default 0; never fewer than every shot),
 //          --budget ms (fail if the slowest swept frame exceeds this; default: warn above 150 ms),
-//          --geo-tol px (median edge offset allowed for check 7, in 1080-wide px; default 12)
+//          --geo-tol px (median edge offset allowed for check 7, in 1080-wide px; default 12),
+//          --flash-skip (do not run check 9)
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const C = require('./common.cjs');
 const { build } = require('./build.cjs');
@@ -126,8 +130,345 @@ function seededShuffle(arr, seed) {
   return { a, rand };
 }
 
+// Check 9 (WCAG 2.3.1). A transition is peak-to-valley, not frame-to-frame, so a ramp counts once.
+// Pairs do not overlap: three flashes a second is 3 Hz, not six half-cycles. Hysteresis sits under
+// the 10% and redness-20 thresholds, so a wiggle cannot split a peak and a real step still counts.
+// Saturated red is Harding's test (R/(R+G+B) >= 0.8 and the clamped (R-G-B)*320 changes by more
+// than 20) or, when both colours have a chromaticity, CIE 1976 UCS distance > 0.2. Black has none;
+// Harding is what catches red against black. Area is the share of 8×14 blocks that finish together.
+const FLASH_AREA = 0.25;
+const FLASH_LIMIT = 3;
+const LUMA_HYST = 0.01;
+const RED_HYST = 5;
+
+function extremaIndices(series, hyst) {
+  const n = series.length;
+  if (!n) return [];
+  const idx = [0];
+  let dir = 0;
+  let extreme = series[0];
+  let extremeAt = 0;
+  for (let i = 1; i < n; i++) {
+    const v = series[i];
+    if (dir === 0) {
+      if (v >= series[0] + hyst) {
+        dir = 1;
+        extreme = v;
+        extremeAt = i;
+      } else if (v <= series[0] - hyst) {
+        dir = -1;
+        extreme = v;
+        extremeAt = i;
+      }
+      continue;
+    }
+    if (dir === 1) {
+      if (v > extreme) {
+        extreme = v;
+        extremeAt = i;
+      } else if (extreme - v >= hyst) {
+        idx.push(extremeAt);
+        dir = -1;
+        extreme = v;
+        extremeAt = i;
+      }
+    } else if (v < extreme) {
+      extreme = v;
+      extremeAt = i;
+    } else if (v - extreme >= hyst) {
+      idx.push(extremeAt);
+      dir = 1;
+      extreme = v;
+      extremeAt = i;
+    }
+  }
+  if (idx[idx.length - 1] !== extremeAt) idx.push(extremeAt);
+  return idx;
+}
+
+function opposingPairs(trans) {
+  const at = [];
+  for (let i = 0; i + 1 < trans.length; ) {
+    if (trans[i].dir !== trans[i + 1].dir) {
+      at.push(trans[i + 1].at);
+      i += 2;
+    } else i += 1;
+  }
+  return at;
+}
+
+function redRatio(r, g, b) {
+  const s = r + g + b;
+  return s > 1e-6 ? r / s : 0;
+}
+
+function redness(r, g, b) {
+  return Math.max(0, (r - g - b) * 320);
+}
+
+function chromaUV(r, g, b) {
+  const X = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b;
+  const Y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b;
+  const Z = 0.0193339 * r + 0.1191920 * g + 0.9503041 * b;
+  const den = X + 15 * Y + 3 * Z;
+  if (!(den > 1e-6)) return null;
+  return [4 * X / den, 9 * Y / den];
+}
+
+function isRedStep(r0, g0, b0, r1, g1, b1) {
+  if (redRatio(r0, g0, b0) < 0.8 && redRatio(r1, g1, b1) < 0.8) return false;
+  if (Math.abs(redness(r0, g0, b0) - redness(r1, g1, b1)) > 20) return true;
+  const a = chromaUV(r0, g0, b0);
+  const c = chromaUV(r1, g1, b1);
+  if (!a || !c) return false;
+  return Math.hypot(a[0] - c[0], a[1] - c[1]) > 0.2;
+}
+
+function generalFlashAt(L) {
+  const ext = extremaIndices(L, LUMA_HYST);
+  const trans = [];
+  for (let k = 1; k < ext.length; k++) {
+    const a = ext[k - 1];
+    const b = ext[k];
+    const L0 = L[a];
+    const L1 = L[b];
+    if (Math.abs(L1 - L0) >= 0.1 && Math.min(L0, L1) < 0.8) trans.push({ at: b, dir: L1 > L0 ? 1 : -1 });
+  }
+  return opposingPairs(trans);
+}
+
+function redFlashAt(R, G, B) {
+  const n = R.length;
+  const red = new Float64Array(n);
+  for (let i = 0; i < n; i++) red[i] = redness(R[i], G[i], B[i]);
+  const ext = extremaIndices(red, RED_HYST);
+  const trans = [];
+  for (let k = 1; k < ext.length; k++) {
+    const a = ext[k - 1];
+    const b = ext[k];
+    if (!isRedStep(R[a], G[a], B[a], R[b], G[b], B[b])) continue;
+    const d = red[b] - red[a];
+    if (d === 0) continue;
+    trans.push({ at: b, dir: d > 0 ? 1 : -1 });
+  }
+  return opposingPairs(trans);
+}
+
+function maxFlashWindow(frames, areas, lo, hi, fps) {
+  let max = 0;
+  let frame = lo < hi ? frames[lo] : 0;
+  let end = frame;
+  let area = 0;
+  for (let s = lo, e = lo; s < hi; s++) {
+    while (e < hi && frames[e] - frames[s] <= fps) e++;
+    const count = e - s;
+    if (count > max) {
+      max = count;
+      frame = frames[s];
+      end = frames[e - 1];
+      area = 0;
+      for (let k = s; k < e; k++) if (areas[k] > area) area = areas[k];
+    }
+  }
+  return { max, frame, end, area };
+}
+
+function flashKind(counts, from, blocks, fps) {
+  const frames = [];
+  const areas = [];
+  for (let i = 0; i < counts.length; i++) {
+    const area = counts[i] / blocks;
+    if (area + 1e-9 >= FLASH_AREA) {
+      frames.push(from + i);
+      areas.push(area);
+    }
+  }
+  const overall = maxFlashWindow(frames, areas, 0, frames.length, fps);
+  const violations = [];
+  let cs = 0;
+  for (let i = 1; i <= frames.length; i++) {
+    if (i < frames.length && frames[i] - frames[i - 1] <= fps) continue;
+    const w = maxFlashWindow(frames, areas, cs, i, fps);
+    if (w.max > FLASH_LIMIT) violations.push(w);
+    cs = i;
+  }
+  return { max: overall.max, frame: overall.frame, end: overall.end, area: overall.area, violations };
+}
+
+// buf is linear sRGB, 0..255, frame-major then block-major (8×14), three channels.
+function analyzeFlashBlocks(buf, { from, cols, rows, fps }) {
+  const blocks = cols * rows;
+  if (blocks <= 0 || buf.length % (blocks * 3) !== 0) {
+    throw new Error(`flash sample is ${buf.length} bytes for a ${cols}×${rows} grid`);
+  }
+  const nFrames = buf.length / (blocks * 3);
+  const gCounts = new Int32Array(nFrames);
+  const rCounts = new Int32Array(nFrames);
+  const L = new Float64Array(nFrames);
+  const R = new Float64Array(nFrames);
+  const G = new Float64Array(nFrames);
+  const B = new Float64Array(nFrames);
+  for (let block = 0; block < blocks; block++) {
+    for (let i = 0; i < nFrames; i++) {
+      const o = (i * blocks + block) * 3;
+      const r = buf[o] / 255;
+      const g = buf[o + 1] / 255;
+      const b = buf[o + 2] / 255;
+      R[i] = r;
+      G[i] = g;
+      B[i] = b;
+      L[i] = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+    for (const at of generalFlashAt(L)) gCounts[at]++;
+    for (const at of redFlashAt(R, G, B)) rCounts[at]++;
+  }
+  return { nFrames, general: flashKind(gCounts, from, blocks, fps), red: flashKind(rCounts, from, blocks, fps) };
+}
+
+function flashPct(area) {
+  return `${Math.round(area * 100)}%`;
+}
+
+function flashFailLine(kind, w, fps) {
+  const n = w.max;
+  return `${n} ${kind} flash${n === 1 ? '' : 'es'} in the 1s window at T=${(w.frame / fps).toFixed(3)} (${flashPct(w.area)} of the frame)`;
+}
+
+function worstViolation(kind) {
+  let best = null;
+  for (const v of kind.violations) {
+    if (!best || v.max > best.max || (v.max === best.max && v.frame < best.frame)) best = v;
+  }
+  return best;
+}
+
+// One renderer thread cannot draw a 32s film in 20s: strokes do not get cheaper at scale 0.25.
+// Split the frame range across separate browsers. A short fixture stays on one.
+function flashWorkerCount(nFrames) {
+  if (nFrames <= 120) return 1;
+  const cores = os.cpus().length || 2;
+  if (cores < 4) return 1;
+  // Strokes do not get cheaper at scale 0.25, so one renderer spends ~30s on a 32s film.
+  // Four browsers keep that film inside 20s when the machine has the cores; two is the fallback.
+  if (nFrames > 480 && cores >= 8) return 4;
+  return 2;
+}
+
+function splitFrameRange(from, to, workers) {
+  const n = Math.max(0, to - from);
+  if (!n) return [];
+  const w = Math.min(Math.max(1, workers), n);
+  const base = Math.floor(n / w);
+  let extra = n % w;
+  const ranges = [];
+  let a = from;
+  for (let i = 0; i < w; i++) {
+    const len = base + (extra > 0 ? 1 : 0);
+    if (extra > 0) extra--;
+    ranges.push([a, a + len]);
+    a += len;
+  }
+  return ranges;
+}
+
+// Runs in the page. Returns base64 of linear-light block means. step skips device pixels inside
+// a block; the mean is still dozens of samples, and a flash covering a quarter of the frame
+// cannot hide between them.
+function sampleBlocks({ from, to, cols, rows, fps, step }) {
+  step = step > 1 ? step | 0 : 1;
+  const lut = new Float64Array(256);
+  for (let i = 0; i < 256; i++) {
+    const s = i / 255;
+    lut[i] = s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  }
+  const quant = (v) => {
+    const x = Math.round(v);
+    return x < 0 ? 0 : x > 255 ? 255 : x;
+  };
+  const W = FILM.canvas.width;
+  const H = FILM.canvas.height;
+  const blocks = cols * rows;
+  const out = new Uint8Array(Math.max(0, to - from) * blocks * 3);
+  const x0 = new Int32Array(cols);
+  const x1 = new Int32Array(cols);
+  const y0 = new Int32Array(rows);
+  const y1 = new Int32Array(rows);
+  for (let c = 0; c < cols; c++) {
+    x0[c] = Math.floor((c * W) / cols);
+    x1[c] = Math.max(x0[c] + 1, Math.floor(((c + 1) * W) / cols));
+  }
+  for (let r = 0; r < rows; r++) {
+    y0[r] = Math.floor((r * H) / rows);
+    y1[r] = Math.max(y0[r] + 1, Math.floor(((r + 1) * H) / rows));
+  }
+  FILM.post = false;
+  let o = 0;
+  for (let f = from; f < to; f++) {
+    FILM.errors = [];
+    FILM.renderFrame(f / fps);
+    const d = FILM.ctx.getImageData(0, 0, W, H).data;
+    for (let r = 0; r < rows; r++) {
+      const ya = y0[r];
+      const yb = y1[r];
+      for (let c = 0; c < cols; c++) {
+        const xa = x0[c];
+        const xb = x1[c];
+        let sr = 0;
+        let sg = 0;
+        let sb = 0;
+        let n = 0;
+        for (let y = ya; y < yb; y += step) {
+          for (let x = xa; x < xb; x += step) {
+            const p = (y * W + x) * 4;
+            sr += lut[d[p]];
+            sg += lut[d[p + 1]];
+            sb += lut[d[p + 2]];
+            n++;
+          }
+        }
+        const inv = 255 / n;
+        out[o++] = quant(sr * inv);
+        out[o++] = quant(sg * inv);
+        out[o++] = quant(sb * inv);
+      }
+    }
+  }
+  FILM.post = true;
+  let bin = '';
+  const CH = 0x8000;
+  for (let i = 0; i < out.length; i += CH) bin += String.fromCharCode.apply(null, out.subarray(i, Math.min(out.length, i + CH)));
+  return btoa(bin);
+}
+
+// Own browsers, not extra pages in the gate's browser: pages in one browser share a renderer thread.
+async function gatherFlashSamples(loadable, { from, to, shotId, fps, cols, rows, pagesOpened }) {
+  const ranges = splitFrameRange(from, to, flashWorkerCount(to - from));
+  if (!ranges.length) return Buffer.alloc(0);
+  const browsers = await Promise.all(ranges.map(() => C.launch()));
+  const pages = [];
+  try {
+    const opened = await Promise.all(browsers.map((b, i) => C.openPage(b, loadable, { scale: 0.25, prefix: `check-flash${i}`, only: shotId })));
+    pages.push(...opened);
+    for (const pg of opened) pagesOpened.push(pg);
+    const bad = opened.find((pg) => !pg.info);
+    if (bad) {
+      const err = new Error('FILM did not initialise; flash check did not run');
+      err.loadErr = bad.loadErrors;
+      throw err;
+    }
+    for (const pg of opened) pg.page.setDefaultTimeout(180000);
+    const parts = await Promise.all(opened.map((pg, i) => pg.page.evaluate(sampleBlocks, {
+      from: ranges[i][0], to: ranges[i][1], cols, rows, fps, step: 2,
+    })));
+    return Buffer.concat(parts.map((b64) => Buffer.from(b64, 'base64')));
+  } finally {
+    await Promise.all(pages.map((p) => p.close().catch(() => {})));
+    await Promise.all(browsers.map((b) => b.close().catch(() => {})));
+  }
+}
+
 async function main() {
-  const args = C.parseArgs(process.argv.slice(2), ['fixtures']);
+  const args = C.parseArgs(process.argv.slice(2), ['fixtures', 'flash-skip']);
   const fixtures = typeof args.fixtures === 'string' ? args.fixtures : !!args.fixtures;
   const scale = args.scale ? Number(args.scale) : 1;
   const sweepStep = Math.max(1, Number(args.sweep || 4));
@@ -604,6 +945,47 @@ async function main() {
     await browser.close();
   }
 
+  // ---------------------------------------------------------------- 9 flash
+  // The gate browser is already closed: this check launches its own, so a 32s film is not
+  // drawn on top of the determinism pages.
+  // Calibration (check.cjs and common.cjs copied onto the films, src left alone, then reverted):
+  //   butterfly-life: PASS, no window over 3 (max 1 general, 0 red), flash 18.3s, gate OK in 107.3s
+  //   arctic-tern-life: PASS, no window over 3 (max 2 general, 0 red), flash 6.0s, gate OK in 50.5s
+  if (args['flash-skip']) {
+    report(9, 'flash', 'SKIP', 'skipped (--flash-skip)');
+  } else {
+    const tFlash = Date.now();
+    try {
+      const from = shotId ? Math.round(SHOTS[0].start * FPS) : 0;
+      const to = shotId ? Math.max(from, Math.round(SHOTS[0].end * FPS)) : Math.max(0, Math.round(TL.duration * FPS));
+      const buf = await gatherFlashSamples(loadable, { from, to, shotId, fps: FPS, cols: 8, rows: 14, pagesOpened });
+      const stats = analyzeFlashBlocks(buf, { from, cols: 8, rows: 14, fps: FPS });
+      const sec = ((Date.now() - tFlash) / 1000).toFixed(1);
+      const gW = worstViolation(stats.general);
+      const rW = worstViolation(stats.red);
+      const details = [
+        ...stats.general.violations.map((v) => `general T=${(v.frame / FPS).toFixed(3)}..${(v.end / FPS).toFixed(3)}: ${v.max} flashes, ${flashPct(v.area)} of the frame`),
+        ...stats.red.violations.map((v) => `red T=${(v.frame / FPS).toFixed(3)}..${(v.end / FPS).toFixed(3)}: ${v.max} flashes, ${flashPct(v.area)} of the frame`),
+      ];
+      if (gW || rW) {
+        const parts = [];
+        if (gW) parts.push(flashFailLine('general', gW, FPS));
+        if (rW) parts.push(flashFailLine('red', rW, FPS));
+        report(9, 'flash', false, `${parts.join('; ')} (${sec}s)`, details);
+      } else {
+        report(
+          9,
+          'flash',
+          true,
+          `no window over 3 flashes (max ${stats.general.max} general, ${stats.red.max} red; ${stats.nFrames} frames, scale 0.25, ${sec}s)`
+        );
+      }
+    } catch (e) {
+      const loadErr = (e.loadErr || []).map((err) => `script error ${err.file}:${err.line}:${err.col} ${err.message}`);
+      report(9, 'flash', false, e.loadErr ? e.message : `flash check failed: ${e && e.message ? e.message : e}`, loadErr);
+    }
+  }
+
   {
     const blocked = [...new Set(pagesOpened.flatMap((p) => p.blocked))];
     const { hits, kb } = mediaStatic;
@@ -643,7 +1025,11 @@ async function main() {
   process.exit(failed.length ? 1 : 0);
 }
 
-main().catch((e) => {
-  console.error(e && e.stack ? e.stack : e);
-  process.exit(2);
-});
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e && e.stack ? e.stack : e);
+    process.exit(2);
+  });
+}
+
+module.exports = { analyzeFlashBlocks };
