@@ -36,6 +36,7 @@ Expect 1000+ lines for a dense shot — density is part of the look (hundreds of
 - Draw layers back to front under numbered comments; annotation overlays last, screen-fixed (no camera transform).
 - Beat events use `lead` so the event is visible on its beat frame, not one frame late.
 - `info.p` for whole-shot ramps; `info.T` (or `info.shot.start + t`) for cross-shot continuity like stripe drift and boil.
+- A line that draws on uses `inkPath` `reveal` (0..1 by arc length, or `[from, to]` for a running dash) and `nib` on the tip; do not slice the point list.
 - Caches only for t-independent data. Anything time-varying derives from `t` alone.
 
 ## Text

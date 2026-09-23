@@ -71,7 +71,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `clamp`, `lerp`, `invLerp`, `smoothstep`, `ease` (`inOutCubic`, `outBack`, `outExpo`, `inOutSine`, and so on), `mapRange`.
 - `boil(T, fps = 12)` returns the held drawing-frame index for line wobble.
 - `onTwos(t)` quantises time to 1/12 s for character motion.
-- `inkPath(ctx, points, opts)`: a hand-drawn polyline or closed shape with seeded wobble, pressure-varying width, optional double stroke.
+- `inkPath(ctx, points, opts)`: a hand-drawn polyline or closed shape with seeded wobble, pressure-varying width, optional double stroke. `reveal` (0..1, or `[from, to]`) draws that fraction of the arc length, double included; omit it for the whole line, the same pixels as before. `nib: { r, color, blot }` is the pen drop on the tip while that span is unfinished.
 - `hatch(ctx, clipFn, opts)`: parallel strokes at an angle and spacing, clipped by a path function, each stroke slightly jittered. `crossHatch` layers two.
 - `stipple(ctx, clipFn, opts)`: seeded dot fill with density control.
 - `paper(ctx, opts)`: cream paper base with grain and fibres, cached.
