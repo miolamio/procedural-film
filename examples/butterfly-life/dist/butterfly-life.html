@@ -5421,6 +5421,382 @@
   lib.shadeSide = shadeSide;
 
   // ===========================================================================
+  // Motion smear
+  // ===========================================================================
+
+  // Scratch bitmaps keyed by pixel size, never by time: a second pass of the same frame reuses them.
+  const smearSlot = { tiny: null, full: null };
+
+  /**
+   * smear(ctx, draw, opts) : drawn-animation multiples for a pose that jumps between two phases.
+   * draw(ctx, u) paints the object at phase u. u runs from `from` to `to` inclusive.
+   *   n        5                 copies. draw is called exactly n times.
+   *   mode     'ghosts'          fading copies, oldest first (default).
+   *            'stretch'         the leading pose, scaled along the centroid shift from `from` to `to`.
+   *            'lines'           speed lines off the trailing edge of the leading pose.
+   *   alpha    1                 opacity of the leading copy, the stretch, and the lines.
+   *   falloff  1                 higher: older ghosts fade faster, stretch and lines run longer.
+   *   seed     1                 jitter for speed lines only.
+   * n === 1, or from === to, paints exactly one draw(ctx, to) — no fade, no stretch, no lines.
+   */
+  function smearNum(v, fallback) {
+    const x = +v;
+    return Number.isFinite(x) ? x : fallback;
+  }
+
+  function smearPhase(from, to, n, i) {
+    if (n <= 1) return to;
+    if (i <= 0) return from;
+    if (i >= n - 1) return to;
+    return from + ((to - from) * i) / (n - 1);
+  }
+
+  // Leading copy stays at `alpha`; older copies fall toward 0. Each copy is clamped to 0..1
+  // so a stack composited with source-over cannot blow a pixel out.
+  function smearCopyAlpha(i, n, alpha, falloff) {
+    const a = clamp(smearNum(alpha, 1), 0, 1);
+    if (i >= n - 1) return a;
+    const rank = (i + 1) / n;
+    return clamp(smearNum(a * Math.pow(rank, smearNum(falloff, 1)), 0), 0, 1);
+  }
+
+  function smearCanvas(ctx, full) {
+    const w = full ? Math.max(1, ctx.canvas.width | 0) : 1;
+    const h = full ? Math.max(1, ctx.canvas.height | 0) : 1;
+    const key = full ? 'full' : 'tiny';
+    let c = smearSlot[key];
+    if (!c || c.width !== w || c.height !== h) c = smearSlot[key] = newCanvas(w, h);
+    const g = c.getContext('2d');
+    if (typeof g.reset === 'function') g.reset();
+    else {
+      for (let i = 0; i < 32; i++) g.restore();
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = 'source-over';
+      g.filter = 'none';
+    }
+    g.shadowBlur = 0;
+    g.shadowOffsetX = 0;
+    g.shadowOffsetY = 0;
+    g.clearRect(0, 0, w, h);
+    if (typeof ctx.getTransform === 'function') {
+      const m = ctx.getTransform();
+      g.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    return g;
+  }
+
+  function smearDevice(ctx, x, y) {
+    if (typeof ctx.getTransform !== 'function') return [x, y];
+    const m = ctx.getTransform();
+    return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f];
+  }
+
+  // Records path points in device pixels while draw() paints. The proxy forwards every
+  // call to the real context, so the pixels (when we keep them) match a direct draw.
+  function smearRecord(ctx, u, draw) {
+    const pts = [];
+    let cx = 0;
+    let cy = 0;
+    let have = false;
+    const push = (x, y) => {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      const d = smearDevice(ctx, x, y);
+      pts.push(d[0], d[1]);
+    };
+    const proxy = new Proxy(ctx, {
+      get(target, prop) {
+        if (prop === 'moveTo' || prop === 'lineTo') {
+          return (x, y) => {
+            const r = target[prop].call(target, x, y);
+            push(x, y);
+            cx = x;
+            cy = y;
+            have = true;
+            return r;
+          };
+        }
+        if (prop === 'quadraticCurveTo') {
+          return (cpx, cpy, x, y) => {
+            const r = target.quadraticCurveTo(cpx, cpy, x, y);
+            const x0 = have ? cx : x;
+            const y0 = have ? cy : y;
+            for (let k = 1; k <= 4; k++) {
+              const t = k / 4;
+              const s = 1 - t;
+              push(s * s * x0 + 2 * s * t * cpx + t * t * x, s * s * y0 + 2 * s * t * cpy + t * t * y);
+            }
+            cx = x;
+            cy = y;
+            have = true;
+            return r;
+          };
+        }
+        if (prop === 'bezierCurveTo') {
+          return (c1x, c1y, c2x, c2y, x, y) => {
+            const r = target.bezierCurveTo(c1x, c1y, c2x, c2y, x, y);
+            const x0 = have ? cx : x;
+            const y0 = have ? cy : y;
+            for (let k = 1; k <= 4; k++) {
+              const t = k / 4;
+              const s = 1 - t;
+              push(
+                s * s * s * x0 + 3 * s * s * t * c1x + 3 * s * t * t * c2x + t * t * t * x,
+                s * s * s * y0 + 3 * s * s * t * c1y + 3 * s * t * t * c2y + t * t * t * y
+              );
+            }
+            cx = x;
+            cy = y;
+            have = true;
+            return r;
+          };
+        }
+        if (prop === 'rect' || prop === 'fillRect' || prop === 'strokeRect') {
+          return (x, y, w, h) => {
+            const r = target[prop].call(target, x, y, w, h);
+            push(x, y);
+            push(x + w, y);
+            push(x + w, y + h);
+            push(x, y + h);
+            return r;
+          };
+        }
+        if (prop === 'arc' || prop === 'ellipse') {
+          return (x, y, rx, ry, rot, a0, a1, ccw) => {
+            let r;
+            let radius = rx;
+            let ryUse = ry;
+            let rotUse = rot || 0;
+            let start = a0;
+            let end = a1;
+            let anticlock = ccw;
+            if (prop === 'arc') {
+              r = target.arc(x, y, rx, ry, rot, a0);
+              radius = rx;
+              ryUse = rx;
+              rotUse = 0;
+              start = ry;
+              end = rot;
+              anticlock = !!a0;
+            } else r = target.ellipse(x, y, rx, ry, rotUse, a0, a1, ccw);
+            let sweep = end - start;
+            if (anticlock) {
+              if (sweep >= 0) sweep -= TAU;
+            } else if (sweep <= 0) sweep += TAU;
+            const cr = Math.cos(rotUse);
+            const sr = Math.sin(rotUse);
+            for (let k = 0; k <= 8; k++) {
+              const a = start + (sweep * k) / 8;
+              const px = Math.cos(a) * radius;
+              const py = Math.sin(a) * ryUse;
+              push(x + px * cr - py * sr, y + px * sr + py * cr);
+            }
+            cx = x + Math.cos(end) * radius;
+            cy = y + Math.sin(end) * ryUse;
+            have = true;
+            return r;
+          };
+        }
+        const v = target[prop];
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+      set(target, prop, value) {
+        target[prop] = value;
+        return true;
+      },
+    });
+    draw(proxy, u);
+    return pts;
+  }
+
+  function smearCentroid(pts) {
+    const n = pts.length >> 1;
+    if (!n) return null;
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < pts.length; i += 2) {
+      x += pts[i];
+      y += pts[i + 1];
+    }
+    return [x / n, y / n, n];
+  }
+
+  function smearRadius(pts, c) {
+    let r = 0;
+    for (let i = 0; i < pts.length; i += 2) {
+      const d = Math.hypot(pts[i] - c[0], pts[i + 1] - c[1]);
+      if (d > r) r = d;
+    }
+    return r;
+  }
+
+  function smearGhosts(ctx, draw, from, to, n, alpha, falloff) {
+    ctx.save();
+    for (let i = 0; i < n; i++) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha *= smearCopyAlpha(i, n, alpha, falloff);
+      draw(ctx, smearPhase(from, to, n, i));
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  function smearStretch(ctx, draw, from, to, n, alpha, falloff) {
+    let fromPts = null;
+    for (let i = 0; i < n - 1; i++) {
+      const pts = smearRecord(smearCanvas(ctx, false), smearPhase(from, to, n, i), draw);
+      if (i === 0) fromPts = pts;
+    }
+    const pose = smearCanvas(ctx, true);
+    const toPts = smearRecord(pose, smearPhase(from, to, n, n - 1), draw);
+    const c0 = fromPts ? smearCentroid(fromPts) : null;
+    const c1 = smearCentroid(toPts);
+    ctx.save();
+    const base = ctx.globalAlpha;
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = base * clamp(smearNum(alpha, 1), 0, 1);
+    let scaled = false;
+    if (c0 && c1) {
+      const dx = c1[0] - c0[0];
+      const dy = c1[1] - c0[1];
+      const dist = Math.hypot(dx, dy);
+      const rad = smearRadius(toPts, c1);
+      const gain = clamp(smearNum(falloff, 1), 0, 3);
+      if (dist > 0.75 && rad > 1 && gain > 0) {
+        let s = 1 + (dist / rad) * gain;
+        if (s > 4) s = 4;
+        const ang = Math.atan2(dy, dx);
+        ctx.translate(c1[0], c1[1]);
+        ctx.rotate(ang);
+        ctx.scale(s, Math.pow(s, -0.25));
+        ctx.rotate(-ang);
+        ctx.translate(-c1[0], -c1[1]);
+        scaled = true;
+      }
+    }
+    ctx.imageSmoothingEnabled = scaled;
+    ctx.drawImage(pose.canvas, 0, 0);
+    ctx.restore();
+  }
+
+  // Rear-most device point in each perpendicular slice, so lines fan across the trailing edge
+  // instead of stacking on one vertex.
+  function smearTrailing(pts, c, ux, uy, px, py, maxN) {
+    const n = pts.length >> 1;
+    if (!n || !c) return [];
+    const scored = [];
+    for (let i = 0; i < pts.length; i += 2) {
+      const dx = pts[i] - c[0];
+      const dy = pts[i + 1] - c[1];
+      scored.push([pts[i], pts[i + 1], dx * ux + dy * uy, dx * px + dy * py]);
+    }
+    scored.sort((a, b) => a[2] - b[2] || a[3] - b[3]);
+    const rear = [];
+    for (let i = 0; i < scored.length; i++) if (scored[i][2] < -0.5) rear.push(scored[i]);
+    const pool = rear.length >= 2 ? rear : scored.slice(0, Math.min(scored.length, maxN));
+    const best = new Map();
+    for (let i = 0; i < pool.length; i++) {
+      const p = pool[i];
+      const k = Math.round(p[3] / 12);
+      const prev = best.get(k);
+      if (!prev || p[2] < prev[2]) best.set(k, p);
+    }
+    const keys = [...best.keys()].sort((a, b) => a - b);
+    let rows = keys.map((k) => best.get(k));
+    if (rows.length > maxN) {
+      const slim = [];
+      const step = rows.length === 1 ? 0 : (rows.length - 1) / (maxN - 1);
+      for (let i = 0; i < maxN; i++) slim.push(rows[Math.round(i * step)]);
+      rows = slim;
+    }
+    return rows;
+  }
+
+  function smearLines(ctx, draw, from, to, n, alpha, falloff, seed) {
+    let fromPts = null;
+    for (let i = 0; i < n - 1; i++) {
+      const pts = smearRecord(smearCanvas(ctx, false), smearPhase(from, to, n, i), draw);
+      if (i === 0) fromPts = pts;
+    }
+    const toPts = smearRecord(ctx, smearPhase(from, to, n, n - 1), draw);
+    const c0 = fromPts ? smearCentroid(fromPts) : null;
+    const c1 = smearCentroid(toPts);
+    if (!c0 || !c1) return;
+    const vx = c1[0] - c0[0];
+    const vy = c1[1] - c0[1];
+    const dist = Math.hypot(vx, vy);
+    if (dist < 0.75) return;
+    const ux = vx / dist;
+    const uy = vy / dist;
+    const px = -uy;
+    const py = ux;
+    const rows = smearTrailing(toPts, c1, ux, uy, px, py, 14);
+    if (!rows.length) return;
+    const m = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null;
+    const sc = m ? Math.hypot(m.a, m.b) || 1 : 1;
+    const rnd = rng(seed === undefined ? 1 : seed);
+    const gain = clamp(smearNum(falloff, 1), 0, 2.5);
+    const a = clamp(smearNum(alpha, 1), 0, 1);
+    ctx.save();
+    const base = ctx.globalAlpha;
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = pal.ink;
+    ctx.strokeStyle = pal.ink;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < rows.length; i++) {
+      const p = rows[i];
+      const side = rnd.range(-1, 1);
+      const len = dist * (0.55 + 0.8 * gain) * rnd.range(0.8, 1.16);
+      const hw = (6 + rnd() * 5) * sc;
+      const x0 = p[0] - ux * (8 * sc) + px * side * (3 * sc);
+      const y0 = p[1] - uy * (8 * sc) + py * side * (3 * sc);
+      const x1 = x0 - ux * len + px * side * (2 * sc);
+      const y1 = y0 - uy * len + py * side * (2 * sc);
+      ctx.globalAlpha = base * a * (0.55 + 0.35 * rnd());
+      ctx.beginPath();
+      ctx.moveTo(x0 + px * hw, y0 + py * hw);
+      ctx.lineTo(x0 - px * hw, y0 - py * hw);
+      ctx.lineTo(x1, y1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  lib.smear = (ctx, draw, o) => {
+    if (typeof draw !== 'function') return;
+    const opt = o || {};
+    const from = smearNum(opt.from, 0);
+    const to = smearNum(opt.to, 1);
+    let n = opt.n == null ? 5 : opt.n | 0;
+    if (!(n >= 1)) n = 1;
+    const mode = String(opt.mode || 'ghosts').toLowerCase();
+    const alpha = opt.alpha;
+    const falloff = opt.falloff;
+    // A single copy, or a pose that did not move, is exactly draw(ctx, to). Extra calls still
+    // run so the counter stays n, but they paint a scratch bitmap and cannot touch this canvas.
+    if (n === 1 || from === to) {
+      for (let i = 1; i < n; i++) draw(smearCanvas(ctx, false), to);
+      draw(ctx, to);
+      return;
+    }
+    if (mode === 'stretch') smearStretch(ctx, draw, from, to, n, alpha, falloff);
+    else if (mode === 'lines') smearLines(ctx, draw, from, to, n, alpha, falloff, opt.seed);
+    else smearGhosts(ctx, draw, from, to, n, alpha, falloff);
+  };
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
