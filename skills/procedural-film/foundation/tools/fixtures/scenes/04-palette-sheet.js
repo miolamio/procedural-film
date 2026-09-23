@@ -11,7 +11,8 @@ FILM.scene({
     const CHIP = 126, GAPX = 18, GAPY = 76, X0 = 70;
     const PAPER_TOP = 250, BLUE_TOP = 1078; // both halves keep their labels inside the safe area
     const pages = Math.max(1, Math.ceil(names.length / PER));
-    const page = Math.min(pages - 1, Math.floor(L.clamp(t / info.dur, 0, 0.999) * pages));
+    // Paging stays on the original 2s slot, so extending the shot across a reserved gap does not repage 6..8.
+    const page = Math.min(pages - 1, Math.floor(L.clamp(t / 2, 0, 0.999) * pages));
     const shown = names.slice(page * PER, page * PER + PER);
 
     // 1. plate: paper above the fold, blueprint below, so every colour is judged on both

@@ -93,7 +93,7 @@ Blueprint diagram of a system at work, plumbing, wiring, a sensory or steering m
 - Duration: 1.5 s
 - Plate: blueprint
 - Camera: locked, or easing a few percent toward a push-in target that sets up the next shot
-- Leans on: `glowDot`, `tracePath`, `guideCircle`, `hexLattice`, `bracket`, `arcAnnotation`, `blueprint`, `camera`
+- Leans on: `glowDot`, `tracePath`, `guideCircle`, `hexLattice`, `bracket`, `arcAnnotation`, `blueprint`, `camera`, `branch`, `drawBranch`
 - Example: `examples/butterfly-life/src/scenes/10-wing-veins.js` (also `12-sun-compass.js` for the fully locked variant)
 
 ## 10. Macro push-in to surface texture
