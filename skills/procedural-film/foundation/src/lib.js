@@ -2097,6 +2097,324 @@
   };
 
   // ===========================================================================
+  // Wireframe 3D
+  // Mesh space is right-handed: X to the right, Y up, Z toward the viewer.
+  // Canvas Y grows downward, so orthographic Y is negated. A full turn is
+  // reduced by subtraction (not by scaling the fraction) so 2π is exactly 0
+  // and θ+2π is the same angle as θ.
+  // ===========================================================================
+
+  function wrapAngle(a) {
+    if (!a) return 0;
+    const n = Math.floor(a / TAU);
+    let b = a - n * TAU;
+    if (!(b > 0)) return 0;
+    if (b > TAU - 1e-9) return 0;
+    return b;
+  }
+
+  // Yaw (Y), then pitch (X), then roll (Z). Pitch stays aimed at the camera,
+  // so a turntable's floor does not tumble as it spins.
+  function rotateYUp(x, y, z, rx, ry, rz) {
+    const cy = Math.cos(ry), sy = Math.sin(ry);
+    const x1 = x * cy + z * sy;
+    const z1 = -x * sy + z * cy;
+    const cx = Math.cos(rx), sx = Math.sin(rx);
+    const y2 = y * cx - z1 * sx;
+    const z2 = y * sx + z1 * cx;
+    const cz = Math.cos(rz), sz = Math.sin(rz);
+    return [x1 * cz - y2 * sz, x1 * sz + y2 * cz, z2];
+  }
+
+  function viewOf(o) {
+    const rot = (o && o.rot) || [0, 0, 0];
+    const at = (o && o.at) || [W() / 2, H() / 2];
+    const persp = o && o.persp > 0 ? +o.persp : 0;
+    return {
+      rx: wrapAngle(+rot[0] || 0),
+      ry: wrapAngle(+rot[1] || 0),
+      rz: wrapAngle(+rot[2] || 0),
+      ax: at[0],
+      ay: at[1],
+      scale: o && o.scale != null ? +o.scale : 1,
+      persp,
+    };
+  }
+
+  function projectView(p, v) {
+    const r = rotateYUp(+p[0] || 0, +p[1] || 0, +p[2] || 0, v.rx, v.ry, v.rz);
+    let m = 1;
+    if (v.persp) {
+      const d = v.persp - r[2];
+      m = v.persp / (d > 1e-3 ? d : 1e-3);
+    }
+    // mesh Y is up; canvas Y is down
+    return [v.ax + v.scale * r[0] * m, v.ay - v.scale * r[1] * m, r[2]];
+  }
+
+  /**
+   * project3d(p, opts) : [x, y, depth] in the same view as wire3d.
+   * depth is z after rotation, positive toward the viewer (larger = closer).
+   *   at [W/2, H/2], scale 1 (px per mesh unit), rot [rx, ry, rz] radians,
+   *   persp 0 (orthographic) or a focal length in mesh units. The camera sits
+   *   at z = persp looking toward −Z, so a nearer point (larger z) draws larger.
+   */
+  function project3d(p, o) {
+    return projectView(p || [0, 0, 0], viewOf(o));
+  }
+  lib.project3d = project3d;
+
+  function mesh(verts, edges) {
+    return { verts, edges };
+  }
+
+  /** box(w=2, h=2, d=2) : cuboid centred on the origin. box() is the cube (±1, ±1, ±1). */
+  function box(w = 2, h = 2, d = 2) {
+    const hx = w / 2, hy = h / 2, hz = d / 2;
+    const verts = [
+      [-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz],
+      [-hx, -hy, -hz], [hx, -hy, -hz], [hx, hy, -hz], [-hx, hy, -hz],
+    ];
+    const edges = [
+      [0, 1], [1, 2], [2, 3], [3, 0],
+      [4, 5], [5, 6], [6, 7], [7, 4],
+      [0, 4], [1, 5], [2, 6], [3, 7],
+    ];
+    return mesh(verts, edges);
+  }
+
+  /** sphere(lat=8, lon=12, radius=1) : latitude stacks and longitude slices, poles shared. */
+  function sphere(lat = 8, lon = 12, radius = 1) {
+    lat = Math.max(2, lat | 0);
+    lon = Math.max(3, lon | 0);
+    const verts = [[0, radius, 0]];
+    for (let i = 1; i < lat; i++) {
+      const phi = (i / lat) * Math.PI;
+      const y = Math.cos(phi) * radius;
+      const rr = Math.sin(phi) * radius;
+      for (let j = 0; j < lon; j++) {
+        const th = (j / lon) * TAU;
+        verts.push([Math.cos(th) * rr, y, Math.sin(th) * rr]);
+      }
+    }
+    const south = verts.length;
+    verts.push([0, -radius, 0]);
+    const edges = [];
+    const ring = (i) => 1 + (i - 1) * lon;
+    for (let j = 0; j < lon; j++) {
+      edges.push([0, 1 + j]);
+      edges.push([ring(lat - 1) + j, south]);
+    }
+    for (let i = 1; i < lat; i++) {
+      const base = ring(i);
+      for (let j = 0; j < lon; j++) {
+        const a = base + j;
+        edges.push([a, base + ((j + 1) % lon)]);
+        if (i < lat - 1) edges.push([a, a + lon]);
+      }
+    }
+    return mesh(verts, edges);
+  }
+
+  /** cylinder(seg=12, radius=1, height=2) : top and bottom rings plus the verticals. No cap spokes. */
+  function cylinder(seg = 12, radius = 1, height = 2) {
+    seg = Math.max(3, seg | 0);
+    const verts = [];
+    const edges = [];
+    const hy = height / 2;
+    for (let j = 0; j < seg; j++) {
+      const a = (j / seg) * TAU;
+      const x = Math.cos(a) * radius;
+      const z = Math.sin(a) * radius;
+      verts.push([x, hy, z], [x, -hy, z]);
+    }
+    for (let j = 0; j < seg; j++) {
+      const j2 = (j + 1) % seg;
+      const top = j * 2;
+      const bot = top + 1;
+      edges.push([top, j2 * 2], [bot, j2 * 2 + 1], [top, bot]);
+    }
+    return mesh(verts, edges);
+  }
+
+  /** torus(major=16, minor=8, R=1, r=0.35) : tube of radius r around a circle of radius R in the XZ plane. */
+  function torus(major = 16, minor = 8, R = 1, r = 0.35) {
+    major = Math.max(3, major | 0);
+    minor = Math.max(3, minor | 0);
+    const verts = [];
+    const edges = [];
+    for (let i = 0; i < major; i++) {
+      const a = (i / major) * TAU;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      for (let j = 0; j < minor; j++) {
+        const b = (j / minor) * TAU;
+        const cb = Math.cos(b), sb = Math.sin(b);
+        verts.push([(R + r * cb) * ca, r * sb, (R + r * cb) * sa]);
+      }
+    }
+    const id = (i, j) => (i % major) * minor + (j % minor);
+    for (let i = 0; i < major; i++) {
+      for (let j = 0; j < minor; j++) {
+        const a = id(i, j);
+        edges.push([a, id(i, j + 1)], [a, id(i + 1, j)]);
+      }
+    }
+    return mesh(verts, edges);
+  }
+
+  /**
+   * helix(turns=2, steps=40, radius=1, height=2, opts)
+   *   strands  1     copies spaced evenly around the axis
+   *   rungs    0     false/0 off; true connects every second sample; a number connects every nth.
+   *                  Rungs are appended after the strand polylines.
+   * A leading options object is accepted in place of the numbers.
+   */
+  function helix(turns = 2, steps = 40, radius = 1, height = 2, o) {
+    if (turns && typeof turns === 'object') {
+      o = turns;
+      turns = o.turns != null ? o.turns : 2;
+      steps = o.steps != null ? o.steps : 40;
+      radius = o.radius != null ? o.radius : 1;
+      height = o.height != null ? o.height : 2;
+    }
+    o = o || {};
+    steps = Math.max(1, steps | 0);
+    const strands = Math.max(1, (o.strands | 0) || 1);
+    let rungEvery = 0;
+    if (o.rungs === true) rungEvery = 2;
+    else if (typeof o.rungs === 'number' && o.rungs > 0) rungEvery = Math.max(1, o.rungs | 0);
+    const verts = [];
+    const edges = [];
+    const span = steps + 1;
+    for (let s = 0; s < strands; s++) {
+      const phase = (s / strands) * TAU;
+      const base = s * span;
+      for (let i = 0; i <= steps; i++) {
+        const u = i / steps;
+        const a = phase + u * turns * TAU;
+        verts.push([Math.cos(a) * radius, (u - 0.5) * height, Math.sin(a) * radius]);
+        if (i) edges.push([base + i - 1, base + i]);
+      }
+    }
+    if (rungEvery && strands > 1) {
+      for (let i = 0; i <= steps; i += rungEvery) {
+        for (let s = 0; s < strands - 1; s++) edges.push([s * span + i, (s + 1) * span + i]);
+        if (strands > 2) edges.push([(strands - 1) * span + i, i]);
+      }
+    }
+    return mesh(verts, edges);
+  }
+
+  /**
+   * fromPoints(points, edges) : points are [x, y, z]. edges is [[i, j], ...] or
+   * { closed } to join the points in order (and close the loop).
+   */
+  function fromPoints(points, edges) {
+    const verts = [];
+    const src = points || [];
+    for (let i = 0; i < src.length; i++) {
+      const p = src[i];
+      verts.push([+p[0] || 0, +p[1] || 0, p.length > 2 ? +p[2] || 0 : 0]);
+    }
+    const out = [];
+    if (Array.isArray(edges)) {
+      for (let i = 0; i < edges.length; i++) out.push([edges[i][0] | 0, edges[i][1] | 0]);
+    } else {
+      for (let i = 1; i < verts.length; i++) out.push([i - 1, i]);
+      if (edges && edges.closed && verts.length > 2) out.push([verts.length - 1, 0]);
+    }
+    return mesh(verts, out);
+  }
+
+  const mesh3d = { box, sphere, cylinder, torus, helix, fromPoints };
+  for (const key of Object.keys(mesh3d)) Object.freeze(mesh3d[key]);
+  lib.mesh3d = Object.freeze(mesh3d);
+
+  /**
+   * wire3d(ctx, mesh, opts) : project a { verts, edges } mesh and stroke every edge once.
+   * Returns the number of edges stroked.
+   *   at [W/2, H/2], scale 1, rot [0, 0, 0], persp 0, depthFade 0,
+   *   hidden 'none' | 'dash' (an edge whose midpoint is farther than the mean
+   *   vertex — smaller z — is dashed), color pal.lavender, width 1.5, nodes 0
+   *   (circle radius in px at each vertex). Far edges thin and fade as depthFade
+   *   goes from 0 to 1. Drawn far to near.
+   */
+  function wire3d(ctx, meshIn, o) {
+    o = o || {};
+    const verts = (meshIn && meshIn.verts) || [];
+    const edges = (meshIn && meshIn.edges) || [];
+    if (!verts.length || !edges.length) return 0;
+    const v = viewOf(o);
+    const proj = new Array(verts.length);
+    let zSum = 0;
+    let zMin = Infinity;
+    let zMax = -Infinity;
+    for (let i = 0; i < verts.length; i++) {
+      const q = projectView(verts[i], v);
+      proj[i] = q;
+      zSum += q[2];
+      if (q[2] < zMin) zMin = q[2];
+      if (q[2] > zMax) zMax = q[2];
+    }
+    const zMean = zSum / verts.length;
+    const zSpan = zMax - zMin;
+    const fade = o.depthFade > 0 ? Math.min(1, o.depthFade) : 0;
+    const width = o.width != null ? o.width : 1.5;
+    const color = o.color || pal.lavender;
+    const hidden = o.hidden === 'dash';
+    const nodeR = o.nodes > 0 ? o.nodes : 0;
+    const shade = (z) => 1 - fade * (1 - (zSpan ? (z - zMin) / zSpan : 1));
+    const order = new Array(edges.length);
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      const z = (proj[e[0]][2] + proj[e[1]][2]) * 0.5;
+      order[i] = { i, z, back: hidden && z < zMean };
+    }
+    order.sort((a, b) => (a.z - b.z) || (a.i - b.i));
+    ctx.save();
+    const baseAlpha = ctx.globalAlpha;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    let strokes = 0;
+    const drawEdges = width > 0;
+    if (drawEdges) {
+      for (let k = 0; k < order.length; k++) {
+        const item = order[k];
+        const e = edges[item.i];
+        const a = proj[e[0]];
+        const b = proj[e[1]];
+        const kFade = shade(item.z);
+        ctx.beginPath();
+        ctx.moveTo(a[0], a[1]);
+        ctx.lineTo(b[0], b[1]);
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = baseAlpha * kFade;
+        ctx.lineWidth = width * kFade;
+        ctx.setLineDash(item.back ? [8, 6] : []);
+        ctx.stroke();
+        strokes++;
+      }
+    }
+    if (nodeR) {
+      ctx.setLineDash([]);
+      const nodes = new Array(verts.length);
+      for (let i = 0; i < verts.length; i++) nodes[i] = i;
+      nodes.sort((i, j) => (proj[i][2] - proj[j][2]) || (i - j));
+      ctx.fillStyle = color;
+      for (let n = 0; n < nodes.length; n++) {
+        const q = proj[nodes[n]];
+        ctx.globalAlpha = baseAlpha * shade(q[2]);
+        ctx.beginPath();
+        ctx.arc(q[0], q[1], nodeR, 0, TAU);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+    return strokes;
+  }
+  lib.wire3d = wire3d;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 

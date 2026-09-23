@@ -226,7 +226,12 @@ async function main() {
       if (i > 0) {
         const prev = shots[i - 1];
         const d = s.start - prev.end;
-        if (d > EPS) tlProblems.push(`gap of ${d.toFixed(4)}s between '${prev.id}' (ends ${prev.end}) and '${s.id}' (starts ${s.start})`);
+        if (d > EPS) {
+          const msg = `gap of ${d.toFixed(4)}s between '${prev.id}' (ends ${prev.end}) and '${s.id}' (starts ${s.start})`;
+          // A fixture reel may reserve a later window for a showcase added on another branch. A film may not.
+          if (fixtures) tlWarnings.push(msg);
+          else tlProblems.push(msg);
+        }
         if (d < -EPS) tlProblems.push(`overlap of ${(-d).toFixed(4)}s between '${prev.id}' (ends ${prev.end}) and '${s.id}' (starts ${s.start})`);
       }
       if (Math.abs(s.start * FPS - Math.round(s.start * FPS)) > 1e-4) tlWarnings.push(`shot '${s.id}' starts between frames (${s.start}s)`);
@@ -341,13 +346,14 @@ async function main() {
       }
       for (const r of reg) if (mine(r.id) && !TL.shots.some((s) => s.id === r.id)) tlWarnings.push(`${r.file} registers '${r.id}', which is not in the timeline`);
       tlProblems.push(...pg.state.regErrors, ...loadErr);
+      const reservedGap = tlWarnings.some((w) => w.startsWith('gap of'));
       report(
         4,
         'timeline',
         tlProblems.length ? false : tlWarnings.length ? 'WARN' : true,
         tlProblems.length
           ? `${tlProblems.length} problem(s)`
-          : `${TL.shots.length} shots cover 0..${TL.duration}s with no gaps or overlaps; ${shotId ? `${path.basename(src.shotFile(SHOTS[0]))} registers '${shotId}'` : "every shot's file registers its id"}`,
+          : `${TL.shots.length} shots cover 0..${TL.duration}s ${reservedGap ? 'with a reserved fixture gap' : 'with no gaps or overlaps'}; ${shotId ? `${path.basename(src.shotFile(SHOTS[0]))} registers '${shotId}'` : "every shot's file registers its id"}`,
         [...tlProblems, ...tlWarnings.map((w) => `warn: ${w}`)]
       );
       if (!pg.info) {
