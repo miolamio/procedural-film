@@ -20,8 +20,44 @@
   const root = typeof window !== 'undefined' ? window : globalThis;
   const FILM = (root.FILM = root.FILM || {});
 
-  FILM.W = 1080;
-  FILM.H = 1920;
+  const DEFAULT_W = 1080;
+  const DEFAULT_H = 1920;
+
+  function frameDim(v, fallback) {
+    const n = Number(v);
+    return n > 0 && isFinite(n) ? n : fallback;
+  }
+
+  // Read at use time: core.js loads before timeline.js.
+  function frameSize() {
+    const tl = FILM.TIMELINE;
+    return {
+      w: frameDim(tl && tl.width, DEFAULT_W),
+      h: frameDim(tl && tl.height, DEFAULT_H),
+    };
+  }
+
+  Object.defineProperty(FILM, 'W', {
+    get() { return frameSize().w; },
+    enumerable: true,
+    configurable: true,
+  });
+  Object.defineProperty(FILM, 'H', {
+    get() { return frameSize().h; },
+    enumerable: true,
+    configurable: true,
+  });
+
+  // Title-safe rectangle in frame pixels. Keep in step with tools/common.cjs safeArea.
+  // 1080×1920 keeps the Shorts/Reels box. 16:9, 1:1 and any other size use 90% of the frame, centred.
+  FILM.safeArea = function safeArea(w, h) {
+    const f = frameSize();
+    const fw = frameDim(w == null ? f.w : w, DEFAULT_W);
+    const fh = frameDim(h == null ? f.h : h, DEFAULT_H);
+    if (fw === DEFAULT_W && fh === DEFAULT_H) return { x0: 60, y0: 220, x1: 940, y1: 1540 };
+    return { x0: fw * 0.05, y0: fh * 0.05, x1: fw * 0.95, y1: fh * 0.95 };
+  };
+
   FILM.FPS = 24;
   FILM.BOIL_FPS = 12;
   FILM.S = 1; // render scale: device pixels per logical pixel

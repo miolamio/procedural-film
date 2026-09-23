@@ -5,7 +5,7 @@
 //   node tools/build.cjs --fixtures      writes dist/<slug>-fixtures.html from tools/fixtures
 //   node tools/build.cjs --out path.html
 //
-// Page: black background, canvas fitted to the window at 9:16, click or space to play/pause with
+// Page: black background, canvas fitted to the window at the timeline's aspect, click or space to play/pause with
 // audio, left/right arrows to step, ?t=seconds for a still, ?shot=id to loop a shot, ?render=1 hides UI.
 'use strict';
 

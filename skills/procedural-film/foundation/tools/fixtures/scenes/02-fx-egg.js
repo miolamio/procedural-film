@@ -6,7 +6,7 @@ FILM.scene({
     L.blueprint(ctx, { seed: 8, center: [540, 960] });
     const zoom = L.mapRange(t, 0, info.dur, 1, 1.12, 'inOutSine');
     // centred on the frame centre, so at zoom 1 the geo table (frame pixels) lands where it says
-    L.camera(ctx, { x: 540, y: 960, zoom }, () => {
+    L.camera(ctx, { x: info.W / 2, y: info.H / 2, zoom }, () => {
       const egg = L.geo('egg').outline(8); // the capsule, from fixtures/geo.js
       L.hexLattice(ctx, egg, { r: 20, color: P.lavender, alpha: 0.42, seed: 3 });
       L.inkPath(ctx, egg, { closed: true, color: P.lavender, width: 3, double: { offset: 9, alpha: 0.55, width: 0.6, from: 0, to: 1 }, seed: 4 });
