@@ -14,7 +14,7 @@ const C = require('./common.cjs');
 const TL = C.loadTimeline(path.join(C.SRC, 'timeline.js'));
 const dir = path.join(C.SRC, 'scenes');
 const geoFile = path.join(C.SRC, 'geo.js');
-const GEO = fs.existsSync(geoFile) ? C.loadGeo(geoFile) : {};
+const GEO = fs.existsSync(geoFile) ? C.loadGeo(geoFile, TL) : {};
 const shapeOf = (id) => Object.keys(GEO).find((k) => GEO[k] && /^(profile|outline)$/.test(GEO[k].kind) && (GEO[k].shots || []).includes(id));
 fs.mkdirSync(dir, { recursive: true });
 

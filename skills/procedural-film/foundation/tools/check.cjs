@@ -15,7 +15,8 @@
 //                  hash identically warm forward, warm reversed, in a fresh page shuffled with decoys, cold (the first
 //                  draw in a fresh page) and sequential (drawn straight after the frame before it)
 //   3 sources      no Math.random, Date, performance.now or crypto randomness in src drawing/audio code;
-//                  no text drawn below the Shorts safe area (a literal y argument > 1540; an expression is not read);
+//                  no text drawn below the safe area (a literal y above FILM.safeArea().y1: 1540 on
+//                  1080×1920, the centred 90% box otherwise; an expression is not read);
 //                  warns on a literal colour outside lib.js (colours come from lib.pal)
 //   4 timeline     coverage, ids, transitions, grade ranges and tint names; warns on off-grid hits
 //                  and cuts, a bpm whose 16ths miss the frame grid, and a duration that is not whole bars
@@ -35,7 +36,7 @@
 // Options: --scale s (default 1), --sweep N (every Nth frame, default 4), --det N (add N evenly spaced determinism
 //          frames on top of the per-shot ones, default 0; never fewer than every shot),
 //          --budget ms (fail if the slowest swept frame exceeds this; default: warn above 150 ms),
-//          --geo-tol px (median edge offset allowed for check 7, in 1080-wide px; default 12),
+//          --geo-tol px (median edge offset allowed for check 7, in frame px; default 12),
 //          --flash-skip (do not run check 9)
 'use strict';
 
@@ -458,13 +459,13 @@ function sampleBlocks({ from, to, cols, rows, fps, step }) {
 }
 
 // Own browsers, not extra pages in the gate's browser: pages in one browser share a renderer thread.
-async function gatherFlashSamples(loadable, { from, to, shotId, fps, cols, rows, pagesOpened }) {
+async function gatherFlashSamples(loadable, { from, to, shotId, fps, cols, rows, pagesOpened, frameWidth, frameHeight }) {
   const ranges = splitFrameRange(from, to, flashWorkerCount(to - from));
   if (!ranges.length) return Buffer.alloc(0);
   const browsers = await Promise.all(ranges.map(() => C.launch()));
   const pages = [];
   try {
-    const opened = await Promise.all(browsers.map((b, i) => C.openPage(b, loadable, { scale: 0.25, prefix: `check-flash${i}`, only: shotId })));
+    const opened = await Promise.all(browsers.map((b, i) => C.openPage(b, loadable, { scale: 0.25, prefix: `check-flash${i}`, only: shotId, frameWidth, frameHeight })));
     pages.push(...opened);
     for (const pg of opened) pagesOpened.push(pg);
     const bad = opened.find((pg) => !pg.info);
@@ -534,10 +535,11 @@ function sampleDensity(page, T, grad) {
     for (let i = 0, p = 0; i < data.length; i += 4, p++) {
       lum[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
     }
-    const x0 = Math.round(60 * S);
-    const x1 = Math.round(940 * S);
-    const y0 = Math.round(220 * S);
-    const y1 = Math.round(1540 * S);
+    const box = window.FILM.safeArea();
+    const x0 = Math.round(box.x0 * S);
+    const x1 = Math.round(box.x1 * S);
+    const y0 = Math.round(box.y0 * S);
+    const y1 = Math.round(box.y1 * S);
     const cols = 3;
     const rows = 5;
     const cw = (x1 - x0) / cols;
@@ -596,7 +598,7 @@ async function main() {
   // the shots this run is about: all of them, or the one scene agent's shot
   const SHOTS = shotId ? TL.shots.filter((s) => s.id === shotId) : TL.shots;
   const mine = (id) => !shotId || id === shotId;
-  console.log(`check ${fixtures ? '(fixtures)' : '(src)'}${shotId ? ` --shot ${shotId}` : ''}: ${shotId ? `1 of ${TL.shots.length} shots` : `${TL.shots.length} shots`}, ${TL.duration}s, scale ${scale}`);
+  console.log(`check ${fixtures ? '(fixtures)' : '(src)'}${shotId ? ` --shot ${shotId}` : ''}: ${shotId ? `1 of ${TL.shots.length} shots` : `${TL.shots.length} shots`}, ${TL.duration}s, ${TL.width}×${TL.height}, scale ${scale}`);
   for (const w of src.warnings) console.log(`[warn] ${w}`);
   if (shotId) console.log(`only '${shotId}' is loaded and checked; the full gate (no --shot) covers the film, its media and every other shot`);
 
@@ -621,13 +623,21 @@ async function main() {
         }
       });
     }
-    // must-read text stays inside the Shorts safe area (art bible 1.1): flag .text() with a literal y > 1540
+    // must-read text stays inside the safe area: flag .text() with a literal y below it.
+    // 1080×1920 keeps y > 1540 as a failure. Other formats use the same box and warn (a vertical
+    // plate retargeted to 16:9 or 1:1 still has its old literals; the gate stays green).
+    const box = C.safeArea(TL.width, TL.height);
+    const shorts = TL.width === 1080 && TL.height === 1920;
     const unsafeText = /\b(?:lib|L|LIB)\.text\s*\(\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*(\d{3,4})/;
+    const textWarns = [];
     for (const f of files) {
       if (!fs.existsSync(f)) continue;
       stripComments(fs.readFileSync(f, 'utf8')).split('\n').forEach((line, i) => {
         const m = line.match(unsafeText);
-        if (m && Number(m[1]) > 1540) hits.push(`${C.rel(f)}:${i + 1}  text y ${m[1]} below the Shorts safe area (y must be <= 1540)  | ${line.trim().slice(0, 100)}`);
+        if (!(m && Number(m[1]) > box.y1)) return;
+        const msg = `${C.rel(f)}:${i + 1}  text y ${m[1]} ${shorts ? `below the Shorts safe area (y must be <= ${box.y1})` : `outside the title-safe area (y must be <= ${box.y1})`}  | ${line.trim().slice(0, 100)}`;
+        if (shorts) hits.push(msg);
+        else textWarns.push(`warn: ${msg}`);
       });
     }
     // colours come from lib.pal (art bible 2.2): a literal hex in a scene or timeline file drifts from the palette
@@ -644,11 +654,11 @@ async function main() {
     report(
       3,
       'sources',
-      hits.length ? false : hexWarns.length ? 'WARN' : true,
+      hits.length ? false : hexWarns.length || textWarns.length ? 'WARN' : true,
       hits.length
         ? `${hits.length} banned call(s)`
-        : `no Math.random / Date / performance.now / crypto randomness or unsafe-area text in ${files.length} files${hexWarns.length ? `; ${hexWarns.length} literal colour(s) outside lib.js` : ''}`,
-      [...hits, ...hexWarns]
+        : `no Math.random / Date / performance.now / crypto randomness or unsafe-area text in ${files.length} files${hexWarns.length ? `; ${hexWarns.length} literal colour(s) outside lib.js` : ''}${textWarns.length ? `; ${textWarns.length} text call(s) outside the title-safe area` : ''}`,
+      [...hits, ...textWarns, ...hexWarns]
     );
   }
 
@@ -762,7 +772,7 @@ async function main() {
   let geoFrames = [];
   if (src.geoFile) {
     try {
-      geo = C.loadGeo(src.geoFile);
+      geo = C.loadGeo(src.geoFile, TL);
       const v = C.validateGeo(geo, TL);
       geoProblems.push(...v.problems);
       geoWarnings.push(...v.warnings);
@@ -806,7 +816,7 @@ async function main() {
     fs.copyFileSync(f, copy);
     loadable.push(copy);
   }
-  const openOpts = (prefix) => ({ scale, prefix, only: shotId });
+  const openOpts = (prefix) => ({ scale, prefix, only: shotId, frameWidth: TL.width, frameHeight: TL.height });
   const browser = await C.launch();
   try {
     browserChecks: {
@@ -985,8 +995,8 @@ async function main() {
       //
       // Each shot's first, middle and last frame is drawn with the grain post off, on its own page at
       // scale 0.5 (so a warm scale-1 cache cannot leak into the sample, and checks 1–8 are untouched).
-      // Detail is the fraction of safe-area samples (x 60–940, y 220–1540) whose 2×2-box luminance
-      // gradient is at least 24. Those samples also fill a 3×5 grid (3 columns, 5 rows). A cell is empty
+      // Detail is the fraction of safe-area samples (FILM.safeArea: x 60–940, y 220–1540 on 1080×1920,
+      // otherwise the centred 90% box) whose 2×2-box luminance gradient is at least 24. Those samples also fill a 3×5 grid (3 columns, 5 rows). A cell is empty
       // below 1% detail. Emptiness is the largest empty rectangle, as a fraction of the safe area.
       // The line is the worst of the three frames. Warn when detail < 6% or the rectangle is at least
       // 6 of the 15 cells (40%).
@@ -1053,7 +1063,7 @@ async function main() {
         const tD = Date.now();
         let pgD = null;
         try {
-          pgD = await C.openPage(browser, loadable, { scale: 0.5, prefix: 'check-density', only: shotId });
+          pgD = await C.openPage(browser, loadable, { scale: 0.5, prefix: 'check-density', only: shotId, frameWidth: TL.width, frameHeight: TL.height });
           pagesOpened.push(pgD);
           if (!pgD.info) throw new Error('FILM did not initialise');
           let warns = 0;
@@ -1219,7 +1229,7 @@ async function main() {
     try {
       const from = shotId ? Math.round(SHOTS[0].start * FPS) : 0;
       const to = shotId ? Math.max(from, Math.round(SHOTS[0].end * FPS)) : Math.max(0, Math.round(TL.duration * FPS));
-      const buf = await gatherFlashSamples(loadable, { from, to, shotId, fps: FPS, cols: 8, rows: 14, pagesOpened });
+      const buf = await gatherFlashSamples(loadable, { from, to, shotId, fps: FPS, cols: 8, rows: 14, pagesOpened, frameWidth: TL.width, frameHeight: TL.height });
       const stats = analyzeFlashBlocks(buf, { from, cols: 8, rows: 14, fps: FPS });
       const sec = ((Date.now() - tFlash) / 1000).toFixed(1);
       const gW = worstViolation(stats.general);

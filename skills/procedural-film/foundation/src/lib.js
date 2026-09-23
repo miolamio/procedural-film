@@ -13,7 +13,8 @@
  *   - null                                                 (no clip; opts.bounds or the whole frame)
  * Bounds are { x, y, w, h } or [x, y, w, h] in the current (logical) coordinates.
  *
- * Angles are radians. Sizes are logical pixels on the 1080x1920 frame.
+ * Angles are radians. Sizes are logical pixels on the frame (FILM.W × FILM.H, 1080×1920
+ * when the timeline sets neither width nor height).
  */
 (function () {
   'use strict';
@@ -1376,6 +1377,8 @@
 
   // ===========================================================================
   // Backgrounds: paper, blueprint, stripes
+  // Each fills the frame (FILM.W × FILM.H) unless opts give a rectangle.
+  // Plate caches include both width and height, so a second format does not reuse a vertical plate.
   // ===========================================================================
 
   function renderScale() {
@@ -1384,7 +1387,7 @@
 
   /**
    * paper(ctx, opts) : cream paper with mottling, grain and fibres. Cached by size, seed and options.
-   *   x, y, w, h   0, 0, 1080, 1920
+   *   x, y, w, h   0, 0, frame width, frame height
    *   color        pal.paper
    *   seed         3
    *   grain        1      fine grain strength
@@ -1494,7 +1497,7 @@
   /**
    * blueprint(ctx, opts) : navy plate with faint grid, big guide circles, long diagonals and noise.
    * Cached by size, seed and options.
-   *   x, y, w, h   0, 0, 1080, 1920
+   *   x, y, w, h   0, 0, frame width, frame height
    *   color        pal.navy
    *   seed         5
    *   grid         60      grid pitch (px); 0 turns the grid off
@@ -1659,7 +1662,7 @@
    *   angle    -0.52   stripe direction (radians): 30 degrees rising left to right
    *   offset   0       scroll along the normal (animate this)
    *   wobble   1.4     edge irregularity (px)
-   *   bounds   frame
+   *   bounds   frame (FILM.W × FILM.H)
    *   seed     21
    */
   function stripes(ctx, o = {}) {

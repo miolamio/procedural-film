@@ -8,8 +8,8 @@ Sections 1 to 9 are the house style, fixed by the reference analysis — change 
 
 ## 1. Frame
 
-The canvas is 1080 px wide and 1920 px tall at 24 fps.
-Every pixel value in this file assumes that size.
+The canvas is 1080 px wide and 1920 px tall at 24 fps, unless the timeline sets `width` and `height`.
+Every pixel value in this file assumes 1080×1920 unless a subsection says otherwise.
 The origin is the top-left corner and y grows downward.
 
 ### 1.1 Shorts safe area
@@ -26,6 +26,14 @@ Compose for the height, never crop a square.
 Hanging, climbing, falling and rising subjects use the vertical axis.
 The frame centre line x = 540 is the default axis for the subject.
 Large subjects fill 60 to 90 percent of the frame width so they read on a phone.
+
+### 1.3 Composition for a horizontal frame
+
+When the timeline sets 1920×1080, compose a landscape, not a tall plate turned sideways and not a vertical frame letterboxed in black.
+Put the horizon in the upper third or on the centre line. Sit the subject on that line, left or right of centre, with open ground ahead of the way it travels.
+Must-read content stays inside the title-safe box: 90 percent of the frame, centred. On 1920×1080 that is x 96 to 1824 and y 54 to 1026.
+A 1080×1080 square uses the same 90 percent box, centred (x 54 to 1026, y 54 to 1026).
+Backgrounds, stripes and grain still run full bleed. If a shape needs the height of a 9:16 plate, redesign it; do not pad the frame.
 
 ## 2. Palettes
 

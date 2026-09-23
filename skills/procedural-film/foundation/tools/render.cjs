@@ -7,7 +7,7 @@
 //
 // Options:
 //   --from s, --to s   global seconds (default 0 .. duration)
-//   --scale s          render scale (default 1 = 1080x1920)
+//   --scale s          render scale (default 1 = the timeline frame)
 //   --out path         output file (relative paths are from the project root)
 //   --workers N        pages rendering frame ranges in parallel (default 1 = pipe straight into ffmpeg)
 //   --silent           no music.js needed; writes a silent stereo track
@@ -98,7 +98,7 @@ async function main() {
     // one browser process per worker so pages really render in parallel
     for (let i = 0; i < workers; i++) launches.push(C.launch());
     const bs = await Promise.all(launches);
-    pages = await Promise.all(bs.map((b, i) => C.openPage(b, src.files, { scale, prefix: `render-w${i}` })));
+    pages = await Promise.all(bs.map((b, i) => C.openPage(b, src.files, { scale, prefix: `render-w${i}`, frameWidth: TL.width, frameHeight: TL.height })));
     for (const pg of pages) {
       const problems = [...pg.loadErrors.map((e) => `${e.file}:${e.line}:${e.col} ${e.message}`), ...pg.state.regErrors, ...pg.pageErrors];
       if (problems.length || !pg.info) throw new Error(`scripts failed to load:\n  ${problems.join('\n  ') || 'FILM did not initialise'}`);

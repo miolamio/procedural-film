@@ -5,7 +5,7 @@ description: Procedural film — turn a subject into a short vertical animated f
 
 # Procedural film
 
-Turn a topic into a **film**: roughly 30 seconds, vertical 1080×1920 at 24 fps, hand-inked **paper plate** shots cut against navy **blueprint plate** shots, every event on a **beat grid** (bpm → beats → frames), every pixel and every audio sample computed in plain browser JavaScript. The deliverable is `dist/<slug>.html` (a self-contained player) plus `exports/<slug>.mp4` and its phone and preview transcodes.
+Turn a topic into a **film**: roughly 30 seconds at 24 fps, 1080×1920 vertical unless the timeline sets `width` and `height` (also 1920×1080 and 1080×1080), hand-inked **paper plate** shots cut against navy **blueprint plate** shots, every event on a **beat grid** (bpm → beats → frames), every pixel and every audio sample computed in plain browser JavaScript. The deliverable is `dist/<slug>.html` (a self-contained player) plus `exports/<slug>.mp4` and its phone and preview transcodes.
 
 This skill packages a proven pipeline. It ships three things:
 

@@ -11,6 +11,34 @@ const SRC = path.join(ROOT, 'src');
 const FIX = path.join(__dirname, 'fixtures');
 const TMP = path.join(ROOT, '.tmp');
 const FPS = 24;
+const DEFAULT_W = 1080;
+const DEFAULT_H = 1920;
+
+function frameDim(v, fallback) {
+  const n = Number(v);
+  return n > 0 && isFinite(n) ? n : fallback;
+}
+
+/** Timeline width and height. Absent or non-positive values fall back to 1080×1920. */
+function frameSize(tl) {
+  const src = tl && typeof tl === 'object' ? tl : null;
+  const raw = src && src.raw && typeof src.raw === 'object' ? src.raw : null;
+  return {
+    width: frameDim(src && src.width, 0) || frameDim(raw && raw.width, 0) || DEFAULT_W,
+    height: frameDim(src && src.height, 0) || frameDim(raw && raw.height, 0) || DEFAULT_H,
+  };
+}
+
+/**
+ * Title-safe box in frame pixels. Keep in step with FILM.safeArea in src/core.js.
+ * 1080×1920: Shorts/Reels x 60–940, y 220–1540. Any other size: 90% of the frame, centred.
+ */
+function safeArea(w, h) {
+  const fw = frameDim(w, DEFAULT_W);
+  const fh = frameDim(h, DEFAULT_H);
+  if (fw === DEFAULT_W && fh === DEFAULT_H) return { x0: 60, y0: 220, x1: 940, y1: 1540 };
+  return { x0: fw * 0.05, y0: fh * 0.05, x1: fw * 0.95, y1: fh * 0.95 };
+}
 
 function die(msg) {
   process.stderr.write(`\n[error] ${msg}\n`);
@@ -88,15 +116,17 @@ function normalizeTimeline(tl) {
     return Object.assign({}, s, { index: i, start, end, dur: end - start, transitionIn: tr });
   });
   const duration = tl.duration != null ? Number(tl.duration) : out.length ? out[out.length - 1].end : 0;
-  return { raw: tl, shots: out, duration, hasDuration: tl.duration != null, bpm: tl.bpm, cues: tl.cues };
+  const size = frameSize(tl);
+  return { raw: tl, shots: out, duration, hasDuration: tl.duration != null, bpm: tl.bpm, cues: tl.cues, width: size.width, height: size.height };
 }
 
-/** Evaluate a timeline file in a sandbox (no browser needed). */
+/** Evaluate a timeline file in a sandbox (no browser needed). Width and height on the returned timeline come from the file, else 1080×1920. */
 function loadTimeline(file) {
   const code = fs.readFileSync(file, 'utf8');
   const noop = () => {};
   const libStub = new Proxy(function () {}, { get: () => libStub, apply: () => 0 });
-  const FILM = { W: 1080, H: 1920, FPS, lib: libStub, scene: noop };
+  // Defaults only while the script runs. The object it assigns may set width and height.
+  const FILM = { W: DEFAULT_W, H: DEFAULT_H, FPS, lib: libStub, scene: noop };
   const sandbox = { FILM, console, Math };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
@@ -107,10 +137,11 @@ function loadTimeline(file) {
   return normalizeTimeline(tl);
 }
 
-/** Evaluate geo.js in a sandbox. Returns FILM.GEO ({} when the file sets nothing). */
-function loadGeo(file) {
+/** Evaluate geo.js in a sandbox. Returns FILM.GEO ({} when the file sets nothing). Frame size follows the timeline when one is passed. */
+function loadGeo(file, tl) {
   const code = fs.readFileSync(file, 'utf8');
-  const FILM = { W: 1080, H: 1920, FPS };
+  const { width, height } = frameSize(tl);
+  const FILM = { W: width, H: height, FPS };
   const sandbox = { FILM, console, Math };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
@@ -144,7 +175,11 @@ function selfCrossing(pts) {
  *   polyline : { kind: 'polyline', pts: [[x, y], ...], shots }
  * cuts defaults to every pair of consecutive listed shots; 'a>b' measures a's last and b's first frame.
  */
-function validateGeo(geo, tl, { W = 1080, H = 1920 } = {}) {
+function validateGeo(geo, tl, opts) {
+  opts = opts || {};
+  const frame = frameSize(tl);
+  const W = frameDim(opts.W, 0) || frame.width;
+  const H = frameDim(opts.H, 0) || frame.height;
   const problems = [];
   const warnings = [];
   const frames = [];
@@ -350,7 +385,7 @@ window.__h = {
     return window.__canvases;
   },
   // Measure a profile or outline silhouette on the bare frame at T: at K points round it, find the strongest
-  // luminance edge within +-win px along the outward normal. Returns the offsets in 1080-wide px
+  // luminance edge within +-win px along the outward normal. Returns the offsets in frame px
   // (positive = outside the silhouette), each edge's strength, and for a profile its side (-1 left, +1 right).
   geoMeasure(id, T, win, K) {
     const g = FILM.lib.geo(id);
@@ -387,6 +422,8 @@ window.__h = {
       const a = P[j], b = P[(j + 1) % m];
       const len = cum[j + 1] - cum[j] || 1, u = (s - cum[j]) / len;
       const x = a[0] + (b[0] - a[0]) * u, y = a[1] + (b[1] - a[1]) * u;
+      // A point outside the frame has no edge to measure. In-frame points keep the same scan.
+      if (x < 0 || y < 0 || x > FILM.W || y > FILM.H) continue;
       const tx = (b[0] - a[0]) / len, ty = (b[1] - a[1]) / len;
       const nx = -ty * out, ny = tx * out;
       let best = -1, bt = 0;
@@ -444,7 +481,7 @@ window.__h = {
   png() {
     return FILM.canvas.toDataURL('image/png').slice(22);
   },
-  // a region of the drawn frame at render resolution; x, y, w, h in 1080-wide frame px
+  // a region of the drawn frame at render resolution; x, y, w, h in frame px
   cropPng(x, y, w, h) {
     const S = FILM.canvas.width / FILM.W;
     const c = document.createElement('canvas');
@@ -652,12 +689,18 @@ async function launch(extraArgs = []) {
  * Returns { page, info, state, loadErrors, tmpFile, pageErrors, consoleErrors, blocked, reopen, close }.
  * reopen() navigates the same page again: fresh JS state, nothing drawn yet, canvas mounted.
  */
-async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?render=1', only = null } = {}) {
+async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?render=1', only = null, frameWidth = null, frameHeight = null } = {}) {
   fs.mkdirSync(TMP, { recursive: true });
   const tmpFile = path.join(TMP, uniqueName(prefix) + '.html');
   fs.writeFileSync(tmpFile, pageHtml(files, { title: prefix }));
   const forget = cleanupOnExit(tmpFile);
-  const context = await browser.newContext({ viewport: { width: 540, height: 960 }, deviceScaleFactor: 1 });
+  // Half the frame: 1080×1920 stays 540×960. The bitmap size is set by FILM.mount, not the viewport.
+  const fw = frameDim(frameWidth, DEFAULT_W);
+  const fh = frameDim(frameHeight, DEFAULT_H);
+  const context = await browser.newContext({
+    viewport: { width: Math.max(2, Math.round(fw / 2)), height: Math.max(2, Math.round(fh / 2)) },
+    deviceScaleFactor: 1,
+  });
   // The film may request nothing: every URL other than this page and its own script files is aborted and
   // recorded in pg.blocked (check 1 fails on it), so media fetched at run time cannot slip past the scan.
   const allowed = new Set([tmpFile, ...files].map((f) => 'file://' + f));
@@ -792,6 +835,8 @@ module.exports = {
   rel,
   loadTimeline,
   normalizeTimeline,
+  frameSize,
+  safeArea,
   loadGeo,
   validateGeo,
   sources,

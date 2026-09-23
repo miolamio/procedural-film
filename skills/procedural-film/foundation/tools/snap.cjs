@@ -15,9 +15,9 @@
 //   --only          with --shot: load only core, lib, timeline and that shot's file
 //                   (a fade, iris or wipe in from the unloaded previous shot shows this shot alone)
 //   --out path      output directory (relative to the project root), or a .png path for a single frame
-//   --scale s       render scale (default 1 = 1080x1920)
+//   --scale s       render scale (default 1 = the timeline frame)
 //   --fixtures      use tools/fixtures instead of src
-//   --crop x,y,w,h  also write that region of every frame at render resolution (1080-wide frame px); separate
+//   --crop x,y,w,h  also write that region of every frame at render resolution (frame px); separate
 //                   several regions with ';' ("--crop '300,500,480,480;600,1200,300,300'"): the native-scale
 //                   evidence of the three-scale review, next to the full frame and the contact sheet
 //   --geo a,b       stroke those FILM.GEO entries (src/geo.js) over every frame in magenta: silhouettes, polylines,
@@ -87,7 +87,7 @@ async function main() {
   let failed = false;
   const written = [];
   try {
-    const pg = await C.openPage(browser, src.files, { scale, prefix: 'snap', only: args.only ? shotId : null });
+    const pg = await C.openPage(browser, src.files, { scale, prefix: 'snap', only: args.only ? shotId : null, frameWidth: TL.width, frameHeight: TL.height });
     const loadProblems = [...pg.loadErrors.map((e) => `${e.file}:${e.line}:${e.col} ${e.message}`), ...pg.state.regErrors];
     if (loadProblems.length) {
       failed = true;
