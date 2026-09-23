@@ -1,13 +1,16 @@
-// Fixture timeline for testing the tools (not the film). 8 seconds, 4 shots.
+// Fixture timeline for testing the tools (not the film). 30 seconds, 5 shots.
+// palette is stretched to 28s so fx-parallax can occupy its slot with no gap;
+// the sheet still pages on the original 2s clock.
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 8,
+  duration: 30,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
     { id: 'fx-meadow', file: '03-fx-meadow.js', start: 4.5, end: 6, mode: 'illustrated', transitionIn: { dur: 0.5, kind: 'fade' }, brief: 'Stripes, a leaf and a crawling larva on twos; a flight arc draws on.' },
-    { id: 'palette', file: '04-palette-sheet.js', start: 6, end: 8, mode: 'illustrated', brief: 'Every name in lib.pal as a labelled swatch, on paper above and blueprint below.' },
+    { id: 'palette', file: '04-palette-sheet.js', start: 6, end: 28, mode: 'illustrated', brief: 'Every name in lib.pal as a labelled swatch, on paper above and blueprint below.' },
+    { id: 'fx-parallax', file: '15-fx-parallax.js', start: 28, end: 30, mode: 'illustrated', brief: 'A pull-back: leaf at z 1, grass nearer, hills and sky farther, zoom 3 to 1.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
@@ -15,5 +18,6 @@ FILM.TIMELINE = {
     { t: 4.0, kind: 'burst' },
     { t: 4.5, kind: 'fade' },
     { t: 6, kind: 'cut' },
+    { t: 28, kind: 'cut' },
   ],
 };

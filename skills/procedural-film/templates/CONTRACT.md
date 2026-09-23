@@ -79,6 +79,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `hexLattice(ctx, clipFn, opts)`, `glowDot(ctx, x, y, r, opts)`, `ticks(ctx, ...)`, `bracket(ctx, ...)`, `guideCircle(ctx, ...)`, `arcAnnotation(ctx, ...)`.
 - `stripes(ctx, opts)`: the wide diagonal stripe background.
 - `camera(ctx, { x, y, zoom, rot }, fn)`: draws `fn` under a camera transform centred on the frame.
+- `layers(ctx, { x, y, zoom, rot }, planes)`: the same camera across planes `{ z, draw, blur?, fog?: { color, amount }, static? }`, painted far to near. `z = 1` is the focus plane and matches `camera`. `z > 1` is farther, `z < 1` is nearer. Effective zoom is `1 + (zoom - 1) / z`, and the pan `(x - W/2, y - H/2)` is divided by `z`. `blur` is a depth-of-field radius, applied only when `static` is true (the plane is drawn once into a cached canvas with `ctx.filter`); otherwise the blur is skipped. `fog` is a translucent fill over that plane.
 - `pal`: named colours from the art bible.
 - `text(ctx, str, x, y, opts)`: a thin single-line wordmark drawn with system sans-serif (no font files).
 - `geo(id)`: an entry of `FILM.GEO`, read-only. `profile` (symmetric about `cx`: `hw(y)`, `x(y, side)`, `side(sign)`, `outline()`, `widest`), `outline` (a closed silhouette sampled densely, drawn as it stands: `outline()`), `points` (`pt(name)`), `polyline` (`pts`).
