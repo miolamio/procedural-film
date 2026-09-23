@@ -5785,6 +5785,141 @@
   };
 
   // ===========================================================================
+  // Parallax layers
+  // ===========================================================================
+
+  // One blurred plane is rasterised once per draw function and viewport, then
+  // re-projected. The key deliberately ignores the camera and the frame time:
+  // a static plate must not allocate another canvas on the next frame.
+  const layerIds = new WeakMap();
+  let layerSeq = 1;
+  const LAYER_PAD = 1;
+
+  function layerZ(plane) {
+    const z = plane && plane.z != null ? Number(plane.z) : 1;
+    return Number.isFinite(z) && z !== 0 ? z : 1;
+  }
+
+  // z = 1 is lib.camera. Farther planes (z > 1) take less zoom and less pan.
+  function layerCam(cam, z) {
+    if (z === 1) return cam || {};
+    const c = cam || {};
+    const zoom = c.zoom != null ? c.zoom : 1;
+    const x = c.x != null ? c.x : W() / 2;
+    const y = c.y != null ? c.y : H() / 2;
+    const out = {
+      x: W() / 2 + (x - W() / 2) / z,
+      y: H() / 2 + (y - H() / 2) / z,
+      zoom: 1 + (zoom - 1) / z,
+    };
+    if (c.rot) out.rot = c.rot;
+    return out;
+  }
+
+  function drawPlane(ctx, cam, z, draw) {
+    lib.camera(ctx, layerCam(cam, z), draw);
+  }
+
+  function planeFog(ctx, fog) {
+    const amount = fog ? Number(fog.amount) : 0;
+    if (!(amount > 0)) return;
+    ctx.save();
+    ctx.globalAlpha *= amount;
+    ctx.fillStyle = fog.color || pal.white;
+    ctx.fillRect(0, 0, W(), H());
+    ctx.restore();
+  }
+
+  // Logical rectangle currently mapped onto ctx.canvas (the frame, under the
+  // base transform). Padding keeps blur and a later zoom from sampling emptiness.
+  function layerView(ctx) {
+    const dw = ctx.canvas.width || W();
+    const dh = ctx.canvas.height || H();
+    const m = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null;
+    const a = m ? m.a : dw / W();
+    const b = m ? m.b : 0;
+    const c = m ? m.c : 0;
+    const d = m ? m.d : dh / H();
+    const e = m ? m.e : 0;
+    const f = m ? m.f : 0;
+    const det = a * d - b * c;
+    const inv = (px, py) => {
+      const x = px - e;
+      const y = py - f;
+      if (!det) return { x: px, y: py };
+      return { x: (d * x - c * y) / det, y: (-b * x + a * y) / det };
+    };
+    const pts = [inv(0, 0), inv(dw, 0), inv(0, dh), inv(dw, dh)];
+    let minX = pts[0].x, maxX = pts[0].x, minY = pts[0].y, maxY = pts[0].y;
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i].x < minX) minX = pts[i].x;
+      if (pts[i].x > maxX) maxX = pts[i].x;
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    const vw = maxX - minX || W();
+    const vh = maxY - minY || H();
+    return {
+      ox: minX - LAYER_PAD * vw,
+      oy: minY - LAYER_PAD * vh,
+      ww: vw * (1 + 2 * LAYER_PAD),
+      hh: vh * (1 + 2 * LAYER_PAD),
+      sx: dw / vw,
+      sy: dh / vh,
+    };
+  }
+
+  function cachedBlur(ctx, draw, blur) {
+    let id = layerIds.get(draw);
+    if (!id) layerIds.set(draw, (id = layerSeq++));
+    const v = layerView(ctx);
+    const offW = Math.max(1, Math.round(v.ww * v.sx));
+    const offH = Math.max(1, Math.round(v.hh * v.sy));
+    const q = (n) => Math.round(n * 1000) / 1000;
+    const key = ['plx', id, offW, offH, q(blur), q(v.ox), q(v.oy), q(v.ww), q(v.hh)].join('|');
+    const canvas = cached(key, () => {
+      const off = newCanvas(offW, offH);
+      const g = off.getContext('2d');
+      g.setTransform(v.sx, 0, 0, v.sy, -v.ox * v.sx, -v.oy * v.sy);
+      g.filter = `blur(${blur}px)`;
+      try {
+        draw(g);
+      } finally {
+        g.filter = 'none';
+      }
+      return off;
+    });
+    return { canvas, ox: v.ox, oy: v.oy, ww: v.ww, hh: v.hh };
+  }
+
+  /**
+   * layers(ctx, { x, y, zoom, rot }, planes) : one camera, several depths, painted far to near.
+   *   planes   [{ z, draw, blur, fog: { color, amount }, static }]
+   *   z        1 is the focus plane (same pixels as camera). z > 1 is farther, z < 1 is nearer.
+   *            Effective zoom is 1 + (zoom - 1) / z. The pan (x - W/2, y - H/2) is divided by z.
+   *   blur     depth-of-field radius in px. Honoured only when static is true: the plane is drawn
+   *            once into a cached canvas with ctx.filter. Otherwise the blur is skipped.
+   *   fog      translucent fill over that plane, after it is drawn.
+   */
+  lib.layers = (ctx, cam, planes) => {
+    const list = Array.isArray(planes) ? planes.slice() : [];
+    list.sort((a, b) => layerZ(b) - layerZ(a));
+    for (let i = 0; i < list.length; i++) {
+      const plane = list[i];
+      if (!plane || typeof plane.draw !== 'function') continue;
+      const z = layerZ(plane);
+      const blur = Number(plane.blur);
+      if (plane.static && Number.isFinite(blur) && blur > 0) {
+        const pic = cachedBlur(ctx, plane.draw, blur);
+        drawPlane(ctx, cam, z, (g) => g.drawImage(pic.canvas, pic.ox, pic.oy, pic.ww, pic.hh));
+      } else {
+        drawPlane(ctx, cam, z, plane.draw);
+      }
+      planeFog(ctx, plane.fog);
+    }
+  };
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
