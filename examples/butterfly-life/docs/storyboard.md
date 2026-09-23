@@ -61,7 +61,7 @@ During a flash transition core draws the outgoing shot slightly past its end, so
 
 ## Shared geometry
 
-Scenes that share a shape copy these numbers exactly, or the match cuts jump.
+Scenes that share a shape copy these numbers exactly, or the match cuts jump. `src/geo.js` holds the same tables as data (G1 and G3 as profiles, measured by gate check 7 on the cuts 02 > 03, 16 > 17, 06 > 07, 07 > 08 and 09 > 10).
 
 ### G1: egg, hanging under a leaf (02, 03, 16, 17)
 

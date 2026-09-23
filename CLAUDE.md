@@ -10,10 +10,11 @@ An agent skill, not an app. `skills/procedural-film/SKILL.md` is the pipeline an
 
 ## Two copies of the engine
 
-`skills/procedural-film/foundation/` is copied verbatim into every new film, so `examples/butterfly-life/` carries its own copy.
+`skills/procedural-film/foundation/` is copied verbatim into every new film, so `examples/butterfly-life/` carries its own copy, and so does each film under `films/` (keep their `tools/` in sync too).
 
 - `tools/`, `src/core.js` and `src/player.js` are byte-identical in both places. A fix to any of them goes into both in the same commit (`diff -r skills/procedural-film/foundation/tools examples/butterfly-life/tools` must stay empty).
 - `src/lib.js` differs only in the 2.2 subject-palette block; `src/music.js` in the example is the composed score, while the foundation holds a demo score. Engine changes to either still apply to both.
+- `src/geo.js` is per film (the storyboard's Shared geometry as data); the foundation has none, and its fixtures carry `tools/fixtures/geo.js`.
 - `examples/butterfly-life/dist/butterfly-life.html` is committed. Rebuild it with `build.cjs` whenever the example's `src/` changes.
 - Doc changes often span three places: `SKILL.md`, `templates/`, and the example's filled `docs/`.
 
@@ -25,9 +26,11 @@ Everything runs from a film folder (the example, or a copy of `foundation/`). Ou
 npm install --prefix examples/butterfly-life/tools
 npx --prefix examples/butterfly-life/tools playwright install chromium
 node examples/butterfly-life/tools/smoke.cjs            # Playwright + canvas + OfflineAudioContext work
-node examples/butterfly-life/tools/check.cjs            # the gate: six checks, exit 0 = green
+node examples/butterfly-life/tools/check.cjs            # the gate: seven checks, exit 0 = green
+node examples/butterfly-life/tools/check.cjs --shot <id> # one shot loaded alone (what a scene agent runs)
 node examples/butterfly-life/tools/check.cjs --fixtures # gate against tools/fixtures/ (the foundation's only test film)
 node examples/butterfly-life/tools/snap.cjs --shot <id> --samples 6 --sheet   # contact sheet into .frames/
+node examples/butterfly-life/tools/snap.cjs --times 11.458,11.5 --geo G3 --crop 380,300,320,640  # match cut with the table overlaid
 node examples/butterfly-life/tools/render.cjs --scale 0.5 --out exports/draft.mp4
 node examples/butterfly-life/tools/build.cjs            # dist/<slug>.html
 ```

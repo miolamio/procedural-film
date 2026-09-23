@@ -25,16 +25,17 @@ The look and editing follow `docs/reference-analysis.md`.
 | `src/core.js` | foundation | Defines `window.FILM`, the scene registry, `renderFrame`, global post-processing. |
 | `src/lib.js` | foundation | `FILM.lib`: RNG, noise, easing, ink lines, hatching, stipple, paper grain, blueprint helpers, palette. |
 | `src/timeline.js` | storyboard | `FILM.TIMELINE`: bpm, duration, shot list with ids, files, times, modes and briefs, and the audio cue list. |
+| `src/geo.js` | storyboard | `FILM.GEO`: the storyboard's Shared geometry tables as data (optional until a storyboard has one). |
 | `src/scenes/NN-<id>.js` | one scene agent each | Registers one shot with `FILM.scene({...})`. `NN` is the two-digit shot order. |
 | `src/music.js` | music agent | `FILM.audio.render(ctx, opts)`: schedules the whole score and effects into any `BaseAudioContext`. |
 | `src/player.js` | foundation | Interactive player page behaviour. |
 | `tools/snap.cjs` | foundation | Renders PNG stills and contact sheets headlessly for review. |
 | `tools/build.cjs` | foundation | Inlines everything into `dist/butterfly-life.html`. |
 | `tools/render.cjs` | foundation | Renders the MP4 with audio into `exports/`. |
-| `tools/check.cjs` | foundation | Automated checks: no media, determinism, full timeline coverage, every scene draws without throwing, frame cost. |
+| `tools/check.cjs` | foundation | Automated checks: no media, determinism, full timeline coverage, every scene draws without throwing, frame cost, shared geometry measured on the match cuts. |
 | `docs/storyboard.md`, `docs/art-bible.md` | storyboard | The human-readable plan and the visual rules for this film. |
 
-Load order everywhere: `core.js`, `lib.js`, `timeline.js`, scene files sorted by filename, `music.js`, `player.js`.
+Load order everywhere: `core.js`, `lib.js`, `timeline.js`, `geo.js` (when present), scene files sorted by filename, `music.js`, `player.js`.
 
 ## API
 
@@ -79,6 +80,25 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `camera(ctx, { x, y, zoom, rot }, fn)`: draws `fn` under a camera transform centred on the frame.
 - `pal`: named colours from the art bible.
 - `text(ctx, str, x, y, opts)`: a thin single-line wordmark drawn with system sans-serif (no font files).
+- `geo(id)`: an entry of `FILM.GEO`, read-only. `profile` (symmetric about `cx`: `hw(y)`, `x(y, side)`, `side(sign)`, `outline()`, `widest`), `outline` (a closed silhouette sampled densely, drawn as it stands: `outline()`), `points` (`pt(name)`), `polyline` (`pts`).
+
+### Shared geometry
+
+```js
+FILM.GEO = {
+  G1: { kind: 'profile', cx: 540, ys: [520, 620, 790, 1080, 1280], hs: [180, 262, 285, 208, 0],
+        shots: ['egg-blueprint', 'egg-hatch'], cuts: ['egg-blueprint>egg-hatch'] },
+  G2: { kind: 'outline', pts: [[x, y], ...], shots: [...] },   // sampled every few px, not control points
+  G5: { kind: 'points', pts: { thorax: [540, 900] }, shots: [...] },
+};
+```
+
+`src/geo.js` mirrors every table in the storyboard's Shared geometry section, in frame pixels at the frames either side of the cut (a scene under `lib.camera` lands its shape there).
+It is pure data with no `lib` calls: tools evaluate it on its own.
+Scenes read shapes with `lib.geo(id)` instead of copying numbers, so a table fix reaches every shot at once.
+`cuts` lists the match cuts to hold (default: every pair of consecutive listed shots); `at: [{ shot, t }]` adds a single frame to measure.
+A `profile` is symmetric about a vertical axis only: a shape lying on its side, or a figure of several parts, is an `outline` of its outer silhouette, one closed loop. A cut in the middle of a camera move needs the silhouette as it lands on that frame, as its own entry.
+Check 7 measures every `profile` and `outline` on the rendered frames either side of each cut and fails a cut whose drawn edge strays from the table.
 
 ### Audio
 
@@ -98,15 +118,17 @@ The same function feeds the live player (`AudioContext`) and the MP4 render (`Of
 node tools/snap.cjs --times 1.0,2.5 --out .frames/check            # stills at global times (with --shot, times count from the shot's start)
 node tools/snap.cjs --shot egg-blueprint --samples 6 --sheet        # frames spread over one shot plus a contact sheet
 node tools/snap.cjs --samples 24 --sheet --scale 0.25               # the whole film on one labelled sheet
-node tools/snap.cjs --shot egg-blueprint --only                     # load only core, lib, timeline and this shot's file
+node tools/snap.cjs --shot egg-blueprint --only                     # load only core, lib, timeline, geo and this shot's file
+node tools/snap.cjs --times 11.458,11.5 --geo G3 --crop 380,300,320,640   # both sides of a match cut, table overlaid, native crops
 node tools/stubgen.cjs                                              # placeholder scene per shot (run before scene work starts)
 node tools/build.cjs                                                # writes dist/butterfly-life.html
-node tools/check.cjs                                                # all automated checks, exits non-zero on failure
+node tools/check.cjs                                                # all automated checks, exits non-zero on failure (the director's gate)
+node tools/check.cjs --shot <id>                                   # one shot loaded alone: a scene agent's gate while siblings are half-written
 node tools/render.cjs [--from 0 --to 30] [--scale 0.5] [--out exports/name.mp4]
 ```
 
 `snap.cjs` writes a unique temporary HTML page per run under `.tmp/`, so several agents can render at the same time without clashing.
-`--only` exists so a shot can be rendered while a sibling shot file is half-written.
+`--only` (snap) and `--shot` (check) exist so a shot can be rendered and gated while a sibling shot file is half-written; every check run also loads a snapshot of the sources taken at its start.
 Images go under `.frames/` (git-ignored). Look at them — reading the pixels is the review.
 
 ## Shell note for agents

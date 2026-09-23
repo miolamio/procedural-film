@@ -229,7 +229,7 @@ A scene may be asked for `t` slightly beyond its duration during a transition, s
 ## 8. Match cuts
 
 A match cut keeps a shape on the same pixels across a mode change.
-The shared geometry tables live in `docs/storyboard.md`, section "Shared geometry", and scenes copy those numbers exactly.
+The shared geometry tables live in `docs/storyboard.md`, section "Shared geometry", mirrored as data in `src/geo.js`; scenes read them with `lib.geo(id)` and gate check 7 measures the drawn edges on both sides of every listed cut.
 Line weights may change across the cut, positions may not.
 
 ## 9. Wordmark
@@ -237,6 +237,7 @@ Line weights may change across the cut, positions may not.
 The wordmark is the film's word in lowercase.
 Draw it with `lib.text` in a thin system sans-serif (light weight), 44 px, letter-spacing 0.12 em, lavender at 85 percent.
 It is centred on x = 540 with its baseline at y = 1470, inside the Shorts safe area (the bottom-right corner sits under the button column).
+Headless Chromium, which renders the MP4, draws weight 300 as regular: ask for weight 200 to get the light face, and check it on a rendered frame.
 The baseline stays at y = 1470. If the closing diagram collides with the wordmark, move the diagram — never the wordmark.
 
 ## 10. Subject reference
@@ -249,6 +250,11 @@ source captured in .tmp/research/>". Then one subsection per drawable element:
 Facts as drawing rules: sizes and ratios ("height-to-width 4 to 3"), counts ("18 ridges on the
 visible face"), poses, sequences, what shows through what, what happens first. Where the subject
 has stages, use a table with one row per stage.
+
+End each subsection with **Measure**: the two to four ratios a critic checks in pixels on a rendered
+frame (leg length to body length, wing length to width, the share of the frame the subject fills).
+Wrong proportions were the most common critic finding on an earlier film, and a ratio catches them
+before a critic has to.
 
 ### 10.N Mistakes to avoid
 

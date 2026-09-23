@@ -37,6 +37,12 @@ node tools/audio/render-audio.cjs --solo drums,bass        # bus isolation (also
 node tools/audio/cost.cjs                                  # render() time and node count
 ```
 
+Seek from every bar (the loop below assumes 2 s bars, 120 bpm; step by your bar length): the player and a scrub start mid-score, where an envelope point before the window can throw (`setValueAtTime` with a negative time). Every start must render without an error:
+
+```bash
+for s in $(seq 0 2 30); do node tools/audio/render-audio.cjs --start $s --end $((s + 2)) --out .tmp/audio/seek.wav || echo "seek $s failed"; done
+```
+
 Then measure the phone codec, not just the WAV: a 128k AAC encode overshoots true peak by about +0.2 dB. Encode one (`ffmpeg -i .tmp/audio/score.wav -c:a aac -b:a 128k .tmp/audio/score-128k.m4a`) and measure both (`ffmpeg -i <file> -af ebur128 -f null -`). The limiter ceiling of 0.66 exists to leave that headroom — keep it at or below.
 
-Done when: onsets match cues within 10 ms, no clipping in WAV or AAC, and the gate is green.
+Done when: onsets match cues within 10 ms, a render from every bar start completes, no clipping in WAV or AAC, and the gate is green.

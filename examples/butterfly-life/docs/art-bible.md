@@ -276,7 +276,7 @@ A scene may be asked for `t` slightly beyond its duration during a transition, s
 ## 8. Match cuts
 
 A match cut keeps a shape on the same pixels across a mode change.
-The shared geometry tables live in `docs/storyboard.md`, section "Shared geometry", and scenes copy those numbers exactly.
+The shared geometry tables live in `docs/storyboard.md`, section "Shared geometry", mirrored as data in `src/geo.js`; scenes read them with `lib.geo(id)` and gate check 7 measures the drawn edges on both sides of every listed cut.
 Line weights may change across the cut, positions may not.
 
 ## 9. Wordmark

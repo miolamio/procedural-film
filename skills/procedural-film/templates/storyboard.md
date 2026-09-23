@@ -41,11 +41,13 @@ The plan every agent works from. Fill each section; the guidance in *italics* is
 
 ## Shared geometry
 
-*Exact pixel tables for every shape that survives a match cut. Scenes copy these numbers exactly, or the match cuts jump.*
+*Exact pixel tables for every shape that survives a match cut, in frame pixels on the frames either side of the cut. Every table is mirrored as data in `src/geo.js` (shape in docs/CONTRACT.md, "Shared geometry"); scenes read it with `lib.geo(id)` instead of copying numbers, and gate check 7 measures each profile and outline on the rendered frames either side of its cuts. Name the cuts each table holds.*
 
-### G1: *<shape name>*
+*Pick the form by the shape. A shape symmetric about a vertical axis is a `profile`: half-widths by y. Anything else that must line up is an `outline`: the silhouette itself, sampled every few px in drawing order. Control points smoothed later round off every kink and tip, so they are not a contract. Anchors, projections and arcs are `points`, and centre lines are a `polyline`. Before signing off, draw each table once (`node tools/stubgen.cjs` draws every profile and outline in the stub pass) and check it reads as the thing it claims: a wing with no width, legs that cannot reach the ground, a label on the wrong feature. A wrong table compounds into every scene that uses it.*
 
-*e.g. the egg profile as half-widths by y, a polyline, an arc with centre and radius, a map projection with named anchor points.*
+### G1: *<shape name>* (shots NN, NN; cuts NN > NN)
+
+*e.g. the egg profile as half-widths by y, a sampled outline, an arc with centre and radius, a map projection with named anchor points.*
 
 ## Shots
 
