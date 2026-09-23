@@ -616,47 +616,344 @@
     postShot(ctx, shot, def, T);
   }
 
+  // How many frame starts fall strictly inside dur. Whip, inkwash and morph map the first of
+  // those to the outgoing shot (p = 0) and stay short of 1, so the frame at `dur` is the incoming shot.
+  function interiorFrames(dur) {
+    const span = (dur - EPS) * FILM.FPS;
+    if (!(span > 0)) return 0;
+    const f = Math.floor(span);
+    return span - f < 1e-9 ? f : f + 1;
+  }
+
+  const WHIP_DIR = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
+
+  function transitionColor(c, fallback) {
+    const pal = FILM.lib && FILM.lib.pal;
+    if (typeof c === 'string' && pal && pal[c]) return pal[c];
+    if (typeof c === 'string' && c.charAt(0) === '#') return c;
+    return fallback;
+  }
+
+  function hexRGB(hex) {
+    let h = String(hex || '').replace('#', '');
+    if (h.length === 3) h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
+    const n = parseInt(h.slice(0, 6), 16);
+    if (!(n >= 0)) return [42, 28, 19];
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  // Outgoing leaves along dir, incoming enters from the opposite side. Ease-in keeps the
+  // crossing readable late in the window; ghosts (lib.smear) and speed lines sit on the seam.
+  function whipComposite(ctx, A, B, tr, p, w, h) {
+    const d = WHIP_DIR[tr.dir];
+    if (!d) {
+      FILM.errors.push({ T: frameT, message: `whip dir '${tr.dir}' is not one of left, right, up, down` });
+      ctx.drawImage(B, 0, 0);
+      return;
+    }
+    const dx = d[0];
+    const dy = d[1];
+    const e = p * p * p;
+    let ox = 0, oy = 0, ix = 0, iy = 0;
+    if (dx !== 0) {
+      ox = Math.round(dx * w * e);
+      ix = dx > 0 ? ox - w : ox + w;
+    } else {
+      oy = Math.round(dy * h * e);
+      iy = dy > 0 ? oy - h : oy + h;
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(A, ox, oy);
+    ctx.drawImage(B, ix, iy);
+    const along = dx !== 0 ? w : h;
+    const band = Math.max(12, Math.round(along * 0.16));
+    const seam = dx !== 0 ? (dx > 0 ? ox : ix) : (dy > 0 ? oy : iy);
+    const lib = FILM.lib;
+    if (lib && typeof lib.smear === 'function') {
+      ctx.save();
+      ctx.beginPath();
+      if (dx !== 0) ctx.rect(seam - band, 0, band * 2, h);
+      else ctx.rect(0, seam - band, w, band * 2);
+      ctx.clip();
+      const smearAt = (img, x, y, sign) => {
+        lib.smear(ctx, (g, u) => {
+          const s = Math.round((u - 0.5) * band * 2.4);
+          g.drawImage(img, x + dx * s * sign, y + dy * s * sign);
+        }, { from: 0, to: 1, n: 4, mode: 'ghosts', alpha: 0.5, falloff: 1.4 });
+      };
+      smearAt(A, ox, oy, 1);
+      smearAt(B, ix, iy, -1);
+      ctx.restore();
+    }
+    const pal = lib && lib.pal;
+    const light = pal && pal.white ? pal.white : '#FBF6EA';
+    const dark = pal && pal.ink ? pal.ink : '#2A1C13';
+    const gain = Math.pow(Math.max(0.001, Math.sin(Math.PI * p)), 0.4);
+    const crossMax = dx !== 0 ? h : w;
+    const px = -dy;
+    const py = dx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    for (let i = 0; i < 22; i++) {
+      const cross = ihash(i, 3, 9) * crossMax;
+      const len = along * (0.22 + 0.48 * ihash(i, 5, 9)) * (0.4 + 0.6 * gain);
+      const half = len * 0.5;
+      const slide = (ihash(i, 7, 9) - 0.5) * along * 0.06;
+      const x1 = dx !== 0 ? seam - dx * half + slide : cross;
+      const y1 = dy !== 0 ? seam - dy * half + slide : cross;
+      const x2 = dx !== 0 ? seam + dx * half + slide : cross;
+      const y2 = dy !== 0 ? seam + dy * half + slide : cross;
+      const hw = (4 + ihash(i, 11, 9) * 9) * (0.55 + gain);
+      ctx.globalAlpha = (i % 4 === 0 ? 0.72 : 0.4) * (0.5 + 0.5 * gain);
+      ctx.fillStyle = i % 5 === 0 ? dark : light;
+      ctx.beginPath();
+      ctx.moveTo(x1 + px * hw, y1 + py * hw);
+      ctx.lineTo(x1 - px * hw, y1 - py * hw);
+      ctx.lineTo(x2, y2);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Threshold field cached by size and seed, never by time. A pixel turns on once p passes it,
+  // so the mask only grows. 255 stays off until the frame after the transition.
+  const inkFields = new Map();
+  let inkStore = null;
+
+  function inkField(w, h, seed) {
+    const key = w + 'x' + h + ':' + seed;
+    const hit = inkFields.get(key);
+    if (hit) return hit;
+    const thr = new Uint8Array(w * h);
+    thr.fill(255);
+    const blobs = 8;
+    const diag = Math.hypot(w, h);
+    const base = Math.min(w, h);
+    for (let b = 0; b < blobs; b++) {
+      const cx = (b === 0 ? 0.5 : 0.08 + 0.84 * ihash(b, seed, 1)) * w;
+      const cy = (b === 0 ? 0.48 : 0.07 + 0.86 * ihash(b, seed, 2)) * h;
+      const rad = (b === 0 ? 0.5 * diag : (0.13 + 0.12 * ihash(b, seed, 3)) * base);
+      const ph = ihash(b, seed, 4) * Math.PI * 2;
+      const aspect = b === 0 ? 0.86 : 0.7 + 0.55 * ihash(b, seed, 5);
+      const cph = Math.cos(ph);
+      const sph = Math.sin(ph);
+      const R = rad * 1.34;
+      const x0 = Math.max(0, cx - R) | 0;
+      const y0 = Math.max(0, cy - R) | 0;
+      const x1 = Math.min(w - 1, Math.ceil(cx + R));
+      const y1 = Math.min(h - 1, Math.ceil(cy + R));
+      const step = 2;
+      for (let y = y0; y <= y1; y += step) {
+        const dy = y - cy;
+        for (let x = x0; x <= x1; x += step) {
+          const dx = x - cx;
+          if (dx * dx + dy * dy > R * R) continue;
+          const d = Math.hypot(dx, dy) || 1;
+          const c = dx / d;
+          const s = dy / d;
+          const harm = (c * c - s * s) * cph + 2 * c * s * sph;
+          const ry = rad * (1 + 0.3 * harm);
+          const rx = ry * aspect;
+          const e = Math.hypot(dx / rx, dy / (ry * 0.9));
+          const t = e >= 1 ? 255 : Math.max(1, Math.min(254, Math.ceil(e * 254)));
+          for (let oy = 0; oy < step && y + oy < h; oy++) {
+            for (let ox = 0; ox < step && x + ox < w; ox++) {
+              const i = (y + oy) * w + (x + ox);
+              if (t < thr[i]) thr[i] = t;
+            }
+          }
+        }
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const c0 = thr[i];
+        if (c0 === 255) continue;
+        let t = c0 + ((ihash(x, y, seed + 17) - 0.5) * 28) | 0;
+        if (t < 1) t = 1;
+        else if (t > 254) t = 254;
+        thr[i] = t;
+      }
+    }
+    inkFields.set(key, thr);
+    return thr;
+  }
+
+  function inkPack(w, h) {
+    const cw = Math.max(1, w >> 1);
+    const ch = Math.max(1, h >> 1);
+    if (inkStore && inkStore.w === w && inkStore.h === h) return inkStore;
+    const mk = () => {
+      const c = makeCanvas(cw, ch);
+      const g = c.getContext('2d', { alpha: true, willReadFrequently: true });
+      return { c, g, img: g.createImageData(cw, ch) };
+    };
+    const mask = mk();
+    const rim = mk();
+    const hold = makeCanvas(w, h);
+    const bytes = new Uint8Array(4);
+    const word = (r, g, b, a) => {
+      bytes[0] = r;
+      bytes[1] = g;
+      bytes[2] = b;
+      bytes[3] = a;
+      return new Uint32Array(bytes.buffer)[0];
+    };
+    inkStore = {
+      w: w,
+      h: h,
+      cw: cw,
+      ch: ch,
+      mc: mask.c,
+      mg: mask.g,
+      mask: mask.img,
+      rc: rim.c,
+      rg: rim.g,
+      rim: rim.img,
+      hold: hold,
+      hg: hold.getContext('2d', { alpha: true, willReadFrequently: true }),
+      word: word,
+    };
+    return inkStore;
+  }
+
+  function inkwashComposite(ctx, A, B, tr, p, w, h) {
+    const seed = Number.isFinite(+tr.seed) ? (+tr.seed) | 0 : 1;
+    // Half the device grid: the stipple is already noisy, and a nearest upscale stays binary.
+    const cw = Math.max(1, w >> 1);
+    const ch = Math.max(1, h >> 1);
+    const thr = inkField(cw, ch, seed);
+    const cut = Math.max(0, Math.min(254, Math.round(p * 254)));
+    const pack = inkPack(w, h);
+    const md = pack.mask.data;
+    const rd = pack.rim.data;
+    const m32 = new Uint32Array(md.buffer, md.byteOffset, md.length >> 2);
+    const r32 = new Uint32Array(rd.buffer, rd.byteOffset, rd.length >> 2);
+    const rgb = hexRGB(transitionColor(tr.color, '#2A1C13'));
+    const onWord = pack.word(0, 0, 0, 255);
+    const rimWord = pack.word(rgb[0], rgb[1], rgb[2], 255);
+    const band = 18;
+    for (let i = 0; i < thr.length; i++) {
+      const t = thr[i];
+      if (t <= cut) {
+        m32[i] = onWord;
+        r32[i] = 0;
+      } else if (t !== 255 && t <= cut + band) {
+        m32[i] = 0;
+        r32[i] = rimWord;
+      } else {
+        m32[i] = 0;
+        r32[i] = 0;
+      }
+    }
+    pack.mg.putImageData(pack.mask, 0, 0);
+    pack.rg.putImageData(pack.rim, 0, 0);
+    const hg = pack.hg;
+    hg.setTransform(1, 0, 0, 1, 0, 0);
+    hg.globalAlpha = 1;
+    hg.globalCompositeOperation = 'source-over';
+    hg.clearRect(0, 0, w, h);
+    hg.imageSmoothingEnabled = false;
+    hg.drawImage(B, 0, 0);
+    hg.globalCompositeOperation = 'destination-in';
+    hg.drawImage(pack.mc, 0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(A, 0, 0);
+    ctx.drawImage(pack.hold, 0, 0);
+    ctx.drawImage(pack.rc, 0, 0, w, h);
+  }
+
+  function morphComposite(ctx, A, B, tr, p, w, h) {
+    const lib = FILM.lib;
+    let pts;
+    try {
+      if (!lib || typeof lib.morph !== 'function' || typeof lib.geo !== 'function') throw new Error('lib.morph is not available');
+      pts = lib.morph(lib.geo(tr.from).outline(), lib.geo(tr.to).outline(), p, { n: 160 });
+    } catch (err) {
+      FILM.errors.push({ T: frameT, message: `morph transition: ${err && err.message ? err.message : err}` });
+      ctx.drawImage(B, 0, 0);
+      return;
+    }
+    const open = 1 - Math.pow(1 - p, 1.6);
+    const s = 0.12 + 0.88 * open;
+    let cx = 0, cy = 0;
+    for (let i = 0; i < pts.length; i++) {
+      cx += pts[i][0];
+      cy += pts[i][1];
+    }
+    cx /= pts.length;
+    cy /= pts.length;
+    const Sx = w / FILM.W;
+    const Sy = h / FILM.H;
+    const path = new Path2D();
+    for (let i = 0; i < pts.length; i++) {
+      const x = (cx + (pts[i][0] - cx) * s) * Sx;
+      const y = (cy + (pts[i][1] - cy) * s) * Sy;
+      if (i === 0) path.moveTo(x, y);
+      else path.lineTo(x, y);
+    }
+    path.closePath();
+    ctx.drawImage(A, 0, 0);
+    ctx.save();
+    ctx.clip(path);
+    ctx.drawImage(B, 0, 0);
+    ctx.restore();
+    ctx.lineWidth = Math.max(2, 6 * Sx);
+    ctx.strokeStyle = (lib.pal && lib.pal.ink) || '#2A1C13';
+    ctx.lineJoin = 'round';
+    ctx.stroke(path);
+  }
+
   // fade, iris and wipe: A is the outgoing shot, B the incoming one, p in (0, 1) exclusive.
+  // whip, inkwash and morph include p = 0 (outgoing alone). Their p stays below 1 inside the window.
   function composite(ctx, A, B, tr, p) {
     resetCtx(ctx, true);
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
-    const e = easeInOutCubic(p);
-    ctx.drawImage(A, 0, 0);
-    switch (tr.kind) {
-      case 'fade':
-        ctx.globalAlpha = e;
-        ctx.drawImage(B, 0, 0);
-        break;
-      case 'iris': {
-        const S = w / FILM.W;
-        const cx = (tr.x != null ? tr.x : FILM.W / 2) * S;
-        const cy = (tr.y != null ? tr.y : FILM.H / 2) * S;
-        const R = Math.hypot(Math.max(cx, w - cx), Math.max(cy, h - cy));
-        ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(0.001, e * R), 0, Math.PI * 2);
-        ctx.clip();
-        ctx.drawImage(B, 0, 0);
-        break;
+    if (tr.kind === 'whip') whipComposite(ctx, A, B, tr, p, w, h);
+    else if (tr.kind === 'inkwash') inkwashComposite(ctx, A, B, tr, p, w, h);
+    else if (tr.kind === 'morph') morphComposite(ctx, A, B, tr, p, w, h);
+    else {
+      const e = easeInOutCubic(p);
+      ctx.drawImage(A, 0, 0);
+      switch (tr.kind) {
+        case 'fade':
+          ctx.globalAlpha = e;
+          ctx.drawImage(B, 0, 0);
+          break;
+        case 'iris': {
+          const S = w / FILM.W;
+          const cx = (tr.x != null ? tr.x : FILM.W / 2) * S;
+          const cy = (tr.y != null ? tr.y : FILM.H / 2) * S;
+          const R = Math.hypot(Math.max(cx, w - cx), Math.max(cy, h - cy));
+          ctx.beginPath();
+          ctx.arc(cx, cy, Math.max(0.001, e * R), 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(B, 0, 0);
+          break;
+        }
+        case 'wipe': {
+          const dir = tr.dir || 'down';
+          ctx.beginPath();
+          if (dir === 'up') ctx.rect(0, h * (1 - e), w, h * e);
+          else if (dir === 'left') ctx.rect(w * (1 - e), 0, w * e, h);
+          else if (dir === 'right') ctx.rect(0, 0, w * e, h);
+          else ctx.rect(0, 0, w, h * e);
+          ctx.clip();
+          ctx.drawImage(B, 0, 0);
+          break;
+        }
+        default:
+          ctx.drawImage(B, 0, 0);
       }
-      case 'wipe': {
-        const dir = tr.dir || 'down';
-        ctx.beginPath();
-        if (dir === 'up') ctx.rect(0, h * (1 - e), w, h * e);
-        else if (dir === 'left') ctx.rect(w * (1 - e), 0, w * e, h);
-        else if (dir === 'right') ctx.rect(0, 0, w * e, h);
-        else ctx.rect(0, 0, w, h * e);
-        ctx.clip();
-        ctx.drawImage(B, 0, 0);
-        break;
-      }
-      default:
-        ctx.drawImage(B, 0, 0);
     }
     resetCtx(ctx, false);
   }
 
-  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1 };
+  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1 };
   FILM.TRANSITION_KINDS = Object.keys(KINDS);
 
   /** Draws global time T (seconds) to FILM.canvas. Returns the active shot entry. */
@@ -707,13 +1004,23 @@
       drawShot(ctx, shot, T, false);
       return shot;
     }
-    // p runs strictly between the two shots: frame 0 is already 1/(n+1) of the way in, the last
-    // transition frame (n-1) is n/(n+1), so neither shot's own frame is repeated.
+    // fade, iris and wipe: frame 0 is already 1/(n+1) of the way in, the last transition frame
+    // (n-1) is n/(n+1), so neither shot's own frame is repeated.
+    // whip, inkwash and morph: p = 0 on the first frame (outgoing shot alone). p stays below 1
+    // until dur has elapsed, and that next frame is the incoming shot alone.
+    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph';
+    const p = fresh
+      ? clamp01(k / Math.max(1, interiorFrames(tr.dur)))
+      : clamp01((k + 1) / (n + 1));
+    if (fresh && !(p > 0)) {
+      drawShot(ctx, prev, T, true);
+      return shot;
+    }
     const A = layer(0);
     const B = layer(1);
     drawShot(A.ctx, prev, T, true);
     drawShot(B.ctx, shot, T, false);
-    composite(ctx, A.canvas, B.canvas, tr, clamp01((k + 1) / (n + 1)));
+    composite(ctx, A.canvas, B.canvas, tr, p);
     return shot;
   };
 })();
