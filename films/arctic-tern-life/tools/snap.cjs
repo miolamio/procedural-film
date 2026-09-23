@@ -17,6 +17,11 @@
 //   --out path      output directory (relative to the project root), or a .png path for a single frame
 //   --scale s       render scale (default 1 = 1080x1920)
 //   --fixtures      use tools/fixtures instead of src
+//   --crop x,y,w,h  also write that region of every frame at render resolution (1080-wide frame px); separate
+//                   several regions with ';' ("--crop '300,500,480,480;600,1200,300,300'"): the native-scale
+//                   evidence of the three-scale review, next to the full frame and the contact sheet
+//   --geo a,b       stroke those FILM.GEO entries (src/geo.js) over every frame in magenta: silhouettes, polylines,
+//                   named points. Snap both sides of a match cut with the same --geo to compare them.
 'use strict';
 
 const fs = require('fs');
@@ -67,6 +72,15 @@ async function main() {
   const outDir = singleFile ? path.dirname(outPath) : outPath;
   fs.mkdirSync(outDir, { recursive: true });
   const prefix = (shot ? shot.id : fixtures ? 'fixtures' : 'film') + (args.only ? '-only' : '');
+  const crops = typeof args.crop === 'string'
+    ? args.crop.split(';').filter((x) => x.trim()).map((x) => {
+        const v = x.split(',').map((n) => Number(n.trim()));
+        if (v.length !== 4 || !v.every((n) => isFinite(n)) || v[2] <= 0 || v[3] <= 0) C.die(`--crop wants x,y,w,h in frame px; got '${x}'`);
+        return v;
+      })
+    : [];
+  const geoIds = typeof args.geo === 'string' ? args.geo.split(',').map((x) => x.trim()).filter(Boolean) : [];
+  if (args.geo && !geoIds.length) C.die('--geo needs entry ids, e.g. --geo G1');
 
   const browser = await C.launch();
   const t0 = Date.now();
@@ -90,11 +104,27 @@ async function main() {
     for (let i = 0; i < times.length; i++) {
       const T = times[i];
       const r = await pg.page.evaluate((T) => window.__h.render(T), T);
+      if (geoIds.length) {
+        const err = await pg.page.evaluate((ids) => {
+          try {
+            window.__h.overlayGeo(ids);
+            return null;
+          } catch (e) {
+            return e.message;
+          }
+        }, geoIds);
+        if (err) C.die(`--geo: ${err}`);
+      }
       const png = Buffer.from(await pg.page.evaluate(() => window.__h.png()), 'base64');
       const name = singleFile && times.length === 1 && !args.sheet ? path.basename(outPath) : `${prefix}-T${C.fmtT(T).padStart(7, '0')}.png`;
       const file = path.join(outDir, name);
       fs.writeFileSync(file, png);
       written.push(file);
+      for (const [x, y, w, h] of crops) {
+        const cf = file.replace(/\.png$/i, '') + `-crop-${x}_${y}_${w}x${h}.png`;
+        fs.writeFileSync(cf, Buffer.from(await pg.page.evaluate((b) => window.__h.cropPng(...b), [x, y, w, h]), 'base64'));
+        written.push(cf);
+      }
       const sh = TL.shots.find((s) => s.id === r.shot);
       const local = sh ? T - sh.start : 0;
       console.log(`T=${C.fmtT(T)}  f${String(Math.floor(T * FPS + 1e-6)).padStart(4, '0')}  ${r.shot}  t=${local.toFixed(3)}  ${r.ms.toFixed(0)}ms  -> ${file}`);

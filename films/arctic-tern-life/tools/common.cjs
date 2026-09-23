@@ -98,6 +98,133 @@ function loadTimeline(file) {
   return normalizeTimeline(tl);
 }
 
+/** Evaluate geo.js in a sandbox. Returns FILM.GEO ({} when the file sets nothing). */
+function loadGeo(file) {
+  const code = fs.readFileSync(file, 'utf8');
+  const FILM = { W: 1080, H: 1920, FPS };
+  const sandbox = { FILM, console, Math };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: file, timeout: 2000 });
+  return sandbox.FILM.GEO || {};
+}
+
+/** First crossing between two non-adjacent edges of a closed polygon, or null. */
+function selfCrossing(pts) {
+  const n = pts.length;
+  const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      const c = pts[j], d = pts[(j + 1) % n];
+      const d1 = cross(a, b, c), d2 = cross(a, b, d), d3 = cross(c, d, a), d4 = cross(c, d, b);
+      if (d1 * d2 < 0 && d3 * d4 < 0) return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    }
+  }
+  return null;
+}
+
+/**
+ * Static checks on FILM.GEO against the timeline. Returns { problems, warnings, frames }, where
+ * frames lists every frame to measure: { id, T, label, cut? } per side of each declared cut and per 'at'.
+ *   profile  : { kind: 'profile', cx, ys, hs, shots, cuts?: ['a>b', ...], at?: [{ shot, t }] }
+ *   outline  : { kind: 'outline', pts: [[x, y], ...] closed and densely sampled, shots, cuts?, at? }
+ *   points   : { kind: 'points', pts: { name: [x, y] }, shots }
+ *   polyline : { kind: 'polyline', pts: [[x, y], ...], shots }
+ * cuts defaults to every pair of consecutive listed shots; 'a>b' measures a's last and b's first frame.
+ */
+function validateGeo(geo, tl, { W = 1080, H = 1920 } = {}) {
+  const problems = [];
+  const warnings = [];
+  const frames = [];
+  if (!geo || typeof geo !== 'object' || Array.isArray(geo)) return { problems: ['FILM.GEO is not an object'], warnings, frames };
+  const byId = new Map(tl.shots.map((s) => [s.id, s]));
+  const num = (v) => typeof v === 'number' && isFinite(v);
+  const inFrame = (x, y) => x >= -W && x <= 2 * W && y >= -H && y <= 2 * H; // generous: shapes may run off-frame
+  const firstT = (s) => s.start;
+  const lastT = (s) => Math.max(s.start, (Math.round(s.end * FPS) - 1) / FPS);
+  for (const [id, g] of Object.entries(geo)) {
+    const at = `GEO.${id}`;
+    if (!g || typeof g !== 'object') {
+      problems.push(`${at} is not an object`);
+      continue;
+    }
+    const shots = Array.isArray(g.shots) ? g.shots : [];
+    if (!shots.length) problems.push(`${at}: "shots" must list the shots that draw it`);
+    for (const s of shots) if (!byId.has(s)) problems.push(`${at}: shot '${s}' is not in the timeline`);
+    if (g.kind === 'profile' || g.kind === 'outline') {
+      if (g.kind === 'profile') {
+        const { ys, hs } = g;
+        if (!num(g.cx)) problems.push(`${at}: cx must be a number`);
+        if (!Array.isArray(ys) || !Array.isArray(hs) || ys.length !== hs.length || ys.length < 3) {
+          problems.push(`${at}: ys and hs must be arrays of the same length, at least 3`);
+          continue;
+        }
+        if (![...ys, ...hs].every(num)) problems.push(`${at}: ys and hs must hold numbers only`);
+        for (let i = 1; i < ys.length; i++) if (!(ys[i] > ys[i - 1])) problems.push(`${at}: ys must increase (${ys[i - 1]} then ${ys[i]})`);
+        if (hs.some((h) => h < 0)) problems.push(`${at}: half-widths must be >= 0`);
+        if (num(g.cx) && !inFrame(g.cx, ys[0])) problems.push(`${at}: cx ${g.cx} is far outside the frame`);
+      } else {
+        const pts = g.pts;
+        if (!Array.isArray(pts) || pts.length < 8 || !pts.every((p) => Array.isArray(p) && p.length === 2 && p.every(num))) {
+          problems.push(`${at}: pts must be at least 8 [x, y] points (the sampled outline, not control points)`);
+          continue;
+        }
+        let area = 0, longest = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const [x0, y0] = pts[i], [x1, y1] = pts[(i + 1) % pts.length];
+          area += x0 * y1 - x1 * y0;
+          longest = Math.max(longest, Math.hypot(x1 - x0, y1 - y0));
+        }
+        area = Math.abs(area) / 2;
+        if (area < 400) problems.push(`${at}: the outline encloses ${area.toFixed(0)} px², so it has no body; check the point order`);
+        if (longest > 40) warnings.push(`${at}: a ${longest.toFixed(0)} px gap between outline points: pts should be the drawn outline sampled every few px, not control points to smooth`);
+        const cross = selfCrossing(pts);
+        if (cross) warnings.push(`${at}: the outline crosses itself near (${cross.map((v) => v.toFixed(0)).join(', ')})`);
+      }
+      // frames to measure
+      let cuts = g.cuts;
+      if (cuts == null) {
+        cuts = [];
+        const listed = tl.shots.filter((s) => shots.includes(s.id));
+        for (let i = 1; i < listed.length; i++) if (listed[i].index === listed[i - 1].index + 1) cuts.push(`${listed[i - 1].id}>${listed[i].id}`);
+      }
+      if (!Array.isArray(cuts)) problems.push(`${at}: cuts must be an array of 'a>b' strings`);
+      else
+        for (const c of cuts) {
+          const [a, b] = String(c).split('>').map((x) => x && x.trim());
+          const A = byId.get(a), B = byId.get(b);
+          if (!A || !B) problems.push(`${at}: cut '${c}' names a shot that is not in the timeline`);
+          else if (B.index !== A.index + 1 && !(A.index === tl.shots.length - 1 && B.index === 0)) problems.push(`${at}: cut '${c}': '${b}' does not follow '${a}'`);
+          else {
+            if (B.transitionIn && B.transitionIn.kind !== 'cut' && B.transitionIn.dur > 0) warnings.push(`${at}: cut '${c}' is a ${B.transitionIn.kind}, not a hard cut; its first frame blends both shots`);
+            frames.push({ id, T: lastT(A), label: `${a} last`, cut: c }, { id, T: firstT(B), label: `${b} first`, cut: c });
+          }
+        }
+      for (const x of Array.isArray(g.at) ? g.at : []) {
+        const S = x && byId.get(x.shot);
+        if (!S || !num(x.t) || x.t < 0 || x.t >= S.dur) problems.push(`${at}: at ${JSON.stringify(x)} needs a timeline shot and 0 <= t < its length`);
+        else frames.push({ id, T: S.start + Math.round(x.t * FPS) / FPS, label: `${x.shot} t=${x.t}` });
+      }
+      if (!frames.some((f) => f.id === id)) warnings.push(`${at}: no cut or 'at' frame to measure (list two consecutive shots, or add at: [{ shot, t }])`);
+    } else if (g.kind === 'points') {
+      if (!g.pts || typeof g.pts !== 'object' || Array.isArray(g.pts) || !Object.keys(g.pts).length) problems.push(`${at}: pts must be an object of named [x, y] points`);
+      else
+        for (const [k, p] of Object.entries(g.pts)) {
+          if (!Array.isArray(p) || p.length !== 2 || !p.every(num)) problems.push(`${at}.pts.${k} must be [x, y]`);
+          else if (!inFrame(p[0], p[1])) warnings.push(`${at}.pts.${k} (${p}) is far outside the frame`);
+        }
+    } else if (g.kind === 'polyline') {
+      if (!Array.isArray(g.pts) || g.pts.length < 2 || !g.pts.every((p) => Array.isArray(p) && p.length === 2 && p.every(num))) problems.push(`${at}: pts must be at least two [x, y] points`);
+    } else {
+      problems.push(`${at}: kind '${g.kind}' is not one of profile, outline, points, polyline`);
+    }
+  }
+  return { problems, warnings, frames };
+}
+
 /**
  * Work out every file to load, in contract order, and validate that the timeline and each
  * shot's file exist. Returns { files, timeline, base, sceneFiles, shotFile(id), musicFile, warnings }.
@@ -143,16 +270,18 @@ function sources({ fixtures = false, only = null, player = true, needMusic = fal
     else if (!fs.existsSync(shotFile(shot))) problems.push(`shot '${shot.id}' names file '${shot.file}', which does not exist at ${rel(shotFile(shot))}`);
   }
   const warnings = [];
+  const geoFile = path.join(base, 'geo.js'); // optional: shared geometry, loaded right after the timeline
+  const geo = fs.existsSync(geoFile) ? [geoFile] : [];
   let files;
   if (only) {
     const shot = timeline.shots.find((s) => s.id === only);
-    if (!shot) die(`--only: no shot with id '${only}' in ${label}/timeline.js. Ids: ${timeline.shots.map((s) => s.id).join(', ')}`);
+    if (!shot) die(`no shot with id '${only}' in ${label}/timeline.js. Ids: ${timeline.shots.map((s) => s.id).join(', ')}`);
     const f = shotFile(shot);
     if (!f || !fs.existsSync(f)) die(`shot '${only}': ${problems.find((p) => p.includes(`'${only}'`)) || 'file missing'}`);
-    files = [core, lib, tlFile, f];
+    files = [core, lib, tlFile, ...geo, f];
   } else {
     if (problems.length && !lenient) die(`timeline problems:\n  - ${problems.join('\n  - ')}`);
-    files = [core, lib, tlFile, ...sceneFiles];
+    files = [core, lib, tlFile, ...geo, ...sceneFiles];
     const musicFile = path.join(base, 'music.js');
     if (fs.existsSync(musicFile)) files.push(musicFile);
     else if (needMusic) die(`${label}/music.js is missing. The music agent writes it. Pass --silent to render without it.`);
@@ -167,6 +296,7 @@ function sources({ fixtures = false, only = null, player = true, needMusic = fal
     label,
     scenesDir,
     sceneFiles,
+    geoFile: geo[0] || null,
     shotFile,
     musicFile: fs.existsSync(musicFile) ? musicFile : null,
     warnings,
@@ -196,7 +326,78 @@ function uniqueName(prefix) {
 
 // Harness injected into tool pages only (never shipped). It may use performance.now.
 const HARNESS = `
+(function () {
+  // count canvases created by the film (tools only): a warm second pass that creates more means a cache that churns
+  const make = document.createElement.bind(document);
+  window.__canvases = 0;
+  document.createElement = function (tag, o) {
+    const el = make(tag, o);
+    if (String(tag).toLowerCase() === 'canvas') window.__canvases++;
+    return el;
+  };
+})();
 window.__h = {
+  canvases() {
+    return window.__canvases;
+  },
+  // Measure a profile or outline silhouette on the bare frame at T: at K points round it, find the strongest
+  // luminance edge within +-win px along the outward normal. Returns the offsets in 1080-wide px
+  // (positive = outside the silhouette), each edge's strength, and for a profile its side (-1 left, +1 right).
+  geoMeasure(id, T, win, K) {
+    const g = FILM.lib.geo(id);
+    FILM.errors = [];
+    FILM.post = false;
+    FILM.renderFrame(T);
+    FILM.post = true;
+    const c = FILM.canvas, W = c.width, H = c.height, S = W / FILM.W;
+    const d = FILM.ctx.getImageData(0, 0, W, H).data;
+    const lum = (x, y) => { const k = (y * W + x) * 4; return 0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2]; };
+    // K points evenly spaced by arc length round the outline (a profile is sampled into one first);
+    // at each, scan along the outward normal for the strongest luminance step
+    const P = g.kind === 'outline' ? g.pts : g.outline(4), m = P.length;
+    let area = 0;
+    const cum = [0];
+    for (let i = 0; i < m; i++) {
+      const a = P[i], b = P[(i + 1) % m];
+      area += a[0] * b[1] - b[0] * a[1];
+      cum.push(cum[i] + Math.hypot(b[0] - a[0], b[1] - a[1]));
+    }
+    const out = area > 0 ? 1 : -1; // y points down: a positive shoelace sum runs clockwise on screen
+    const L = cum[m];
+    const lumAt = (x, y) => {
+      const px = Math.round(x * S), py = Math.round(y * S);
+      return px < 0 || py < 0 || px >= W || py >= H ? null : lum(px, py);
+    };
+    // taps along the tangent: an edge that runs with the outline sums up, hatching or a lattice crossing it averages out
+    const TAPS = [-9, -6, -3, 0, 3, 6, 9];
+    const rows = [];
+    let j = 0;
+    for (let k = 0; k < K; k++) {
+      const s = (L * (k + 0.5)) / K;
+      while (cum[j + 1] < s) j++;
+      const a = P[j], b = P[(j + 1) % m];
+      const len = cum[j + 1] - cum[j] || 1, u = (s - cum[j]) / len;
+      const x = a[0] + (b[0] - a[0]) * u, y = a[1] + (b[1] - a[1]) * u;
+      const tx = (b[0] - a[0]) / len, ty = (b[1] - a[1]) / len;
+      const nx = -ty * out, ny = tx * out;
+      let best = -1, bt = 0;
+      for (let t = -win; t <= win; t += 1 / S) {
+        let A = 0, B = 0, ok = true;
+        for (const w of TAPS) {
+          const la = lumAt(x + nx * (t - 2.5) + tx * w, y + ny * (t - 2.5) + ty * w);
+          const lb = lumAt(x + nx * (t + 2.5) + tx * w, y + ny * (t + 2.5) + ty * w);
+          if (la == null || lb == null) { ok = false; break; }
+          A += la; B += lb;
+        }
+        if (!ok) continue;
+        const gr = Math.abs(A - B) / TAPS.length;
+        if (gr > best) { best = gr; bt = t; }
+      }
+      const side = g.kind === 'profile' ? (x < g.cx - 0.5 ? -1 : x > g.cx + 0.5 ? 1 : 0) : 0;
+      if (best >= 0) rows.push({ x: Math.round(x), y: Math.round(y), side, off: Math.round(bt * 10) / 10, edge: Math.round(best) });
+    }
+    return { rows, errors: FILM.errors.map((e) => e.message) };
+  },
   mount(scale, only) {
     const c = document.createElement('canvas');
     c.id = 'tool-canvas';
@@ -218,6 +419,46 @@ window.__h = {
   },
   png() {
     return FILM.canvas.toDataURL('image/png').slice(22);
+  },
+  // a region of the drawn frame at render resolution; x, y, w, h in 1080-wide frame px
+  cropPng(x, y, w, h) {
+    const S = FILM.canvas.width / FILM.W;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * S));
+    c.height = Math.max(1, Math.round(h * S));
+    c.getContext('2d').drawImage(FILM.canvas, Math.round(x * S), Math.round(y * S), c.width, c.height, 0, 0, c.width, c.height);
+    return c.toDataURL('image/png').slice(22);
+  },
+  // stroke a FILM.GEO entry over the drawn frame (review only): silhouettes and polylines as a line, points as rings
+  overlayGeo(ids) {
+    const ctx = FILM.ctx, S = FILM.canvas.width / FILM.W;
+    ctx.save();
+    ctx.setTransform(S, 0, 0, S, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = '#ff2a6d';
+    ctx.fillStyle = '#ff2a6d';
+    ctx.lineWidth = 2;
+    ctx.font = '600 22px ui-monospace, Menlo, monospace';
+    for (const id of ids) {
+      const g = FILM.lib.geo(id);
+      if (g.kind === 'points') {
+        for (const [name, p] of Object.entries(g.pts)) {
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], 9, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillText(name, p[0] + 12, p[1] - 10);
+        }
+        continue;
+      }
+      const P = g.kind === 'polyline' ? g.pts : g.outline(4);
+      ctx.beginPath();
+      P.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+      if (g.kind !== 'polyline') ctx.closePath();
+      ctx.stroke();
+      ctx.fillText(id, P[0][0] + 8, P[0][1] - 8);
+    }
+    ctx.restore();
   },
   hash() {
     const c = FILM.canvas;
@@ -308,7 +549,7 @@ async function launch(extraArgs = []) {
 /**
  * Open a page with the given files loaded (contract order), mount the canvas at scale.
  *   only: shot id when only that shot's file is loaded (sets FILM.only, so core skips transitions from unloaded shots)
- * Returns { page, info, state, loadErrors, tmpFile, pageErrors, consoleErrors, reopen, close }.
+ * Returns { page, info, state, loadErrors, tmpFile, pageErrors, consoleErrors, blocked, reopen, close }.
  * reopen() navigates the same page again: fresh JS state, nothing drawn yet, canvas mounted.
  */
 async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?render=1', only = null } = {}) {
@@ -317,6 +558,22 @@ async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?
   fs.writeFileSync(tmpFile, pageHtml(files, { title: prefix }));
   const forget = cleanupOnExit(tmpFile);
   const context = await browser.newContext({ viewport: { width: 540, height: 960 }, deviceScaleFactor: 1 });
+  // The film may request nothing: every URL other than this page and its own script files is aborted and
+  // recorded in pg.blocked (check 1 fails on it), so media fetched at run time cannot slip past the scan.
+  const allowed = new Set([tmpFile, ...files].map((f) => 'file://' + f));
+  const blocked = [];
+  await context.route('**/*', (route) => {
+    const url = route.request().url();
+    let bare = url.split(/[?#]/)[0];
+    try {
+      bare = decodeURI(bare);
+    } catch (e) {
+      /* keep it encoded */
+    }
+    if (allowed.has(bare)) return route.continue();
+    blocked.push(url.slice(0, 160));
+    return route.abort();
+  });
   const page = await context.newPage();
   const pageErrors = [];
   const consoleErrors = [];
@@ -324,7 +581,7 @@ async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?
   page.on('console', (m) => {
     if (m.type() === 'error') consoleErrors.push(m.text());
   });
-  const pg = { page, info: null, state: null, loadErrors: [], pageErrors, consoleErrors, tmpFile };
+  const pg = { page, info: null, state: null, loadErrors: [], pageErrors, consoleErrors, tmpFile, blocked };
   pg.reopen = async () => {
     await page.goto('file://' + tmpFile + query, { waitUntil: 'load' });
     pg.loadErrors = await page.evaluate(() => window.__loadErrors);
@@ -435,6 +692,8 @@ module.exports = {
   rel,
   loadTimeline,
   normalizeTimeline,
+  loadGeo,
+  validateGeo,
   sources,
   uniqueName,
   cleanupOnExit,

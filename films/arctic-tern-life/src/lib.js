@@ -452,6 +452,91 @@
     return out;
   };
 
+  /**
+   * geo(id) : a shared-geometry entry from FILM.GEO (src/geo.js), the machine-readable copy of the
+   * storyboard's Shared geometry tables. Scenes that share a shape across a match cut read it here
+   * instead of copying numbers, and tools/check.cjs measures the drawn frames against it.
+   *   kind 'profile'  : a silhouette symmetric about x = cx, half-widths hs at heights ys (ys increasing).
+   *                     hw(y) interpolates with a monotone cubic (Fritsch-Carlson), so every table value
+   *                     is hit exactly and the curve never overshoots between them.
+   *                     x(y, side) : edge x (side -1 left, +1 right); side(sign, step) : one edge, top to
+   *                     bottom; outline(step) : the closed silhouette, clockwise from the top left;
+   *                     widest : { y, hw }.
+   *   kind 'outline'  : any closed silhouette, pts already sampled densely (<= 12 px apart) in the order it is
+   *                     drawn. It is the drawn outline, not control points: draw it as it stands
+   *                     (inkPath(ctx, g.outline(), { closed: true, smooth: false })), because smoothing
+   *                     control points rounds off every kink and tip the storyboard drew.
+   *   kind 'points'   : named anchors. pt(name) returns [x, y] and throws on a misspelt name.
+   *   kind 'polyline' : an ordered point list, pts.
+   * Every entry also carries its table fields (cx, ys, hs, pts, shots, cuts, ...) read-only.
+   */
+  const geoCache = new Map();
+  function monotoneSlopes(ys, hs) {
+    const n = ys.length;
+    const d = [];
+    const m = new Array(n).fill(0);
+    for (let i = 0; i < n - 1; i++) d.push((hs[i + 1] - hs[i]) / (ys[i + 1] - ys[i]));
+    m[0] = d[0];
+    m[n - 1] = d[n - 2];
+    for (let i = 1; i < n - 1; i++) {
+      if (d[i - 1] * d[i] <= 0) continue;
+      const h0 = ys[i] - ys[i - 1], h1 = ys[i + 1] - ys[i];
+      const w1 = 2 * h1 + h0, w2 = h1 + 2 * h0;
+      m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+    }
+    return m;
+  }
+  function makeGeo(id, g) {
+    const deep = (v) => (Array.isArray(v) ? Object.freeze(v.map(deep)) : v && typeof v === 'object' ? Object.freeze(Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)]))) : v);
+    const out = Object.assign({ id }, deep(g));
+    if (g.kind === 'profile') {
+      const ys = g.ys, hs = g.hs, n = ys.length, cx = g.cx;
+      const m = monotoneSlopes(ys, hs);
+      const hw = (y) => {
+        if (y <= ys[0]) return hs[0];
+        if (y >= ys[n - 1]) return hs[n - 1];
+        let i = 0;
+        while (ys[i + 1] < y) i++;
+        const h = ys[i + 1] - ys[i];
+        const s = (y - ys[i]) / h, s2 = s * s, s3 = s2 * s;
+        return (2 * s3 - 3 * s2 + 1) * hs[i] + (s3 - 2 * s2 + s) * h * m[i] + (-2 * s3 + 3 * s2) * hs[i + 1] + (s3 - s2) * h * m[i + 1];
+      };
+      const side = (sign, step = 6) => {
+        const pts = [];
+        for (let y = ys[0]; y < ys[n - 1]; y += step) pts.push([cx + sign * hw(y), y]);
+        pts.push([cx + sign * hs[n - 1], ys[n - 1]]);
+        return pts;
+      };
+      let wi = 0;
+      for (let i = 1; i < n; i++) if (hs[i] > hs[wi]) wi = i;
+      out.hw = hw;
+      out.x = (y, s = 1) => cx + s * hw(y);
+      out.side = side;
+      out.outline = (step = 6) => side(-1, step).concat(side(1, step).reverse());
+      out.widest = Object.freeze({ y: ys[wi], hw: hs[wi] });
+    } else if (g.kind === 'outline') {
+      out.outline = () => g.pts.map((p) => [p[0], p[1]]);
+    } else if (g.kind === 'points') {
+      out.pt = (name) => {
+        const p = g.pts[name];
+        if (!p) throw new Error(`FILM.GEO.${id} has no point '${name}' (it has: ${Object.keys(g.pts).join(', ')})`);
+        return [p[0], p[1]];
+      };
+    }
+    return Object.freeze(out);
+  }
+  lib.geo = (id) => {
+    const table = FILM.GEO;
+    const g = table && table[id];
+    if (!g) throw new Error(`FILM.GEO has no entry '${id}' (src/geo.js${table ? `; it has: ${Object.keys(table).join(', ')}` : ' is not loaded'})`);
+    let v = geoCache.get(id);
+    if (!v || v.src !== g) {
+      v = { src: g, geo: makeGeo(id, g) };
+      geoCache.set(id, v);
+    }
+    return v.geo;
+  };
+
   /** tracePath(ctx, pts, closed=true) : adds the polyline to the current path (no beginPath). */
   lib.tracePath = (ctx, pts, closed = true) => {
     for (let i = 0; i < pts.length; i++) {
