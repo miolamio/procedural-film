@@ -1,8 +1,8 @@
-// Fixture timeline for testing the tools (not the film). 14 seconds, 7 shots.
+// Fixture timeline for testing the tools (not the film). 16 seconds, 8 shots.
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 14,
+  duration: 16,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -11,6 +11,7 @@ FILM.TIMELINE = {
     { id: 'fx-draw-on', file: '05-fx-draw-on.js', start: 8, end: 10, mode: 'illustrated', brief: 'A closed shape and a spiral draw on with a nib; a running dash travels a line.' },
     { id: 'fx-pulse', file: '06-fx-pulse.js', start: 10, end: 12, mode: 'illustrated', brief: 'Circles pulse on fixture cues; metronome ticks on sixteenths.' },
     { id: 'fx-morph', file: '07-fx-morph.js', start: 12, end: 14, mode: 'illustrated', brief: 'Fixture egg morphs into the leaf and back, inked, hatched inside.' },
+    { id: 'fx-particles', file: '08-fx-particles.js', start: 14, end: 16, mode: 'schematic', brief: 'Sparks from a point, pollen over paper, smoke rising.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
