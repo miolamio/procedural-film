@@ -60,7 +60,7 @@ node examples/butterfly-life/tools/check.cjs
 node examples/butterfly-life/tools/render.cjs
 ```
 
-`check.cjs` runs the seven-check gate and exits 0 when green; `--shot <id>` gates one shot on its own.
+`check.cjs` runs the eight-check gate and exits 0 when green; `--shot <id>` gates one shot on its own.
 `render.cjs` writes `examples/butterfly-life/exports/butterfly-life.mp4`.
 `node examples/butterfly-life/tools/build.cjs` rebuilds the HTML player.
 

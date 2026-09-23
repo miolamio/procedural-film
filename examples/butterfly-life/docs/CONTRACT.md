@@ -32,7 +32,7 @@ The look and editing follow `docs/reference-analysis.md`.
 | `tools/snap.cjs` | foundation | Renders PNG stills and contact sheets headlessly for review. |
 | `tools/build.cjs` | foundation | Inlines everything into `dist/butterfly-life.html`. |
 | `tools/render.cjs` | foundation | Renders the MP4 with audio into `exports/`. |
-| `tools/check.cjs` | foundation | Automated checks: no media, determinism, full timeline coverage, every scene draws without throwing, frame cost, shared geometry measured on the match cuts. |
+| `tools/check.cjs` | foundation | Automated checks: no media, determinism, full timeline coverage, every scene draws without throwing, frame cost, shared geometry measured on the match cuts, and (fixtures only) lib asserts. |
 | `docs/storyboard.md`, `docs/art-bible.md` | storyboard | The human-readable plan and the visual rules for this film. |
 
 Load order everywhere: `core.js`, `lib.js`, `timeline.js`, `geo.js` (when present), scene files sorted by filename, `music.js`, `player.js`.
@@ -126,6 +126,8 @@ node tools/check.cjs                                                # all automa
 node tools/check.cjs --shot <id>                                   # one shot loaded alone: a scene agent's gate while siblings are half-written
 node tools/render.cjs [--from 0 --to 30] [--scale 0.5] [--out exports/name.mp4]
 ```
+
+Check 8 «lib» loads `tools/fixtures/asserts/*.js` only when the gate runs with `--fixtures`, after the engine. Each file calls `FILM.assert(name, fn)`. The check page (not the shipped film) provides `FILM.expect.eq`, `FILM.expect.near(a, b, eps = 1e-6)`, `FILM.expect.true`, `FILM.expect.throws(fn, re?)` and `FILM.pixels(canvas)` with `count(pred)` and `hash()`. `pred` receives `(r, g, b, a, x, y)`. A run with no asserts directory passes as "no asserts". Assert files are scanned like sources and are not inlined by `build.cjs` or `render.cjs`.
 
 `snap.cjs` writes a unique temporary HTML page per run under `.tmp/`, so several agents can render at the same time without clashing.
 `--only` (snap) and `--shot` (check) exist so a shot can be rendered and gated while a sibling shot file is half-written; every check run also loads a snapshot of the sources taken at its start.

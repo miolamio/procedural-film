@@ -398,6 +398,21 @@ window.__h = {
     }
     return { rows, errors: FILM.errors.map((e) => e.message) };
   },
+  // Run FILM.assert registrations one at a time. An async fn is awaited; a throw becomes ok: false.
+  async runAsserts() {
+    const list = (window.FILM && FILM._asserts) || [];
+    const out = [];
+    for (const t of list) {
+      const t0 = performance.now();
+      try {
+        await t.fn();
+        out.push({ file: t.file, name: t.name, ok: true, message: '', ms: performance.now() - t0 });
+      } catch (e) {
+        out.push({ file: t.file, name: t.name, ok: false, message: (e && (e.message || String(e))) || 'assert failed', ms: performance.now() - t0 });
+      }
+    }
+    return out;
+  },
   mount(scale, only) {
     const c = document.createElement('canvas');
     c.id = 'tool-canvas';
@@ -524,6 +539,81 @@ window.__h = {
 };
 `;
 
+// Check 8 registers tests from tools/fixtures/asserts/*.js, which run as page scripts before the harness.
+// Defined here, not in core.js, so a film that never calls it keeps today's pixels. core.js keeps this object
+// (root.FILM = root.FILM || {}), so the methods survive the engine booting.
+const ASSERT_PREAMBLE = `
+<script>
+(function () {
+  var root = window;
+  var FILM = (root.FILM = root.FILM || {});
+  if (FILM.assert) return;
+  FILM._asserts = [];
+  FILM.assert = function (name, fn) {
+    var src = (document.currentScript && document.currentScript.src) || '';
+    var file = src ? decodeURIComponent(src.split(/[?#]/)[0].split('/').pop()) : '';
+    FILM._asserts.push({ file: file, name: String(name), fn: fn });
+  };
+  function fail(msg) { throw new Error(msg); }
+  function show(v) { try { return JSON.stringify(v); } catch (e) { return String(v); } }
+  function same(a, b) {
+    if (Object.is(a, b)) return true;
+    if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+      for (var i = 0; i < a.length; i++) if (!same(a[i], b[i])) return false;
+      return true;
+    }
+    return false;
+  }
+  FILM.expect = {
+    eq: function (a, b) { if (!same(a, b)) fail('expected ' + show(a) + ' === ' + show(b)); },
+    near: function (a, b, eps) {
+      if (eps == null) eps = 1e-6;
+      if (typeof a === 'number' && typeof b === 'number') {
+        if (!(Math.abs(a - b) <= eps)) fail('expected ' + a + ' ≈ ' + b + ' (±' + eps + ')');
+        return;
+      }
+      if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+        for (var i = 0; i < a.length; i++) FILM.expect.near(a[i], b[i], eps);
+        return;
+      }
+      fail('near() needs numbers or arrays, got ' + show(a) + ' and ' + show(b));
+    },
+    true: function (v, msg) { if (!v) fail(msg || 'expected a truthy value'); },
+    throws: function (fn, re) {
+      var err = null, threw = false;
+      try { fn(); } catch (e) { threw = true; err = e; }
+      if (!threw) fail('expected a throw');
+      if (re && !re.test(String(err && (err.message || err)))) fail('throw ' + show(err && err.message) + ' did not match ' + re);
+    },
+  };
+  FILM.pixels = function (canvas) {
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    var w = canvas.width, h = canvas.height;
+    var d = ctx.getImageData(0, 0, w, h).data;
+    return {
+      count: function (pred) {
+        var n = 0;
+        for (var y = 0, i = 0; y < h; y++) {
+          for (var x = 0; x < w; x++, i++) {
+            var k = i * 4;
+            if (pred(d[k], d[k + 1], d[k + 2], d[k + 3], x, y)) n++;
+          }
+        }
+        return n;
+      },
+      hash: function () {
+        var h1 = 0x811c9dc5 | 0, h2 = 0x01000193 | 0;
+        for (var i = 0; i < d.length; i++) {
+          h1 = Math.imul(h1 ^ d[i], 0x01000193);
+          if ((i & 3) === 3) h2 = Math.imul(h2 ^ h1, 0x5bd1e995);
+        }
+        return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
+      },
+    };
+  };
+})();
+</script>`;
+
 function pageHtml(files, { title = 'tool' } = {}) {
   const tags = files.map((f) => `<script src="file://${encodeURI(f)}"></script>`).join('\n');
   return `<!doctype html>
@@ -531,6 +621,7 @@ function pageHtml(files, { title = 'tool' } = {}) {
 <style>html,body{margin:0;background:#000}</style>
 <script>window.__loadErrors=[];window.addEventListener('error',function(e){window.__loadErrors.push({message:e.message,file:(e.filename||'').split('/').pop(),line:e.lineno,col:e.colno});});</script>
 </head><body>
+${ASSERT_PREAMBLE}
 ${tags}
 <script>${HARNESS}</script>
 </body></html>`;

@@ -32,7 +32,7 @@ The look and editing follow `docs/art-bible.md`.
 | `tools/stubgen.cjs` | foundation | Generates one placeholder scene per timeline shot (the stub pass). |
 | `tools/build.cjs` | foundation | Inlines everything into `dist/<slug>.html`. |
 | `tools/render.cjs` | foundation | Renders the MP4 with audio into `exports/`. |
-| `tools/check.cjs` | foundation | Automated checks: no media, determinism, full timeline coverage, every scene draws without throwing, frame cost. |
+| `tools/check.cjs` | foundation | Automated checks: no media, determinism, full timeline coverage, every scene draws without throwing, frame cost, shared geometry measured on the match cuts, and (fixtures only) lib asserts. |
 | `docs/storyboard.md`, `docs/art-bible.md` | storyboard | The human-readable plan and the visual rules for this film. |
 
 Load order everywhere: `core.js`, `lib.js`, `timeline.js`, scene files sorted by filename, `music.js`, `player.js`.
@@ -105,6 +105,8 @@ node tools/build.cjs                                               # writes dist
 node tools/check.cjs                                               # all automated checks, exits non-zero on failure
 node tools/render.cjs [--from 0 --to 30] [--scale 0.5] [--out exports/name.mp4]
 ```
+
+Check 8 «lib» loads `tools/fixtures/asserts/*.js` only with `--fixtures`. Each file calls `FILM.assert(name, fn)`. The check page provides `FILM.expect` (`eq`, `near`, `true`, `throws`) and `FILM.pixels(canvas)` (`count`, `hash`). A run with no asserts passes as "no asserts".
 
 `snap.cjs` writes a unique temporary HTML page per run under `.tmp/`, so several agents can render at the same time without clashing.
 `--only` exists so a shot can be rendered while a sibling shot file is half-written.

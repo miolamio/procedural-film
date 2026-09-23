@@ -25,6 +25,8 @@
 //   7 geometry     src/geo.js (optional) is well formed and names real shots, and every profile or outline is
 //                  measured on the rendered frames either side of each declared match cut: its edges must sit
 //                  within --geo-tol px (default 12) of the table on most rows, or the cut jumps
+//   8 lib          with --fixtures, run tools/fixtures/asserts/*.js (FILM.assert). No asserts directory → PASS
+//                  "no asserts". A film check (no --fixtures) always reports "no asserts".
 //
 // Options: --scale s (default 1), --sweep N (every Nth frame, default 4), --det N (add N evenly spaced determinism
 //          frames on top of the per-shot ones, default 0; never fewer than every shot),
@@ -139,6 +141,11 @@ async function main() {
   if (args.shot && !shotId) C.die('--shot needs a shot id');
   const src = C.sources({ fixtures, only: shotId, player: !shotId, lenient: true });
   const TL = src.timeline;
+  // Lib asserts live beside the fixture film and are not part of a shipped film (build/render never load them).
+  const assertDir = fixtures ? path.join(src.base, 'asserts') : null;
+  const assertFiles = assertDir && fs.existsSync(assertDir)
+    ? fs.readdirSync(assertDir).filter((f) => f.endsWith('.js')).sort().map((f) => path.join(assertDir, f))
+    : [];
   // the shots this run is about: all of them, or the one scene agent's shot
   const SHOTS = shotId ? TL.shots.filter((s) => s.id === shotId) : TL.shots;
   const mine = (id) => !shotId || id === shotId;
@@ -151,6 +158,7 @@ async function main() {
     const files = shotId
       ? [src.shotFile(SHOTS[0])]
       : [path.join(C.SRC, 'core.js'), path.join(C.SRC, 'lib.js'), path.join(src.base, 'timeline.js'), ...(src.geoFile ? [src.geoFile] : []), ...src.sceneFiles];
+    files.push(...assertFiles);
     if (!shotId) {
       if (src.musicFile) files.push(src.musicFile);
       files.push(path.join(C.SRC, 'player.js'));
@@ -292,6 +300,8 @@ async function main() {
     }
   }
 
+  if (!assertFiles.length) report(8, 'lib', true, 'no asserts');
+
   // ---------------------------------------------------------------- browser checks
   // snapshot every source file now: pages load the copies, so an agent saving a file mid-run changes nothing here
   const snapDir = path.join(C.TMP, C.uniqueName('check-src'));
@@ -302,6 +312,13 @@ async function main() {
     fs.copyFileSync(f, copy);
     return copy;
   });
+  // asserts/geo.js must not overwrite fixtures/geo.js in the flat snapshot
+  for (const f of assertFiles) {
+    const copy = path.join(snapDir, 'asserts', path.basename(f));
+    fs.mkdirSync(path.dirname(copy), { recursive: true });
+    fs.copyFileSync(f, copy);
+    loadable.push(copy);
+  }
   const openOpts = (prefix) => ({ scale, prefix, only: shotId });
   const browser = await C.launch();
   try {
@@ -335,8 +352,33 @@ async function main() {
       );
       if (!pg.info) {
         report(5, 'draw', false, 'FILM did not initialise in the page', [...loadErr, ...pg.pageErrors]);
+        if (assertFiles.length) report(8, 'lib', false, 'FILM did not initialise; asserts did not run', loadErr);
         await pg.close();
         break browserChecks;
+      }
+
+      // ---------------------------------------------------------------- 8 lib
+      if (assertFiles.length) {
+        const names = new Set(assertFiles.map((f) => path.basename(f)));
+        const loadFail = pg.loadErrors.filter((e) => names.has(e.file));
+        const rows = await pg.page.evaluate(() => window.__h.runAsserts());
+        const bad = rows.filter((r) => !r.ok);
+        const details = [
+          ...loadFail.map((e) => `${e.file}:${e.line} failed to load: ${e.message}`),
+          ...bad.map((r) => `${r.file}: ${r.name}: ${r.message}`),
+        ];
+        const ok = bad.length === 0 && loadFail.length === 0 && rows.length > 0;
+        report(
+          8,
+          'lib',
+          ok,
+          ok
+            ? `${rows.length} asserts`
+            : !rows.length
+              ? `assert files loaded but registered nothing${loadFail.length ? `; ${loadFail.length} script error(s)` : ''}`
+              : `${bad.length} of ${rows.length} failed`,
+          details
+        );
       }
 
       // ---------------------------------------------------------------- 5 draw
