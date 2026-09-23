@@ -103,6 +103,7 @@ One continuous push from a normal establishing view down into the subject's surf
 - Plate: paper
 - Camera: continuous exponential push-in (zoom 1.08 to 40x), steps landing on the beats
 - Leans on: `hatch`, `stipple`, `camera`, `arcAnnotation`
+- Cells: `voronoi` tiles a clip; `cells` draws the mosaic or the cracks with a gap and rounded corners.
 - Example: `examples/butterfly-life/src/scenes/11-scale-mosaic.js`
 
 ## 11. Pull-back to reveal scale
