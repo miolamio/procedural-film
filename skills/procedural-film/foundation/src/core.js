@@ -4,7 +4,7 @@
  * Load order everywhere: core.js, lib.js, timeline.js, scenes (sorted), music.js, player.js.
  *
  * Defines window.FILM: the scene registry, the timeline reader, renderFrame(T),
- * transitions between shots and the global post-processing (boiling grain).
+ * transitions between shots, an optional per-shot grade, and the global post-processing (boiling grain).
  *
  * Rules for scene code (see docs/CONTRACT.md):
  *   - Draw only from (t, info). No state carried between frames.
@@ -39,6 +39,7 @@
 
   const EPS = 1e-6;
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const easeInOutCubic = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
 
   // Small self-contained hash so core never depends on lib being healthy.
   function ihash(a, b, c) {
@@ -334,6 +335,214 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Shot grade: after the drawing, before the grain. multiply / screen / overlay
+  // and one radial gradient — never getImageData on the frame. A neutral grade
+  // returns before touching the context, so an ungraded shot stays byte-identical.
+  // ---------------------------------------------------------------------------
+
+  function gradeNum(g, key, lo, hi) {
+    if (!g || g[key] == null) return 0;
+    const n = Number(g[key]);
+    if (!isFinite(n)) return 0;
+    return n < lo ? lo : n > hi ? hi : n;
+  }
+
+  function gradeActive(g) {
+    if (!g || typeof g !== 'object') return false;
+    if (g._mixed) return !!(g.warmth || g.fade || g.vignette || g.paperAge || (g.tints && g.tints.length));
+    return !!(g.warmth || g.fade || g.vignette || g.paperAge || (g.tint && g.tintAmount));
+  }
+
+  function tintEntries(g) {
+    const out = [];
+    if (!g || typeof g !== 'object') return out;
+    if (g._mixed && Array.isArray(g.tints)) {
+      for (const t of g.tints) {
+        if (t && typeof t.name === 'string' && t.amount > 0) out.push({ name: t.name, amount: t.amount > 1 ? 1 : t.amount });
+      }
+      return out;
+    }
+    const amount = gradeNum(g, 'tintAmount', 0, 1);
+    if (typeof g.tint === 'string' && amount > 0) out.push({ name: g.tint, amount });
+    return out;
+  }
+
+  // p is 0 on the outgoing grade and 1 on the incoming one. Two tint names crossfade
+  // as two overlays so the colour does not pop at the midpoint.
+  function lerpGrade(a, b, p) {
+    if (!gradeActive(a) && !gradeActive(b)) return null;
+    const q = 1 - p;
+    const warmth = gradeNum(a, 'warmth', -1, 1) * q + gradeNum(b, 'warmth', -1, 1) * p;
+    const fade = gradeNum(a, 'fade', 0, 1) * q + gradeNum(b, 'fade', 0, 1) * p;
+    const vignette = gradeNum(a, 'vignette', 0, 1) * q + gradeNum(b, 'vignette', 0, 1) * p;
+    const paperAge = gradeNum(a, 'paperAge', 0, 1) * q + gradeNum(b, 'paperAge', 0, 1) * p;
+    const byName = new Map();
+    for (const t of tintEntries(a)) byName.set(t.name, (byName.get(t.name) || 0) + t.amount * q);
+    for (const t of tintEntries(b)) byName.set(t.name, (byName.get(t.name) || 0) + t.amount * p);
+    const tints = [];
+    for (const [name, amount] of byName) if (amount > 0) tints.push({ name, amount });
+    if (!warmth && !fade && !vignette && !paperAge && !tints.length) return null;
+    return { _mixed: true, warmth, fade, vignette, paperAge, tints };
+  }
+
+  // Same mix composite() uses, so the grade tracks the dissolve.
+  function transitionMix(tr, inT) {
+    const k = Math.max(0, inT * FILM.FPS);
+    const n = tr.dur * FILM.FPS;
+    if (!(n > 0)) return 1;
+    if (tr.kind === 'flash') return clamp01(k / n);
+    return easeInOutCubic(clamp01((k + 1) / (n + 1)));
+  }
+
+  function gradeForShot(shot, T, outgoing) {
+    const shots = prepare().shots;
+    let prev = null;
+    let next = null;
+    let tr = null;
+    let inT = 0;
+    if (outgoing) {
+      next = shots[shot.index + 1];
+      if (!next) return shot.grade;
+      prev = shot;
+      tr = next.transitionIn;
+      inT = T - next.start;
+    } else if (shot.index > 0 && shot.transitionIn && shot.transitionIn.kind !== 'cut' && shot.transitionIn.dur > 0) {
+      inT = T - shot.start;
+      if (inT < shot.transitionIn.dur - EPS) {
+        prev = shots[shot.index - 1];
+        next = shot;
+        tr = shot.transitionIn;
+      }
+    }
+    if (prev && next && tr && tr.kind !== 'cut' && KINDS[tr.kind] && tr.dur > 0 && inT > -EPS && inT < tr.dur - EPS) {
+      return lerpGrade(prev.grade, next.grade, transitionMix(tr, inT));
+    }
+    return shot.grade;
+  }
+
+  function palColor(name) {
+    const pal = FILM.lib && FILM.lib.pal;
+    const c = pal && name ? pal[name] : null;
+    return typeof c === 'string' ? c : null;
+  }
+
+  function parseHex(hex) {
+    if (!hex || hex[0] !== '#') return null;
+    let h = hex.slice(1);
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    const n = parseInt(h.slice(0, 6), 16);
+    if (!isFinite(n)) return null;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  // Straight-colour source-over, so several uniform washes become one fill.
+  function washOver(dst, rgb, srcA) {
+    if (!rgb || !(srcA > 0)) return dst;
+    if (srcA > 1) srcA = 1;
+    if (!dst) return { rgb: rgb, a: srcA };
+    const outA = srcA + dst.a * (1 - srcA);
+    const k = dst.a * (1 - srcA);
+    return {
+      rgb: [
+        (rgb[0] * srcA + dst.rgb[0] * k) / outA,
+        (rgb[1] * srcA + dst.rgb[1] * k) / outA,
+        (rgb[2] * srcA + dst.rgb[2] * k) / outA,
+      ],
+      a: outA,
+    };
+  }
+
+  function cssRgb(rgb) {
+    return 'rgb(' + ((rgb[0] + 0.5) | 0) + ',' + ((rgb[1] + 0.5) | 0) + ',' + ((rgb[2] + 0.5) | 0) + ')';
+  }
+
+  const GRADE_WARM = [227, 106, 42];
+  const GRADE_COOL = [46, 111, 190];
+  const GRADE_CREAM = [247, 241, 228];
+  const GRADE_AGE = [228, 196, 138];
+  const GRADE_SEPIA = [166, 124, 82];
+
+  // One composite for every uniform control. A second full-frame fill per control
+  // costs more than the frame budget; the vignette is a separate cached blit.
+  function uniformGrade(warmth, fade, paperAge, tints) {
+    let wash = null;
+    if (warmth > 0) wash = washOver(wash, GRADE_WARM, warmth * 0.72);
+    else if (warmth < 0) wash = washOver(wash, GRADE_COOL, -warmth * 0.72);
+    for (let i = 0; i < tints.length; i++) wash = washOver(wash, parseHex(palColor(tints[i].name)), tints[i].amount);
+    if (!(fade > 0)) {
+      if (paperAge > 0 && !wash) return { op: 'multiply', color: cssRgb(GRADE_SEPIA), alpha: paperAge * 0.85 };
+      if (paperAge > 0) wash = washOver(wash, GRADE_SEPIA, paperAge * 0.75);
+      if (!wash || !(wash.a > 0)) return null;
+      return { op: 'overlay', color: cssRgb(wash.rgb), alpha: wash.a };
+    }
+    const cream = paperAge > 0 ? GRADE_AGE : GRADE_CREAM;
+    const a = paperAge > 0 ? Math.min(1, fade * 0.7 + paperAge * 0.85) : fade * 0.75;
+    if (!wash) return { op: 'screen', color: cssRgb(cream), alpha: a };
+    wash = washOver(wash, cream, a);
+    return { op: 'screen', color: cssRgb(wash.rgb), alpha: wash.a };
+  }
+
+  function gradeFill(ctx, w, h, op, color, alpha) {
+    if (!(alpha > 0) || !color) return;
+    ctx.globalCompositeOperation = op;
+    ctx.globalAlpha = alpha > 1 ? 1 : alpha;
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // White through the subject is a multiply no-op; black at the corner is the falloff.
+  // Cached by size: a radial gradient built every frame is several times over budget.
+  const vignetteCache = {};
+  function vignetteMask(w, h) {
+    const key = w + 'x' + h;
+    const hit = vignetteCache[key];
+    if (hit) return hit;
+    const c = makeCanvas(w, h);
+    const g = c.getContext('2d');
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const r = Math.hypot(cx, cy);
+    const grad = g.createRadialGradient(cx, cy, r * 0.28, cx, cy, r);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.4, '#ffffff');
+    grad.addColorStop(1, '#000000');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, w, h);
+    vignetteCache[key] = c;
+    return c;
+  }
+
+  function applyGrade(ctx, grade) {
+    if (!gradeActive(grade)) return;
+    const mixed = grade._mixed ? grade : null;
+    const warmth = mixed ? grade.warmth : gradeNum(grade, 'warmth', -1, 1);
+    const fade = mixed ? grade.fade : gradeNum(grade, 'fade', 0, 1);
+    const vignette = mixed ? grade.vignette : gradeNum(grade, 'vignette', 0, 1);
+    const paperAge = mixed ? grade.paperAge : gradeNum(grade, 'paperAge', 0, 1);
+    const tints = tintEntries(grade);
+    if (!warmth && !fade && !vignette && !paperAge && !tints.length) return;
+    const c = ctx.canvas;
+    const w = c.width;
+    const h = c.height;
+    const wash = uniformGrade(warmth, fade, paperAge, tints);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.filter = 'none';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.shadowColor = 'rgba(0,0,0,0)';
+    if (wash) gradeFill(ctx, w, h, wash.op, wash.color, wash.alpha);
+    if (vignette > 0) {
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalAlpha = vignette > 1 ? 1 : vignette;
+      ctx.drawImage(vignetteMask(w, h), 0, 0);
+    }
+    ctx.restore();
+  }
+  FILM.applyGrade = applyGrade;
+
+  // ---------------------------------------------------------------------------
   // Drawing
   // ---------------------------------------------------------------------------
 
@@ -392,6 +601,7 @@
       }
       resetCtx(ctx, false);
     }
+    applyGrade(ctx, gradeForShot(shot, T, outgoing));
     postShot(ctx, shot, def, T);
   }
 
@@ -400,7 +610,7 @@
     resetCtx(ctx, true);
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
-    const e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+    const e = easeInOutCubic(p);
     ctx.drawImage(A, 0, 0);
     switch (tr.kind) {
       case 'fade':
