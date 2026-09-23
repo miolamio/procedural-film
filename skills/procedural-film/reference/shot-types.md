@@ -123,6 +123,7 @@ A stream of many small instances of the subject moving together across the frame
 - Plate: paper
 - Camera: locked, with a slow drift or tilt across the shot
 - Leans on: `inkPath`, `hatch`, `inkLine`, `arcAnnotation`
+- Place the crowd with `scatter` so the instances do not overlap, carry them on one `flow` with `advect`, and draw them with `instances`.
 - Example: `examples/butterfly-life/src/scenes/14-migration-column.js`
 
 ## 13. Snap zoom-in to a match-cut

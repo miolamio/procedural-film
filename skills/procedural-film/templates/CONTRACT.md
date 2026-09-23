@@ -81,6 +81,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `camera(ctx, { x, y, zoom, rot }, fn)`: draws `fn` under a camera transform centred on the frame.
 - `pal`: named colours from the art bible.
 - `text(ctx, str, x, y, opts)`: a thin single-line wordmark drawn with system sans-serif (no font files).
+- `scatter(clip, { r, seed, max, density, bounds })` places Poisson-disk points inside any hatch clip, cached by the clip, `r`, `seed`, `max` and an 8×8 sample of `density` (not by the function's identity; the local radius is `r / sqrt(density)`). `flow(x, y, T, { seed, scale, speed, curl })` is a divergence-free curl of `noise2`; `advect(p0, T, opts, steps)` integrates that field from 0 to T with a fixed step; `instances(ctx, pts, fn)` draws each point with an rng seeded by its index.
 - `geo(id)`: an entry of `FILM.GEO`, read-only. `profile` (symmetric about `cx`: `hw(y)`, `x(y, side)`, `side(sign)`, `outline()`, `widest`), `outline` (a closed silhouette sampled densely, drawn as it stands: `outline()`), `points` (`pt(name)`), `polyline` (`pts`).
 
 ### Shared geometry
