@@ -226,12 +226,7 @@ async function main() {
       if (i > 0) {
         const prev = shots[i - 1];
         const d = s.start - prev.end;
-        if (d > EPS) {
-          const msg = `gap of ${d.toFixed(4)}s between '${prev.id}' (ends ${prev.end}) and '${s.id}' (starts ${s.start})`;
-          // Fixture showcases reserve a later slot (a sibling shot fills 8..10). A real film still fails a hole.
-          if (fixtures) tlWarnings.push(msg);
-          else tlProblems.push(msg);
-        }
+        if (d > EPS) tlProblems.push(`gap of ${d.toFixed(4)}s between '${prev.id}' (ends ${prev.end}) and '${s.id}' (starts ${s.start})`);
         if (d < -EPS) tlProblems.push(`overlap of ${(-d).toFixed(4)}s between '${prev.id}' (ends ${prev.end}) and '${s.id}' (starts ${s.start})`);
       }
       if (Math.abs(s.start * FPS - Math.round(s.start * FPS)) > 1e-4) tlWarnings.push(`shot '${s.id}' starts between frames (${s.start}s)`);
