@@ -775,6 +775,8 @@
       RX[k] = DX[k] + ty * wr;
       RY[k] = DY[k] - tx * wr;
     }
+    // reveal window: same ribbon, only the quads inside the arc-length span. Absent => today's fill.
+    if (q.part) return paintSpan(ctx, DX, DY, LX, LY, RX, RY, Wd, S, i0, n, q.part);
     ctx.beginPath();
     for (let k = 0; k < n - 1; k++) {
       ctx.moveTo(LX[k], LY[k]);
@@ -858,7 +860,167 @@
    *   fillAlpha   1
    *   double      false    true or { offset, width, alpha, from, to, seed }: a second quick retrace
    *                        (defaults: 30 percent of the width, min 1.5 px at 5 px, 3 px clear of the line, alpha 0.4)
+   *   reveal      null     0..1 draws that fraction of the arc length from the start, double included.
+   *                        [from, to] draws the segment (a running dash). Omit, or pass 1 / [0, 1], for the whole line.
+   *   nib         null     { r, color, blot } ink drop and highlight on the moving tip while the span is unfinished
    */
+  // null => draw the whole line (today's pixels). Otherwise absolute arc-length window on S, nib on the open tip.
+  function revealOf(reveal, L) {
+    if (reveal == null) return null;
+    let a, b;
+    if (Array.isArray(reveal)) {
+      a = +reveal[0];
+      b = +reveal[1];
+      if (!isFinite(a) || !isFinite(b)) return null;
+      if (b < a) {
+        const s = a;
+        a = b;
+        b = s;
+      }
+    } else {
+      a = 0;
+      b = +reveal;
+      if (!isFinite(b)) return null;
+    }
+    a = clamp(a, 0, 1);
+    b = clamp(b, 0, 1);
+    if (a <= 0 && b >= 1) return null;
+    return { sFrom: a * L, sTo: b * L, nib: b > a && b < 1 };
+  }
+
+  function spanPoint(DX, DY, Wd, S, i0, n, s) {
+    const last = n - 1;
+    let k = 0;
+    if (s >= S[i0 + last]) k = Math.max(0, last - 1);
+    else if (s > S[i0]) while (k < last - 1 && S[i0 + k + 1] < s) k++;
+    const a = S[i0 + k], b = S[i0 + k + 1];
+    let u = b > a ? (s - a) / (b - a) : 0;
+    if (u < 0) u = 0;
+    else if (u > 1) u = 1;
+    const hw = Wd[k] + (Wd[k + 1] - Wd[k]) * u;
+    return {
+      x: DX[k] + (DX[k + 1] - DX[k]) * u,
+      y: DY[k] + (DY[k + 1] - DY[k]) * u,
+      hw: hw > 0.05 ? hw : 0.05,
+      w: hw * 2,
+    };
+  }
+
+  // Quads whose both ends sit inside the window use the same vertices as the full ribbon.
+  function paintSpan(ctx, DX, DY, LX, LY, RX, RY, Wd, S, i0, n, part) {
+    const sFrom = part.sFrom, sTo = part.sTo;
+    if (!(n >= 2) || !(sTo > sFrom)) return null;
+    const sLo = S[i0], sHi = S[i0 + n - 1];
+    if (!(sTo > sLo) || !(sFrom < sHi)) return null;
+    ctx.beginPath();
+    let drew = false;
+    for (let k = 0; k < n - 1; k++) {
+      const a = S[i0 + k], b = S[i0 + k + 1];
+      if (!(b > a)) {
+        if (a >= sFrom && a <= sTo) {
+          ctx.moveTo(LX[k], LY[k]);
+          ctx.lineTo(LX[k + 1], LY[k + 1]);
+          ctx.lineTo(RX[k + 1], RY[k + 1]);
+          ctx.lineTo(RX[k], RY[k]);
+          ctx.closePath();
+          drew = true;
+        }
+        continue;
+      }
+      if (b <= sFrom || a >= sTo) continue;
+      let t0 = 0, t1 = 1;
+      if (a < sFrom) t0 = (sFrom - a) / (b - a);
+      if (b > sTo) t1 = (sTo - a) / (b - a);
+      if (!(t1 > t0)) continue;
+      const at = (A, B, t) => (t <= 0 ? A : t >= 1 ? B : A + (B - A) * t);
+      ctx.moveTo(at(LX[k], LX[k + 1], t0), at(LY[k], LY[k + 1], t0));
+      ctx.lineTo(at(LX[k], LX[k + 1], t1), at(LY[k], LY[k + 1], t1));
+      ctx.lineTo(at(RX[k], RX[k + 1], t1), at(RY[k], RY[k + 1], t1));
+      ctx.lineTo(at(RX[k], RX[k + 1], t0), at(RY[k], RY[k + 1], t0));
+      ctx.closePath();
+      drew = true;
+    }
+    if (sFrom <= sLo && sTo > sLo) {
+      ctx.moveTo(DX[0] + Wd[0], DY[0]);
+      ctx.arc(DX[0], DY[0], Wd[0], 0, TAU);
+      drew = true;
+    }
+    if (sTo >= sHi && sFrom < sHi) {
+      ctx.moveTo(DX[n - 1] + Wd[n - 1], DY[n - 1]);
+      ctx.arc(DX[n - 1], DY[n - 1], Wd[n - 1], 0, TAU);
+      drew = true;
+    }
+    // Running dash: round the trailing cut. The leading tip is the nib, not a second cap.
+    if (sFrom > sLo && sFrom < sHi) {
+      const tail = spanPoint(DX, DY, Wd, S, i0, n, sFrom);
+      ctx.moveTo(tail.x + tail.hw, tail.y);
+      ctx.arc(tail.x, tail.y, tail.hw, 0, TAU);
+      drew = true;
+    }
+    if (drew) ctx.fill('nonzero');
+    if (sTo > sLo && sTo < sHi) return spanPoint(DX, DY, Wd, S, i0, n, sTo);
+    return null;
+  }
+
+  function paintDouble(ctx, C, q, o, b, width, tIn, tOut, seed, closed, span) {
+    if (!o.double) return;
+    const d = o.double === true ? {} : o.double;
+    const ds = seedInt(d.seed != null ? d.seed : seed + 977);
+    const r = rng(ds);
+    const L = C.S[C.m - 1];
+    let f0 = d.from != null ? d.from : closed ? r.range(0, 0.35) : r.range(0.03, 0.18);
+    let f1 = d.to != null ? d.to : closed ? f0 + r.range(0.45, 0.75) : r.range(0.72, 0.95);
+    f1 = Math.min(1, f1);
+    let i0 = 0, i1 = C.m - 1;
+    while (i0 < C.m - 1 && C.S[i0] < f0 * L) i0++;
+    while (i1 > i0 && C.S[i1] > f1 * L) i1--;
+    const dw = d.width != null ? width * d.width : Math.max(1.2, width * 0.3);
+    const q2 = Object.assign({}, q, {
+      seed: ds,
+      width: dw,
+      rough: 0.15 + dw * 0.07,
+      offset: d.offset != null ? d.offset : (width / 2 + 3) * (r() < 0.5 ? -1 : 1),
+      wobble: q.wobble * 1.3,
+      boilSeed: (hash(ds, b) | 0) & 0x7fffffff,
+      taperIn: Math.max(tIn, 26),
+      taperOut: Math.max(tOut, 40),
+      closeBlend: 0,
+      swell: 0.35,
+    });
+    if (span) q2.part = span;
+    ctx.globalAlpha *= d.alpha != null ? d.alpha : 0.4;
+    ribbon(ctx, C.X, C.Y, C.NX, C.NY, C.S, i0, i1, q2);
+  }
+
+  function inkNib(ctx, tip, nib, color, seed) {
+    const r = nib.r != null ? nib.r : Math.max(1.8, tip.w * 0.62);
+    const blot = nib.blot;
+    const br = blot === true ? r * 1.7 : blot ? Math.abs(+blot) || 0 : 0;
+    if (!(r > 0) && !(br > 0)) return;
+    ctx.save();
+    ctx.fillStyle = nib.color || color;
+    if (br > 0) {
+      const ang = h3(seed, 23, 9) * TAU;
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, br, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(tip.x + Math.cos(ang) * br * 0.34, tip.y + Math.sin(ang) * br * 0.34, br * 0.55, 0, TAU);
+      ctx.fill();
+    }
+    if (r > 0) {
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, r, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha *= 0.85;
+      ctx.fillStyle = pal.white;
+      ctx.beginPath();
+      ctx.arc(tip.x - r * 0.28, tip.y - r * 0.32, Math.max(1.2, r * 0.4), 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function inkPath(ctx, pts, o = {}) {
     if (!pts || pts.length < 2) return;
     const closed = !!o.closed;
@@ -893,10 +1055,11 @@
       closeBlend: closed ? Math.min(60, C.loopLen * 0.25) + overlap : 0,
       loopLen: C.loopLen,
     };
+    const span = revealOf(o.reveal, C.S[C.m - 1]);
     ctx.save();
     const color = o.color || pal.ink;
     const alpha = o.alpha != null ? o.alpha : 1;
-    if (closed && o.fill) {
+    if (closed && o.fill && !span) {
       // fill follows the wobbled outline (without the overlap run)
       const F = ribbonLine(C, q, 0, Math.max(1, C.m - 1));
       ctx.beginPath();
@@ -914,32 +1077,15 @@
     }
     ctx.globalAlpha *= alpha;
     ctx.fillStyle = color;
-    ribbon(ctx, C.X, C.Y, C.NX, C.NY, C.S, 0, C.m - 1, q);
-    if (o.double) {
-      const d = o.double === true ? {} : o.double;
-      const ds = seedInt(d.seed != null ? d.seed : seed + 977);
-      const r = rng(ds);
-      const L = C.S[C.m - 1];
-      let f0 = d.from != null ? d.from : closed ? r.range(0, 0.35) : r.range(0.03, 0.18);
-      let f1 = d.to != null ? d.to : closed ? f0 + r.range(0.45, 0.75) : r.range(0.72, 0.95);
-      f1 = Math.min(1, f1);
-      let i0 = 0, i1 = C.m - 1;
-      while (i0 < C.m - 1 && C.S[i0] < f0 * L) i0++;
-      while (i1 > i0 && C.S[i1] > f1 * L) i1--;
-      const q2 = Object.assign({}, q, {
-        seed: ds,
-        width: d.width != null ? width * d.width : Math.max(1.2, width * 0.3),
-        rough: 0.15 + (d.width != null ? width * d.width : Math.max(1.2, width * 0.3)) * 0.07,
-        offset: d.offset != null ? d.offset : (width / 2 + 3) * (r() < 0.5 ? -1 : 1),
-        wobble: q.wobble * 1.3,
-        boilSeed: (hash(ds, b) | 0) & 0x7fffffff,
-        taperIn: Math.max(tIn, 26),
-        taperOut: Math.max(tOut, 40),
-        closeBlend: 0,
-        swell: 0.35,
-      });
-      ctx.globalAlpha *= d.alpha != null ? d.alpha : 0.4;
-      ribbon(ctx, C.X, C.Y, C.NX, C.NY, C.S, i0, i1, q2);
+    if (!span) {
+      ribbon(ctx, C.X, C.Y, C.NX, C.NY, C.S, 0, C.m - 1, q);
+      paintDouble(ctx, C, q, o, b, width, tIn, tOut, seed, closed, null);
+    } else {
+      const tip = ribbon(ctx, C.X, C.Y, C.NX, C.NY, C.S, 0, C.m - 1, Object.assign({}, q, { part: span }));
+      const inkA = ctx.globalAlpha;
+      paintDouble(ctx, C, q, o, b, width, tIn, tOut, seed, closed, span);
+      ctx.globalAlpha = inkA;
+      if (span.nib && o.nib && tip) inkNib(ctx, tip, o.nib, color, seed);
     }
     ctx.restore();
   }
