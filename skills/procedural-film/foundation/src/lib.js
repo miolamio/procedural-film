@@ -2097,6 +2097,483 @@
   };
 
   // ===========================================================================
+  // Branching: space colonization (Runions 2007)
+  // ===========================================================================
+
+  /**
+   * branch(opts) : a tree grown by space colonization inside a clip, cached by its parameters (never by t).
+   *   seed        1
+   *   root        [x, y], or a polyline whose first point is the root and each later point is already
+   *               grown as the child of the one before it (a trunk)
+   *   clip        a polygon [[x, y], ...] or a list of polygons (even-odd), same point shapes as hatch.
+   *               Nodes stay inside the clip. Omit it and the tree fills the frame.
+   *   attractors  n or [[x, y], ...]   n points are seeded inside the clip; points outside it are dropped
+   *   step        16      px between a node and the child grown from it
+   *   killDist    step*1.55   an attractor this close to a node is used up
+   *   influence   step*4.5    an attractor pulls only the nearest node within this radius
+   *   maxNodes    400     including the root
+   * Returns { nodes, paths(minLen) }. Each node is { x, y, parent, depth, thickness }: parent is null on the
+   * root and a node index otherwise, depth is 0 at the root, and thickness follows da Vinci (thickness^2.5
+   * of a node is the sum of its children's, terminals are 1), so a parent is at least as thick as any child.
+   * paths(minLen) returns the polylines between junctions, root first, dropping any shorter than minLen pixels.
+   *
+   * drawBranch(ctx, tree, opts) inks the tree through inkPath, one segment at a time, in growth order.
+   *   width   1.8    pen width at thickness 1; a thicker node is wider by its thickness
+   *   taper   0      px of tip taper on the last segment of each path (a number, or [in, out]); 0 leaves the
+   *                  da Vinci width alone
+   *   reveal  1      0 draws nothing, 1 draws every path; in between, segments appear in the order grown
+   *   color   pal.ink
+   *   alpha   1
+   *   minLen  0      passed to paths
+   */
+  const branchCache = new Map();
+  const BRANCH_CACHE_MAX = 32;
+
+  function branchCached(key, make) {
+    const hit = branchCache.get(key);
+    if (hit) {
+      branchCache.delete(key);
+      branchCache.set(key, hit);
+      return hit;
+    }
+    const tree = make();
+    branchCache.set(key, tree);
+    while (branchCache.size > BRANCH_CACHE_MAX) branchCache.delete(branchCache.keys().next().value);
+    return tree;
+  }
+
+  function asPoint(p) {
+    if (Array.isArray(p) && typeof p[0] === 'number') return [+p[0], +p[1]];
+    if (p && typeof p.x === 'number' && typeof p.y === 'number') return [+p.x, +p.y];
+    return null;
+  }
+  function asPointList(list) {
+    const out = [];
+    if (!Array.isArray(list)) return out;
+    for (let i = 0; i < list.length; i++) {
+      const p = asPoint(list[i]);
+      if (p) out.push(p);
+    }
+    return out;
+  }
+  function asRoot(root) {
+    const one = asPoint(root);
+    if (one) return [one];
+    return asPointList(root);
+  }
+  function framePoly() {
+    const w = W(), h = H();
+    return [[[0, 0], [w, 0], [w, h], [0, h]]];
+  }
+  function halton(index, base) {
+    let f = 1, r = 0, i = index + 1;
+    while (i > 0) {
+      f /= base;
+      r += f * (i % base);
+      i = Math.floor(i / base);
+    }
+    return r;
+  }
+  function sampleIn(polys, n, seed) {
+    if (!(n > 0)) return [];
+    const b = polysBounds(polys);
+    if (!(b.w > 0) || !(b.h > 0)) return [];
+    const s = seedInt(seed);
+    const sx = h3(s, 2, 3);
+    const sy = h3(s, 5, 7);
+    const out = [];
+    const limit = Math.max(n * 40, 80);
+    for (let i = 0; i < limit && out.length < n; i++) {
+      const x = b.x + ((halton(i, 2) + sx) % 1) * b.w;
+      const y = b.y + ((halton(i, 3) + sy) % 1) * b.h;
+      if (polysContain(polys, x, y)) out.push([x, y]);
+    }
+    return out;
+  }
+  function segmentIn(polys, x0, y0, x1, y1) {
+    for (let s = 1; s <= 4; s++) {
+      const t = s / 4;
+      if (!polysContain(polys, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false;
+    }
+    return true;
+  }
+  function clipStep(polys, x, y, dx, dy, step) {
+    const at = (d) => [x + dx * d, y + dy * d];
+    const ok = (d) => {
+      const p = at(d);
+      return segmentIn(polys, x, y, p[0], p[1]);
+    };
+    if (ok(step)) return at(step);
+    if (!ok(step * 0.34)) return null;
+    let lo = step * 0.34, hi = step;
+    for (let k = 0; k < 7; k++) {
+      const mid = (lo + hi) * 0.5;
+      if (ok(mid)) lo = mid;
+      else hi = mid;
+    }
+    return lo >= step * 0.5 ? at(lo) : null;
+  }
+  function gridOf(nodes, cell) {
+    const grid = new Map();
+    const inv = 1 / cell;
+    for (let i = 0; i < nodes.length; i++) {
+      const key = Math.floor(nodes[i].x * inv) + ',' + Math.floor(nodes[i].y * inv);
+      let bucket = grid.get(key);
+      if (!bucket) grid.set(key, (bucket = []));
+      bucket.push(i);
+    }
+    return grid;
+  }
+  function nearestNode(grid, nodes, x, y, cell, rad) {
+    const inv = 1 / cell;
+    const cx = Math.floor(x * inv);
+    const cy = Math.floor(y * inv);
+    const r = Math.ceil(rad * inv);
+    const rad2 = rad * rad;
+    let best = -1;
+    let bestD = rad2;
+    for (let iy = cy - r; iy <= cy + r; iy++) {
+      for (let ix = cx - r; ix <= cx + r; ix++) {
+        const bucket = grid.get(ix + ',' + iy);
+        if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const i = bucket[k];
+          const dx = nodes[i].x - x;
+          const dy = nodes[i].y - y;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+      }
+    }
+    return best;
+  }
+  function orient(ax, ay, bx, by, cx, cy) {
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  }
+  function properIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+    const o1 = orient(ax, ay, bx, by, cx, cy);
+    const o2 = orient(ax, ay, bx, by, dx, dy);
+    const o3 = orient(cx, cy, dx, dy, ax, ay);
+    const o4 = orient(cx, cy, dx, dy, bx, by);
+    return o1 * o2 < 0 && o3 * o4 < 0;
+  }
+  function ptSegDist(px, py, ax, ay, bx, by) {
+    const abx = bx - ax, aby = by - ay;
+    const ab2 = abx * abx + aby * aby;
+    let t = ab2 > 1e-12 ? ((px - ax) * abx + (py - ay) * aby) / ab2 : 0;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    return Math.hypot(ax + abx * t - px, ay + aby * t - py);
+  }
+  function segDist(ax, ay, bx, by, cx, cy, dx, dy) {
+    if (properIntersect(ax, ay, bx, by, cx, cy, dx, dy)) return 0;
+    return Math.min(
+      ptSegDist(ax, ay, cx, cy, dx, dy),
+      ptSegDist(bx, by, cx, cy, dx, dy),
+      ptSegDist(cx, cy, ax, ay, bx, by),
+      ptSegDist(dx, dy, ax, ay, bx, by)
+    );
+  }
+  function segmentBlocked(nodes, segs, parent, nx, ny, clear) {
+    const ax = nodes[parent].x, ay = nodes[parent].y;
+    for (let s = 0; s < segs.length; s++) {
+      const ia = segs[s][0], ib = segs[s][1];
+      const bx = nodes[ia].x, by = nodes[ia].y, cx = nodes[ib].x, cy = nodes[ib].y;
+      if (ia === parent || ib === parent) {
+        if (ptSegDist(nx, ny, bx, by, cx, cy) < clear) return true;
+        continue;
+      }
+      if (segDist(ax, ay, nx, ny, bx, by, cx, cy) < clear) return true;
+    }
+    return false;
+  }
+  function pruneAttractors(attr, nodes, kill) {
+    if (!attr.length || !nodes.length) return;
+    const cell = Math.max(kill, 1e-3);
+    const grid = gridOf(nodes, cell);
+    const kill2 = kill * kill;
+    let w = 0;
+    for (let a = 0; a < attr.length; a++) {
+      const x = attr[a][0], y = attr[a][1];
+      const ni = nearestNode(grid, nodes, x, y, cell, kill);
+      if (ni >= 0) {
+        const dx = nodes[ni].x - x, dy = nodes[ni].y - y;
+        if (dx * dx + dy * dy <= kill2) continue;
+      }
+      attr[w++] = attr[a];
+    }
+    attr.length = w;
+  }
+  function applyThickness(nodes) {
+    const n = nodes.length;
+    if (!n) return;
+    const kids = new Array(n);
+    for (let i = 0; i < n; i++) kids[i] = [];
+    const roots = [];
+    for (let i = 0; i < n; i++) {
+      const p = nodes[i].parent;
+      if (p == null) roots.push(i);
+      else kids[p].push(i);
+    }
+    const order = [];
+    const seen = new Uint8Array(n);
+    const st = [];
+    for (let r = 0; r < roots.length; r++) st.push(roots[r], 0);
+    while (st.length) {
+      const phase = st.pop();
+      const i = st.pop();
+      if (phase === 0) {
+        if (seen[i]) continue;
+        seen[i] = 1;
+        st.push(i, 1);
+        const ch = kids[i];
+        for (let c = ch.length - 1; c >= 0; c--) st.push(ch[c], 0);
+      } else order.push(i);
+    }
+    for (let k = 0; k < order.length; k++) {
+      const i = order[k];
+      const ch = kids[i];
+      if (!ch.length) nodes[i].thickness = 1;
+      else if (ch.length === 1) nodes[i].thickness = nodes[ch[0]].thickness;
+      else {
+        let sum = 0, m = 0;
+        for (let c = 0; c < ch.length; c++) {
+          const t = nodes[ch[c]].thickness;
+          sum += Math.pow(t, 2.5);
+          if (t > m) m = t;
+        }
+        const combined = Math.pow(sum, 0.4);
+        nodes[i].thickness = combined > m ? combined : m;
+      }
+    }
+  }
+  function colonize(polys, rootPts, attrIn, step, kill, influence, maxNodes, seed) {
+    const nodes = [];
+    const segs = [];
+    let parent = null;
+    let depth = 0;
+    for (let r = 0; r < rootPts.length && nodes.length < maxNodes; r++) {
+      const x = rootPts[r][0], y = rootPts[r][1];
+      if (!polysContain(polys, x, y)) continue;
+      if (parent != null && !segmentIn(polys, nodes[parent].x, nodes[parent].y, x, y)) continue;
+      const i = nodes.length;
+      nodes.push({ x, y, parent, depth, thickness: 1 });
+      if (parent != null) segs.push([parent, i]);
+      parent = i;
+      depth += 1;
+    }
+    if (!nodes.length) {
+      const one = sampleIn(polys, 1, seed);
+      if (one.length) nodes.push({ x: one[0][0], y: one[0][1], parent: null, depth: 0, thickness: 1 });
+    }
+    const attr = [];
+    for (let i = 0; i < attrIn.length; i++) {
+      const p = attrIn[i];
+      if (polysContain(polys, p[0], p[1])) attr.push(p);
+    }
+    // wide enough that a stroke cannot lie along another and read as a crossing; joints still meet at the parent
+    const clear = Math.max(3.5, Math.min(7.5, step * 0.45));
+    const s = seedInt(seed);
+    pruneAttractors(attr, nodes, kill);
+    let guard = 0;
+    while (nodes.length < maxNodes && attr.length && guard++ < maxNodes) {
+      const n0 = nodes.length;
+      const cell = Math.max(influence, 1e-3);
+      const grid = gridOf(nodes, cell);
+      const accX = new Float64Array(n0);
+      const accY = new Float64Array(n0);
+      const accN = new Uint32Array(n0);
+      for (let a = 0; a < attr.length; a++) {
+        const ni = nearestNode(grid, nodes, attr[a][0], attr[a][1], cell, influence);
+        if (ni < 0) continue;
+        let dx = attr[a][0] - nodes[ni].x;
+        let dy = attr[a][1] - nodes[ni].y;
+        const d = Math.hypot(dx, dy);
+        if (d < 1e-6) continue;
+        accX[ni] += dx / d;
+        accY[ni] += dy / d;
+        accN[ni]++;
+      }
+      let added = 0;
+      for (let i = 0; i < n0 && nodes.length < maxNodes; i++) {
+        if (!accN[i]) continue;
+        let sx = accX[i], sy = accY[i];
+        const ip = nodes[i].parent;
+        if (ip != null) {
+          let vx = nodes[i].x - nodes[ip].x;
+          let vy = nodes[i].y - nodes[ip].y;
+          const vd = Math.hypot(vx, vy);
+          if (vd > 1e-6) {
+            sx += (vx / vd) * 0.45;
+            sy += (vy / vd) * 0.45;
+          }
+        }
+        const L = Math.hypot(sx, sy);
+        if (L < 1e-6) continue;
+        const dx = sx / L, dy = sy / L;
+        const pt = clipStep(polys, nodes[i].x, nodes[i].y, dx, dy, step);
+        if (!pt) continue;
+        let x = pt[0], y = pt[1];
+        const j = (h3(s, nodes.length + 1, 9) - 0.5) * 2.2;
+        const jx = x - dy * j, jy = y + dx * j;
+        if (segmentIn(polys, nodes[i].x, nodes[i].y, jx, jy) && !segmentBlocked(nodes, segs, i, jx, jy, clear)) {
+          x = jx;
+          y = jy;
+        } else if (segmentBlocked(nodes, segs, i, x, y, clear)) continue;
+        const ni = nodes.length;
+        nodes.push({ x, y, parent: i, depth: nodes[i].depth + 1, thickness: 1 });
+        segs.push([i, ni]);
+        added++;
+      }
+      pruneAttractors(attr, nodes, kill);
+      if (!added) break;
+    }
+    applyThickness(nodes);
+    return nodes;
+  }
+  function branchRuns(nodes, minLen) {
+    const n = nodes.length;
+    const kids = new Array(n);
+    for (let i = 0; i < n; i++) kids[i] = [];
+    for (let i = 0; i < n; i++) {
+      const p = nodes[i].parent;
+      if (p != null) kids[p].push(i);
+    }
+    const min = minLen > 0 ? minLen : 0;
+    const runs = [];
+    for (let i = 0; i < n; i++) {
+      if (nodes[i].parent != null && kids[i].length === 1) continue;
+      const ch = kids[i];
+      for (let c = 0; c < ch.length; c++) {
+        const idx = [i];
+        let cur = ch[c];
+        while (true) {
+          idx.push(cur);
+          if (kids[cur].length !== 1) break;
+          cur = kids[cur][0];
+        }
+        const pts = new Array(idx.length);
+        let len = 0;
+        for (let k = 0; k < idx.length; k++) {
+          const nd = nodes[idx[k]];
+          pts[k] = [nd.x, nd.y];
+          if (k) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+        }
+        if (len + 1e-9 >= min) runs.push({ idx, pts, len });
+      }
+    }
+    return runs;
+  }
+  function makeTree(nodes) {
+    const frozen = Object.freeze(nodes.map((nd) => Object.freeze({
+      x: nd.x,
+      y: nd.y,
+      parent: nd.parent,
+      depth: nd.depth,
+      thickness: nd.thickness,
+    })));
+    return Object.freeze({
+      nodes: frozen,
+      paths(minLen) {
+        const runs = branchRuns(frozen, minLen);
+        const out = new Array(runs.length);
+        for (let i = 0; i < runs.length; i++) out[i] = runs[i].pts;
+        return out;
+      },
+    });
+  }
+  function branch(o) {
+    o = o || {};
+    const seed = o.seed === undefined ? 1 : o.seed;
+    const step = o.step > 0 ? +o.step : 16;
+    const kill = o.killDist > 0 ? +o.killDist : step * 1.55;
+    const influence = o.influence > 0 ? +o.influence : Math.max(kill * 2, step * 4.5);
+    const maxNodes = Math.max(1, Math.floor(o.maxNodes > 0 ? +o.maxNodes : 400));
+    const polys = toPolys(o.clip) || framePoly();
+    let rootPts = asRoot(o.root);
+    if (!rootPts.length) {
+      const b = polysBounds(polys);
+      rootPts = [[b.x + b.w * 0.5, b.y + b.h * 0.5]];
+    }
+    let attrSpec;
+    if (typeof o.attractors === 'number') attrSpec = Math.max(0, Math.floor(o.attractors));
+    else if (Array.isArray(o.attractors)) attrSpec = asPointList(o.attractors);
+    else attrSpec = 160;
+    const key = JSON.stringify([seed, rootPts, polys, attrSpec, step, kill, influence, maxNodes]);
+    return branchCached(key, () => {
+      const attrPts = typeof attrSpec === 'number' ? sampleIn(polys, attrSpec, seed) : attrSpec;
+      return makeTree(colonize(polys, rootPts, attrPts, step, kill, influence, maxNodes, seed));
+    });
+  }
+
+  function tipTaperOf(taper) {
+    if (taper == null || taper === false || taper === 0) return null;
+    if (Array.isArray(taper)) return taper;
+    return [0, taper];
+  }
+  function drawBranch(ctx, tree, o) {
+    o = o || {};
+    if (!tree || !tree.nodes || tree.nodes.length < 2) return;
+    let reveal = o.reveal == null ? 1 : +o.reveal;
+    if (!(reveal > 0)) return;
+    if (reveal > 1) reveal = 1;
+    const nodes = tree.nodes;
+    const n = nodes.length;
+    const grown = reveal >= 1 ? n - 1 : reveal * (n - 1);
+    const next = Math.floor(grown) + 1;
+    const frac = grown - Math.floor(grown);
+    const runs = branchRuns(nodes, o.minLen);
+    const unit = o.width != null ? o.width : 1.8;
+    const color = o.color || pal.ink;
+    const alpha = o.alpha != null ? o.alpha : 1;
+    const seed0 = o.seed == null ? 1 : o.seed;
+    const wobble = o.wobble != null ? o.wobble : 0;
+    const tipTaper = tipTaperOf(o.taper);
+    for (let r = 0; r < runs.length; r++) {
+      const idx = runs[r].idx;
+      for (let k = 1; k < idx.length; k++) {
+        const i = idx[k];
+        const p = nodes[idx[k - 1]];
+        const c = nodes[i];
+        let x1 = c.x, y1 = c.y, t1 = c.thickness;
+        if (i <= grown + 1e-9) {
+          /* full segment */
+        } else if (frac > 1e-8 && i === next) {
+          x1 = p.x + (c.x - p.x) * frac;
+          y1 = p.y + (c.y - p.y) * frac;
+          t1 = p.thickness + (c.thickness - p.thickness) * frac;
+        } else break;
+        const maxT = p.thickness > t1 ? p.thickness : t1;
+        const t0 = p.thickness;
+        const tip = k === idx.length - 1;
+        inkPath(ctx, [[p.x, p.y], [x1, y1]], {
+          smooth: false,
+          width: unit * maxT,
+          color,
+          alpha,
+          seed: (hash(seed0, idx[0], i) & 0x7fffffff) || 1,
+          step: 4,
+          swell: 0,
+          taper: tip && tipTaper ? tipTaper : 0,
+          wobble,
+          tremble: o.tremble != null ? o.tremble : 0,
+          rough: o.rough != null ? o.rough : 0,
+          widthJitter: o.widthJitter != null ? o.widthJitter : 0,
+          boil: o.boil != null ? o.boil : false,
+          pressure(u) { return (t0 + (t1 - t0) * u) / maxT; },
+        });
+        if (i > grown + 1e-9) break;
+      }
+    }
+  }
+
+  lib.branch = branch;
+  lib.drawBranch = drawBranch;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
