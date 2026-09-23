@@ -1,8 +1,8 @@
-// Fixture timeline for testing the tools (not the film). 30 seconds, 15 shots.
+// Fixture timeline for testing the tools (not the film). 32 seconds, 16 shots.
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 30,
+  duration: 32,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -19,6 +19,7 @@ FILM.TIMELINE = {
     { id: 'fx-light', file: '13-fx-light.js', start: 24, end: 26, mode: 'illustrated', brief: 'The fixture egg on paper: hatched ground shadow, shaded side, rim light orbiting.' },
     { id: 'fx-smear', file: '14-fx-smear.js', start: 26, end: 28, mode: 'illustrated', brief: 'Two wings flap in three drawings: bare on the left, ghosts and speed lines on the right.' },
     { id: 'fx-parallax', file: '15-fx-parallax.js', start: 28, end: 30, mode: 'illustrated', brief: 'A pull-back: leaf at z 1, grass nearer, hills and sky farther, zoom 3 to 1.' },
+    { id: 'fx-wire3d', file: '16-fx-wire3d.js', start: 30, end: 32, mode: 'schematic', brief: 'A turntable: a double helix with rungs and a crystal, back edges dashed.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
