@@ -77,6 +77,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `hatch(ctx, clipFn, opts)`: parallel strokes at an angle and spacing, clipped by a path function, each stroke slightly jittered. `crossHatch` layers two.
 - `stipple(ctx, clipFn, opts)`: seeded dot fill with density control.
 - `wash(ctx, clip, opts)`: translucent watercolour inside a clip — noise-deformed layers, a darker rim, granulation modulated by paper grain, optional blooms. Cached by the clip, the options and the render scale; a frame only blits it. `boil: true` reuses three variants on the 12 fps clock and is never keyed by raw time.
+- `castShadow(ctx, outline, opts)`, `rimLight(ctx, outline, opts)`, `shadeSide(ctx, outline, opts)`: volume from one closed outline (points, or a geo entry). `dir` is where the shadow falls and the light is `-dir`. `castShadow` shifts the silhouette by `len·dir` — and, given a `ground` y, compresses it in y onto that line — then fills with `hatch`, `stipple` or a flat tone (`style`, `soft`, `clipOutside`). `rimLight` strokes the contour where the outward normal faces the light, fading off. `shadeSide` hatches the opposite side inside the form.
 - `paper(ctx, opts)`: cream paper base with grain and fibres, cached.
 - `blueprint(ctx, opts)`: navy base, faint grid, guide circles and diagonals.
 - `hexLattice(ctx, clipFn, opts)`, `glowDot(ctx, x, y, r, opts)`, `ticks(ctx, ...)`, `bracket(ctx, ...)`, `guideCircle(ctx, ...)`, `arcAnnotation(ctx, ...)`.
