@@ -58,6 +58,7 @@ Blueprint comparison of the same subject at several stages, stacked by size and 
 ## 6. Silhouette transformation (match-cut into a new form)
 
 The subject contracts or reshapes on camera from one recognizable silhouette into another inside one locked shot, so the match cut on either side lands on an exact outline.
+The in-between is `lib.morph` of the two `lib.geo` outlines (arc-length `resample`, then cyclic alignment), not a hand-blended copy of the points.
 
 - Duration: 2.0 s
 - Plate: paper

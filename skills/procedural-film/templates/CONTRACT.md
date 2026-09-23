@@ -83,6 +83,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `pal`: named colours from the art bible.
 - `text(ctx, str, x, y, opts)`: a thin single-line wordmark drawn with system sans-serif (no font files).
 - `geo(id)`: an entry of `FILM.GEO`, read-only. `profile` (symmetric about `cx`: `hw(y)`, `x(y, side)`, `side(sign)`, `outline()`, `widest`), `outline` (a closed silhouette sampled densely, drawn as it stands: `outline()`), `points` (`pt(name)`), `polyline` (`pts`).
+- `resample(pts, n, closed)`: arc-length resample to `n` points. `morph(a, b, p, { n = 256, align = 'auto' | 'top' | 'index', ease })`: resample two closed contours, align the start (`auto` minimises the sum of distances over cyclic shifts and both traversal directions; `top` pairs the uppermost points; `index` keeps resample order), then interpolate. `ease` is an `lib.ease` name or a function. Works on `lib.geo(id).outline()` of any kind.
 
 ### Shared geometry
 
