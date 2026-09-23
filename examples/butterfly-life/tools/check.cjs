@@ -17,8 +17,8 @@
 //   3 sources      no Math.random, Date, performance.now or crypto randomness in src drawing/audio code;
 //                  no text drawn below the Shorts safe area (a literal y argument > 1540; an expression is not read);
 //                  warns on a literal colour outside lib.js (colours come from lib.pal)
-//   4 timeline     coverage, ids, transitions; warns on off-grid hits and cuts, a bpm whose 16ths
-//                  miss the frame grid, and a duration that is not whole bars
+//   4 timeline     coverage, ids, transitions, grade ranges and tint names; warns on off-grid hits
+//                  and cuts, a bpm whose 16ths miss the frame grid, and a duration that is not whole bars
 //   5 draw         every checked frame draws without throwing and is not one flat colour
 //   6 cost         frame times from a sweep across the film; slowest frames listed; warns when a repeat of the
 //                  sweep creates canvases again (a cache keyed by time, or one too small to hold the film)
@@ -112,6 +112,21 @@ function stripComments(code) {
     }
   }
   return out;
+}
+
+// Colour names a shot may name in grade.tint. Read from lib.js so check 4 does not boot the engine.
+function readPalNames() {
+  const text = fs.readFileSync(path.join(C.SRC, 'lib.js'), 'utf8');
+  const start = text.indexOf('const pal = {');
+  const end = start < 0 ? -1 : text.indexOf('\n  };', start);
+  const names = new Set();
+  if (start < 0 || end < 0) return names;
+  const body = text.slice(start, end);
+  for (const m of body.matchAll(/(?:^|\n)\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/g)) names.add(m[1]);
+  const aliasEnd = text.indexOf('lib.pal = pal', end);
+  const alias = text.slice(end, aliasEnd < 0 ? end : aliasEnd);
+  for (const m of alias.matchAll(/pal\.([A-Za-z_][A-Za-z0-9_]*)\s*=/g)) names.add(m[1]);
+  return names;
 }
 
 const BANNED = [
@@ -649,6 +664,9 @@ async function main() {
     if (!TL.hasDuration) tlProblems.push('timeline has no "duration"');
     if (!(TL.duration > 0)) tlProblems.push(`duration is not positive (${TL.duration})`);
     const ids = new Set();
+    const GRADE_RANGE = { warmth: [-1, 1], fade: [0, 1], vignette: [0, 1], paperAge: [0, 1], tintAmount: [0, 1] };
+    const palNames = readPalNames();
+    if (!palNames.size) tlProblems.push('could not read colour names from lib.pal');
     shots.forEach((s, i) => {
       if (typeof s.id !== 'string' || !s.id) tlProblems.push(`shot #${i} has no id`);
       else if (ids.has(s.id)) tlProblems.push(`duplicate shot id '${s.id}'`);
@@ -672,6 +690,28 @@ async function main() {
       }
       const m = String(s.mode || '').toLowerCase();
       if (!/illus|schem|blue|none|raw/.test(m)) tlWarnings.push(`shot '${s.id}' mode '${s.mode}' is neither illustrated nor schematic (treated as illustrated)`);
+      if (s.grade != null) {
+        const g = s.grade;
+        if (typeof g !== 'object' || Array.isArray(g)) {
+          tlProblems.push(`shot '${s.id}' grade must be an object`);
+        } else {
+          for (const key of Object.keys(g)) {
+            if (!Object.prototype.hasOwnProperty.call(GRADE_RANGE, key) && key !== 'tint') {
+              tlProblems.push(`shot '${s.id}' grade.${key} is not a grade field`);
+            }
+          }
+          for (const [key, [lo, hi]] of Object.entries(GRADE_RANGE)) {
+            if (g[key] == null) continue;
+            const n = g[key];
+            if (typeof n !== 'number' || !isFinite(n) || n < lo || n > hi) {
+              tlProblems.push(`shot '${s.id}' grade.${key} ${n} is outside ${lo}..${hi}`);
+            }
+          }
+          if (g.tint != null && (typeof g.tint !== 'string' || !palNames.has(g.tint))) {
+            tlProblems.push(`shot '${s.id}' grade.tint '${g.tint}' is not a colour in lib.pal`);
+          }
+        }
+      }
     });
     // every event sits on the beat grid (16ths at the film's bpm), so cuts and hits land together
     for (const c of TL.cues || []) {
