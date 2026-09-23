@@ -31,8 +31,44 @@
   const root = typeof window !== 'undefined' ? window : globalThis;
   const FILM = (root.FILM = root.FILM || {});
 
-  FILM.W = 1080;
-  FILM.H = 1920;
+  const DEFAULT_W = 1080;
+  const DEFAULT_H = 1920;
+
+  function frameDim(v, fallback) {
+    const n = Number(v);
+    return n > 0 && isFinite(n) ? n : fallback;
+  }
+
+  // Read at use time: core.js loads before timeline.js.
+  function frameSize() {
+    const tl = FILM.TIMELINE;
+    return {
+      w: frameDim(tl && tl.width, DEFAULT_W),
+      h: frameDim(tl && tl.height, DEFAULT_H),
+    };
+  }
+
+  Object.defineProperty(FILM, 'W', {
+    get() { return frameSize().w; },
+    enumerable: true,
+    configurable: true,
+  });
+  Object.defineProperty(FILM, 'H', {
+    get() { return frameSize().h; },
+    enumerable: true,
+    configurable: true,
+  });
+
+  // Title-safe rectangle in frame pixels. Keep in step with tools/common.cjs safeArea.
+  // 1080×1920 keeps the Shorts/Reels box. 16:9, 1:1 and any other size use 90% of the frame, centred.
+  FILM.safeArea = function safeArea(w, h) {
+    const f = frameSize();
+    const fw = frameDim(w == null ? f.w : w, DEFAULT_W);
+    const fh = frameDim(h == null ? f.h : h, DEFAULT_H);
+    if (fw === DEFAULT_W && fh === DEFAULT_H) return { x0: 60, y0: 220, x1: 940, y1: 1540 };
+    return { x0: fw * 0.05, y0: fh * 0.05, x1: fw * 0.95, y1: fh * 0.95 };
+  };
+
   FILM.FPS = 24;
   FILM.BOIL_FPS = 12;
   FILM.S = 1; // render scale: device pixels per logical pixel
@@ -1043,7 +1079,8 @@
  *   - null                                                 (no clip; opts.bounds or the whole frame)
  * Bounds are { x, y, w, h } or [x, y, w, h] in the current (logical) coordinates.
  *
- * Angles are radians. Sizes are logical pixels on the 1080x1920 frame.
+ * Angles are radians. Sizes are logical pixels on the frame (FILM.W × FILM.H, 1080×1920
+ * when the timeline sets neither width nor height).
  */
 (function () {
   'use strict';
@@ -2442,6 +2479,8 @@
 
   // ===========================================================================
   // Backgrounds: paper, blueprint, stripes
+  // Each fills the frame (FILM.W × FILM.H) unless opts give a rectangle.
+  // Plate caches include both width and height, so a second format does not reuse a vertical plate.
   // ===========================================================================
 
   function renderScale() {
@@ -2450,7 +2489,7 @@
 
   /**
    * paper(ctx, opts) : cream paper with mottling, grain and fibres. Cached by size, seed and options.
-   *   x, y, w, h   0, 0, 1080, 1920
+   *   x, y, w, h   0, 0, frame width, frame height
    *   color        pal.paper
    *   seed         3
    *   grain        1      fine grain strength
@@ -2560,7 +2599,7 @@
   /**
    * blueprint(ctx, opts) : navy plate with faint grid, big guide circles, long diagonals and noise.
    * Cached by size, seed and options.
-   *   x, y, w, h   0, 0, 1080, 1920
+   *   x, y, w, h   0, 0, frame width, frame height
    *   color        pal.navy
    *   seed         5
    *   grid         60      grid pitch (px); 0 turns the grid off
@@ -2725,7 +2764,7 @@
    *   angle    -0.52   stripe direction (radians): 30 degrees rising left to right
    *   offset   0       scroll along the normal (animate this)
    *   wobble   1.4     edge irregularity (px)
-   *   bounds   frame
+   *   bounds   frame (FILM.W × FILM.H)
    *   seed     21
    */
   function stripes(ctx, o = {}) {
@@ -36425,11 +36464,13 @@
     const rangeEnd = loopShot ? loopShot.end : duration;
     const tParam = params.get('t');
 
+    const fw = FILM.W;
+    const fh = FILM.H;
     const style = document.createElement('style');
     style.textContent = [
       'html,body{margin:0;height:100%;background:#000;overflow:hidden}',
       'body{display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-user-select:none;user-select:none}',
-      '#film{display:block;height:min(100vh,calc(100vw*16/9));width:auto;aspect-ratio:9/16;background:#000}',
+      '#film{display:block;height:min(100vh,calc(100vw*' + fh + '/' + fw + '));width:auto;aspect-ratio:' + fw + '/' + fh + ';background:#000}',
       '#hud{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;font:12px/1.4 ui-monospace,Menlo,monospace;color:#bbb;',
       'display:flex;justify-content:space-between;pointer-events:none;transition:opacity .4s;text-shadow:0 1px 2px #000}',
       '#bar{position:fixed;left:0;bottom:0;height:2px;background:#e8e0cf;width:0;pointer-events:none}',

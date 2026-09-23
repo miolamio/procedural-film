@@ -20,7 +20,10 @@ function centroid(canvas, pred) {
 
 function redDot(ctx) {
   ctx.fillStyle = FILM.lib.pal.red;
-  ctx.fillRect(700, 1100, 28, 28);
+  // 1100 on a 1920-tall frame. On a shorter frame, stay within a quarter of the
+  // height of centre so zoom 2 (which scales that offset) does not leave the plate.
+  const y = FILM.H >= 1920 ? 1100 : FILM.H / 2 + Math.min(140, FILM.H / 4 - 40);
+  ctx.fillRect(700, y, 28, 28);
 }
 
 FILM.assert('one layer at z = 1 matches lib.camera', () => {
