@@ -79,6 +79,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `paper(ctx, opts)`: cream paper base with grain and fibres, cached.
 - `blueprint(ctx, opts)`: navy base, faint grid, guide circles and diagonals.
 - `hexLattice(ctx, clipFn, opts)`, `glowDot(ctx, x, y, r, opts)`, `ticks(ctx, ...)`, `bracket(ctx, ...)`, `guideCircle(ctx, ...)`, `arcAnnotation(ctx, ...)`.
+- `voronoi(sites, clip, opts)` returns clipped cells `{ i, site, poly }` (Lloyd `relax` 0..3, cached by sites, clip and relax). `cells(ctx, cells, opts)` draws them with `inset`, `round`, `fill(i, cell)` and `stroke`.
 - `stripes(ctx, opts)`: the wide diagonal stripe background.
 - `camera(ctx, { x, y, zoom, rot }, fn)`: draws `fn` under a camera transform centred on the frame.
 - `pal`: named colours from the art bible.
