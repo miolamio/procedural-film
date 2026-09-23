@@ -2895,6 +2895,376 @@
   lib.particles = particles;
 
   // ===========================================================================
+  // Scatter and flow
+  // ===========================================================================
+
+  /*
+   * scatter(clip, opts) : Bridson Poisson-disk points inside a clip (any format from the
+   * file header), then a seeded volley of uniform darts so the gaps Bridson leaves still fill.
+   * Returns [{x, y}, ...]. Do not mutate it: the same array comes back on a later call.
+   *
+   *   r        exclusion radius in px. Pairs are at least r apart when density is absent or 1.
+   *   seed     rng seed (number or string)
+   *   max      stop after this many points (default 1000000)
+   *   density  optional (x, y) => 0..1. Local exclusion radius is r / sqrt(density).
+   *            0 (and anything under 0.04) rejects the spot; values above 1 clamp to 1,
+   *            so points are never closer than r.
+   *   bounds   {x,y,w,h} or [x,y,w,h] when clip is a function, a Path2D or null.
+   *            A polygon uses its own bounds (same rule as hatch).
+   *
+   * Cache key: clip hash, bounds, r, seed, max, and an 8×8 sampling of density over the
+   * bounds. The density function's identity is not the key. Absent density is its own
+   * signature, not the signature of a function that returns 1. Two pure functions that
+   * agree on that grid share an entry even if they differ between the samples; a density
+   * or a clip that is not a pure function of its arguments (one that reads the clock,
+   * for example) is not cached correctly. A function clip is hashed from its source plus
+   * a 16×16 inside-test, a Path2D from that test alone, so a closure's captured shape
+   * participates.
+   *
+   * flow(x, y, T, opts) : velocity {x, y} in px per second.
+   *   seed, scale (eddy size in px, default 240), speed (px/s, default 1),
+   *   curl (default true). curl is taken from the smooth, unclamped field noise2 clamps
+   *   into [-1, 1], so the velocity stays differentiable where noise2 would flatten.
+   *   The pattern also translates by `speed` px/s. T is the only time (not lib.T).
+   *   curl: false returns the gradient of that field instead.
+   *
+   * advect(p0, T, opts, steps) : where p0 ({x,y} or [x,y]) lands after time T.
+   *   Fixed step count (default 8), one sample of flow at the middle of each step.
+   *   A pure function of p0, T, opts and steps: the order of calls does not matter.
+   *
+   * instances(ctx, pts, fn) : fn(ctx, p, i, rnd) for each point. ctx is saved and
+   *   restored. rnd is rng(hash of the index), so instance i keeps its seed when p moves.
+   */
+  const scatterCache = new Map();
+  const SCATTER_CAP = 48;
+  const BRIDSON_K = 90;
+  let scatterScratch = null;
+
+  function scatterCtx() {
+    if (scatterScratch) return scatterScratch;
+    const c = newCanvas(Math.max(2, W()), Math.max(2, H()));
+    scatterScratch = c.getContext('2d');
+    return scatterScratch;
+  }
+
+  function hashAll(parts) {
+    let h = 0;
+    for (let i = 0; i < parts.length; i += 24) {
+      const args = [h];
+      const end = i + 24 < parts.length ? i + 24 : parts.length;
+      for (let j = i; j < end; j++) args.push(parts[j]);
+      h = hash.apply(null, args);
+    }
+    return h >>> 0;
+  }
+
+  function hardInside(clip, x, y, fillRule) {
+    const ctx = scatterCtx();
+    const rule = fillRule || 'nonzero';
+    if (typeof Path2D !== 'undefined' && clip instanceof Path2D) return ctx.isPointInPath(clip, x, y, rule);
+    ctx.beginPath();
+    clip(ctx);
+    return ctx.isPointInPath(x, y, rule);
+  }
+
+  function mask16(clip, b, fillRule) {
+    const ctx = scatterCtx();
+    const rule = fillRule || 'nonzero';
+    const path = typeof Path2D !== 'undefined' && clip instanceof Path2D;
+    if (!path) {
+      ctx.beginPath();
+      clip(ctx);
+    }
+    const bits = [];
+    for (let j = 0; j < 16; j++) {
+      for (let i = 0; i < 16; i++) {
+        const x = b.x + ((i + 0.5) / 16) * b.w;
+        const y = b.y + ((j + 0.5) / 16) * b.h;
+        const hit = path ? ctx.isPointInPath(clip, x, y, rule) : ctx.isPointInPath(x, y, rule);
+        bits.push(hit ? 1 : 0);
+      }
+    }
+    return bits;
+  }
+
+  function walkClip(clip, parts) {
+    if (clip == null) {
+      parts.push(0);
+      return;
+    }
+    if (typeof clip === 'number' || typeof clip === 'string') {
+      parts.push(clip);
+      return;
+    }
+    if (Array.isArray(clip)) {
+      parts.push(clip.length);
+      for (let i = 0; i < clip.length; i++) walkClip(clip[i], parts);
+      return;
+    }
+    if (typeof clip.x === 'number' && typeof clip.y === 'number') {
+      parts.push(clip.x, clip.y);
+      return;
+    }
+    parts.push(String(clip));
+  }
+
+  function clipHash(clip, b, fillRule) {
+    const parts = ['clip', b.x, b.y, b.w, b.h, fillRule || ''];
+    if (typeof clip === 'function') {
+      parts.push('fn', String(clip));
+      const bits = mask16(clip, b, fillRule);
+      for (let i = 0; i < bits.length; i++) parts.push(bits[i]);
+    } else if (typeof Path2D !== 'undefined' && clip instanceof Path2D) {
+      parts.push('path');
+      const bits = mask16(clip, b, fillRule);
+      for (let i = 0; i < bits.length; i++) parts.push(bits[i]);
+    } else {
+      parts.push('poly');
+      walkClip(clip, parts);
+    }
+    return hashAll(parts);
+  }
+
+  function densityHash(density, b) {
+    if (typeof density !== 'function') return hash('dens', 0);
+    const s = ['dens', 1];
+    for (let j = 0; j < 8; j++) {
+      for (let i = 0; i < 8; i++) {
+        const x = b.x + ((i + 0.5) / 8) * b.w;
+        const y = b.y + ((j + 0.5) / 8) * b.h;
+        const d = density(x, y);
+        s.push(typeof d === 'number' ? d : String(d));
+      }
+    }
+    return hash.apply(null, s);
+  }
+
+  function scatter(clip, o) {
+    o = o || {};
+    const r = o.r;
+    const seed = o.seed === undefined ? 1 : o.seed;
+    const max = o.max == null ? 1000000 : Math.max(0, Math.floor(Number(o.max)));
+    const shape = shapeOf(clip, { bounds: o.bounds, fillRule: o.fillRule });
+    const b = shape.bounds;
+    const key = hash('scatter', clipHash(clip, b, o.fillRule), r, seed, max, densityHash(o.density, b));
+    if (scatterCache.has(key)) {
+      const hit = scatterCache.get(key);
+      scatterCache.delete(key);
+      scatterCache.set(key, hit);
+      return hit;
+    }
+    const out = [];
+    const remember = () => {
+      Object.freeze(out);
+      if (scatterCache.has(key)) scatterCache.delete(key);
+      scatterCache.set(key, out);
+      while (scatterCache.size > SCATTER_CAP) scatterCache.delete(scatterCache.keys().next().value);
+      return out;
+    };
+    if (!(r > 0) || !(b.w > 0) || !(b.h > 0) || !(max > 0)) return remember();
+
+    const density = typeof o.density === 'function' ? o.density : null;
+    const rand = rng(seed);
+    const hard = typeof clip === 'function' || (typeof Path2D !== 'undefined' && clip instanceof Path2D);
+    function localR(x, y) {
+      if (!density) return r;
+      let d = density(x, y);
+      if (!(d > 0)) return Infinity;
+      if (d > 1) d = 1;
+      if (d < 0.04) return Infinity;
+      return r / Math.sqrt(d);
+    }
+    function inside(x, y) {
+      // Half-open bounds so a point on the far edge cannot fall outside the grid.
+      if (x < b.x || y < b.y || x >= b.x + b.w || y >= b.y + b.h) return false;
+      if (shape.polys) return polysContain(shape.polys, x, y);
+      if (hard) return hardInside(clip, x, y, o.fillRule);
+      return true;
+    }
+
+    const cell = r / Math.SQRT2;
+    const cols = Math.max(1, Math.ceil(b.w / cell));
+    const rows = Math.max(1, Math.ceil(b.h / cell));
+    const grid = new Int32Array(cols * rows);
+    grid.fill(-1);
+    const xs = [];
+    const ys = [];
+    const lrs = [];
+    let maxLr = r;
+
+    function cellOf(x, y) {
+      const c = Math.floor((x - b.x) / cell);
+      const rr = Math.floor((y - b.y) / cell);
+      if (c < 0 || rr < 0 || c >= cols || rr >= rows) return -1;
+      return rr * cols + c;
+    }
+    function fits(x, y, lr) {
+      if (!(lr < Infinity) || !inside(x, y)) return false;
+      const here = cellOf(x, y);
+      if (here < 0 || grid[here] >= 0) return false;
+      const reach = lr > maxLr ? lr : maxLr;
+      const rad = Math.floor(reach / cell) + 1;
+      const c0 = Math.floor((x - b.x) / cell);
+      const r0 = Math.floor((y - b.y) / cell);
+      for (let j = r0 - rad; j <= r0 + rad; j++) {
+        if (j < 0 || j >= rows) continue;
+        const row = j * cols;
+        for (let i = c0 - rad; i <= c0 + rad; i++) {
+          if (i < 0 || i >= cols) continue;
+          const idx = grid[row + i];
+          if (idx < 0) continue;
+          const dx = xs[idx] - x;
+          const dy = ys[idx] - y;
+          const need = lr > lrs[idx] ? lr : lrs[idx];
+          if (dx * dx + dy * dy < need * need) return false;
+        }
+      }
+      return true;
+    }
+    function place(x, y, lr) {
+      const idx = xs.length;
+      xs.push(x);
+      ys.push(y);
+      lrs.push(lr);
+      if (lr > maxLr) maxLr = lr;
+      const g = cellOf(x, y);
+      if (g >= 0) grid[g] = idx;
+      out.push(Object.freeze({ x: x, y: y }));
+    }
+
+    for (let n = 0; n < 64 && xs.length < max; n++) {
+      const x = b.x + rand() * b.w;
+      const y = b.y + rand() * b.h;
+      const lr = localR(x, y);
+      if (lr < Infinity && inside(x, y)) {
+        place(x, y, lr);
+        break;
+      }
+    }
+    if (!xs.length) return remember();
+
+    const active = [0];
+    // Each point is retired after one barren batch, so this is at most a few times `max`.
+    const spinCap = max * 8 + 64;
+    let spins = 0;
+    while (active.length && xs.length < max && spins < spinCap) {
+      spins++;
+      const ai = Math.floor(rand() * active.length);
+      const pi = active[ai];
+      const px = xs[pi];
+      const py = ys[pi];
+      const plr = lrs[pi];
+      let grew = false;
+      for (let k = 0; k < BRIDSON_K && xs.length < max; k++) {
+        const ang = rand() * TAU;
+        const rad = plr * (1 + rand());
+        const x = px + Math.cos(ang) * rad;
+        const y = py + Math.sin(ang) * rad;
+        const lr = localR(x, y);
+        if (!(lr < Infinity) || !fits(x, y, lr)) continue;
+        place(x, y, lr);
+        active.push(xs.length - 1);
+        grew = true;
+      }
+      if (!grew) {
+        active[ai] = active[active.length - 1];
+        active.pop();
+      }
+    }
+    // Bridson deactivates a point after K misses and leaves holes. A fixed volley of
+    // uniform darts from the same rng fills those holes without breaking the radius.
+    const darts = Math.min(12000, cols * rows * 4);
+    for (let n = 0; n < darts && xs.length < max; n++) {
+      const x = b.x + rand() * b.w;
+      const y = b.y + rand() * b.h;
+      const lr = localR(x, y);
+      if (!(lr < Infinity) || !fits(x, y, lr)) continue;
+      place(x, y, lr);
+    }
+    return remember();
+  }
+
+  function noiseGrad2(x, y, seed) {
+    const s = seed === undefined ? 0 : seedInt(seed);
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const fx = x - ix;
+    const fy = y - iy;
+    const u = fade5(fx);
+    const v = fade5(fy);
+    const du = 30 * fx * fx * (fx - 1) * (fx - 1);
+    const dv = 30 * fy * fy * (fy - 1) * (fy - 1);
+    function gxy(gx, gy) {
+      const k = (h3(gx, gy, s) * 8) | 0;
+      return [GX[k], GY[k]];
+    }
+    const g00 = gxy(ix, iy);
+    const g10 = gxy(ix + 1, iy);
+    const g01 = gxy(ix, iy + 1);
+    const g11 = gxy(ix + 1, iy + 1);
+    const n00 = g00[0] * fx + g00[1] * fy;
+    const n10 = g10[0] * (fx - 1) + g10[1] * fy;
+    const n01 = g01[0] * fx + g01[1] * (fy - 1);
+    const n11 = g11[0] * (fx - 1) + g11[1] * (fy - 1);
+    const nx0 = n00 + u * (n10 - n00);
+    const nx1 = n01 + u * (n11 - n01);
+    const dnx0x = g00[0] + du * (n10 - n00) + u * (g10[0] - g00[0]);
+    const dnx1x = g01[0] + du * (n11 - n01) + u * (g11[0] - g01[0]);
+    const dnx0y = g00[1] + u * (g10[1] - g00[1]);
+    const dnx1y = g01[1] + u * (g11[1] - g01[1]);
+    const n = nx0 + v * (nx1 - nx0);
+    const dndx = dnx0x + v * (dnx1x - dnx0x);
+    const dndy = dnx0y + dv * (nx1 - nx0) + v * (dnx1y - dnx0y);
+    return { dx: dndx * 1.1, dy: dndy * 1.1 };
+  }
+
+  function flow(x, y, T, o) {
+    o = o || {};
+    const scale = o.scale > 0 ? o.scale : 240;
+    const speed = o.speed != null ? o.speed : 1;
+    const t = typeof T === 'number' ? T : 0;
+    const inv = 1 / scale;
+    const g = noiseGrad2(x * inv - t * speed * inv, y * inv, o.seed === undefined ? 0 : o.seed);
+    if (o.curl === false) return { x: g.dx * speed, y: g.dy * speed };
+    return { x: g.dy * speed, y: -g.dx * speed };
+  }
+
+  function advect(p0, T, opts, steps) {
+    const x0 = Array.isArray(p0) ? p0[0] : p0.x;
+    const y0 = Array.isArray(p0) ? p0[1] : p0.y;
+    const t1 = typeof T === 'number' ? T : 0;
+    const n = steps == null ? 8 : Math.round(steps);
+    if (!(t1 !== 0) || !(n > 0)) return { x: x0, y: y0 };
+    const dt = t1 / n;
+    let x = x0;
+    let y = y0;
+    for (let i = 0; i < n; i++) {
+      const v = flow(x, y, (i + 0.5) * dt, opts);
+      x += v.x * dt;
+      y += v.y * dt;
+    }
+    return { x: x, y: y };
+  }
+
+  function instances(ctx, pts, draw) {
+    if (!pts || !pts.length || typeof draw !== 'function') return;
+    for (let i = 0; i < pts.length; i++) {
+      const rnd = rng(hash(0x51a7, i));
+      ctx.save();
+      try {
+        draw(ctx, pts[i], i, rnd);
+      } finally {
+        ctx.restore();
+      }
+    }
+  }
+
+  lib.scatter = scatter;
+  lib.flow = flow;
+  lib.advect = advect;
+  lib.instances = instances;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
