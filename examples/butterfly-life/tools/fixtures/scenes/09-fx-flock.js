@@ -21,13 +21,6 @@
   }
 
   FILM.scene({
-    id: 'fx-flock-hold',
-    draw(ctx) {
-      L.paper(ctx, { seed: 8 });
-    },
-  });
-
-  FILM.scene({
     id: 'fx-flock',
     draw(ctx, t) {
       L.paper(ctx, { seed: 8 });
