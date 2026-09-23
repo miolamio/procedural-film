@@ -3742,6 +3742,566 @@
   lib.drawBranch = drawBranch;
 
   // ===========================================================================
+  // Voronoi cells
+  // ===========================================================================
+
+  // Bowyer–Watson Delaunay, then the dual: each cell is the clip cut by the
+  // perpendicular bisectors of the site's Delaunay neighbours. A tiling check
+  // falls back to cutting against every other site when a degenerate mesh
+  // would leave a gap. Cached by sites, clip and Lloyd relax (never by time).
+  const voronoiCache = new Map();
+
+  function polyArea(poly) {
+    let a = 0;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      a += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+    }
+    return a * 0.5;
+  }
+
+  function cleanRing(poly, eps) {
+    if (!poly || poly.length < 3) return [];
+    const e = eps == null ? 1e-8 : eps;
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i];
+      const q = out[out.length - 1];
+      if (q && Math.hypot(p[0] - q[0], p[1] - q[1]) <= e) continue;
+      out.push([p[0], p[1]]);
+    }
+    if (out.length > 2 && Math.hypot(out[0][0] - out[out.length - 1][0], out[0][1] - out[out.length - 1][1]) <= e) out.pop();
+    if (out.length < 3) return [];
+    const slim = [];
+    for (let i = 0; i < out.length; i++) {
+      const a = out[(i + out.length - 1) % out.length];
+      const b = out[i];
+      const c = out[(i + 1) % out.length];
+      const cr = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+      if (Math.abs(cr) > e) slim.push(b);
+    }
+    return slim.length >= 3 ? slim : out;
+  }
+
+  function ensureCCW(poly) {
+    const c = cleanRing(poly, 1e-9);
+    if (c.length < 3) return [];
+    if (polyArea(c) < 0) c.reverse();
+    return c;
+  }
+
+  function pointInConvex(poly, x, y, eps) {
+    const e = eps == null ? 1e-6 : eps;
+    const n = poly.length;
+    if (n < 3) return false;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const cr = (poly[i][0] - poly[j][0]) * (y - poly[j][1]) - (poly[i][1] - poly[j][1]) * (x - poly[j][0]);
+      if (cr < -e) return false;
+    }
+    return true;
+  }
+
+  function ringConvex(poly) {
+    const n = poly.length;
+    if (n < 3) return false;
+    let sign = 0;
+    for (let i = 0; i < n; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % n];
+      const c = poly[(i + 2) % n];
+      const cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+      if (Math.abs(cr) <= 1e-7) continue;
+      const s = cr > 0 ? 1 : -1;
+      if (sign && s !== sign) return false;
+      sign = s;
+    }
+    return true;
+  }
+
+  function segCut(a, b, mx, my, dx, dy) {
+    const ex = b[0] - a[0];
+    const ey = b[1] - a[1];
+    const denom = ex * dx + ey * dy;
+    if (Math.abs(denom) < 1e-14) return null;
+    let t = ((mx - a[0]) * dx + (my - a[1]) * dy) / denom;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    return [a[0] + ex * t, a[1] + ey * t];
+  }
+
+  // Keep the half-plane of points closer to (sx,sy) than to (ox,oy).
+  function clipHalf(poly, sx, sy, ox, oy) {
+    const mx = (sx + ox) * 0.5;
+    const my = (sy + oy) * 0.5;
+    const dx = sx - ox;
+    const dy = sy - oy;
+    const inside = (x, y) => (x - mx) * dx + (y - my) * dy >= -1e-9;
+    const out = [];
+    const n = poly.length;
+    for (let i = 0; i < n; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % n];
+      const ain = inside(a[0], a[1]);
+      const bin = inside(b[0], b[1]);
+      if (ain && bin) out.push([b[0], b[1]]);
+      else if (ain && !bin) {
+        const hit = segCut(a, b, mx, my, dx, dy);
+        if (hit) out.push(hit);
+      } else if (!ain && bin) {
+        const hit = segCut(a, b, mx, my, dx, dy);
+        if (hit) out.push(hit);
+        out.push([b[0], b[1]]);
+      }
+    }
+    return cleanRing(out, 1e-8);
+  }
+
+  function rectRing(x, y, w, h) {
+    return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  }
+
+  function clipToRing(clip, o) {
+    if (Array.isArray(clip) && clip.length === 4 && typeof clip[0] === 'number') {
+      return ensureCCW(rectRing(clip[0], clip[1], clip[2], clip[3]));
+    }
+    if (clip && !Array.isArray(clip) && Number.isFinite(clip.x) && Number.isFinite(clip.y) && Number.isFinite(clip.w) && Number.isFinite(clip.h)) {
+      return ensureCCW(rectRing(clip.x, clip.y, clip.w, clip.h));
+    }
+    const polys = toPolys(clip);
+    if (polys && polys.length) {
+      let best = null;
+      let bestA = 0;
+      for (let i = 0; i < polys.length; i++) {
+        const ring = ensureCCW(polys[i]);
+        const a = Math.abs(polyArea(ring));
+        if (a > bestA) {
+          bestA = a;
+          best = ring;
+        }
+      }
+      if (best) return best;
+    }
+    const b = normBounds(o.bounds);
+    return ensureCCW(rectRing(b.x, b.y, b.w, b.h));
+  }
+
+  function normalizeSites(sites) {
+    const out = [];
+    if (!sites || !sites.length) return out;
+    for (let i = 0; i < sites.length; i++) {
+      const p = XY(sites[i]);
+      if (Number.isFinite(p[0]) && Number.isFinite(p[1])) out.push([p[0], p[1]]);
+    }
+    return out;
+  }
+
+  function delaunayNeighbors(points) {
+    const n = points.length;
+    const nbrs = Array.from({ length: n }, () => []);
+    if (n < 2) return nbrs;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const p = points[i];
+      if (p[0] < minX) minX = p[0];
+      if (p[1] < minY) minY = p[1];
+      if (p[0] > maxX) maxX = p[0];
+      if (p[1] > maxY) maxY = p[1];
+    }
+    const span = Math.max(maxX - minX, maxY - minY) || 1;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const P = new Array(n + 3);
+    for (let i = 0; i < n; i++) P[i] = [(points[i][0] - cx) / span, (points[i][1] - cy) / span];
+    P[n] = [-30, -10];
+    P[n + 1] = [30, -10];
+    P[n + 2] = [0, 30];
+    const orient = (i, j, k) => {
+      const ax = P[i][0], ay = P[i][1];
+      const bx = P[j][0], by = P[j][1];
+      const cxp = P[k][0], cyp = P[k][1];
+      return (bx - ax) * (cyp - ay) - (by - ay) * (cxp - ax);
+    };
+    const inCircle = (i, j, k, p) => {
+      const ax = P[i][0] - P[p][0];
+      const ay = P[i][1] - P[p][1];
+      const bx = P[j][0] - P[p][0];
+      const by = P[j][1] - P[p][1];
+      const cxp = P[k][0] - P[p][0];
+      const cyp = P[k][1] - P[p][1];
+      const ab = ax * by - bx * ay;
+      const bc = bx * cyp - cxp * by;
+      const ca = cxp * ay - ax * cyp;
+      return (ax * ax + ay * ay) * bc + (bx * bx + by * by) * ca + (cxp * cxp + cyp * cyp) * ab;
+    };
+    let tris = [{ a: n, b: n + 1, c: n + 2 }];
+    const EPS = 1e-12;
+    for (let pi = 0; pi < n; pi++) {
+      let dup = false;
+      for (let k = 0; k < pi; k++) {
+        const dx = P[pi][0] - P[k][0];
+        const dy = P[pi][1] - P[k][1];
+        if (dx * dx + dy * dy < 1e-20) { dup = true; break; }
+      }
+      if (dup) continue;
+      const bad = [];
+      for (let t = 0; t < tris.length; t++) {
+        const tr = tris[t];
+        const o = orient(tr.a, tr.b, tr.c);
+        if (o < 0) {
+          const tmp = tr.b;
+          tr.b = tr.c;
+          tr.c = tmp;
+        }
+        if (Math.abs(o) < 1e-16) continue;
+        if (inCircle(tr.a, tr.b, tr.c, pi) >= -EPS) bad.push(t);
+      }
+      if (!bad.length) {
+        for (let t = 0; t < tris.length; t++) {
+          const tr = tris[t];
+          if (orient(tr.a, tr.b, pi) >= -EPS && orient(tr.b, tr.c, pi) >= -EPS && orient(tr.c, tr.a, pi) >= -EPS) {
+            bad.push(t);
+            break;
+          }
+        }
+      }
+      if (!bad.length) continue;
+      const count = new Map();
+      const keyOf = (u, v) => (u < v ? u + ':' + v : v + ':' + u);
+      for (let b = 0; b < bad.length; b++) {
+        const tr = tris[bad[b]];
+        const edges = [[tr.a, tr.b], [tr.b, tr.c], [tr.c, tr.a]];
+        for (let e = 0; e < 3; e++) {
+          const k = keyOf(edges[e][0], edges[e][1]);
+          count.set(k, (count.get(k) || 0) + 1);
+        }
+      }
+      const boundary = [];
+      for (let b = 0; b < bad.length; b++) {
+        const tr = tris[bad[b]];
+        const edges = [[tr.a, tr.b], [tr.b, tr.c], [tr.c, tr.a]];
+        for (let e = 0; e < 3; e++) {
+          const u = edges[e][0], v = edges[e][1];
+          if (count.get(keyOf(u, v)) === 1) boundary.push([u, v]);
+        }
+      }
+      const dead = new Set(bad);
+      const next = [];
+      for (let t = 0; t < tris.length; t++) if (!dead.has(t)) next.push(tris[t]);
+      for (let e = 0; e < boundary.length; e++) {
+        const u = boundary[e][0], v = boundary[e][1];
+        if (orient(u, v, pi) >= -1e-14) next.push({ a: u, b: v, c: pi });
+        else if (orient(v, u, pi) >= -1e-14) next.push({ a: v, b: u, c: pi });
+      }
+      tris = next;
+    }
+    const link = (i, j) => {
+      if (i >= n || j >= n || i === j) return;
+      const a = nbrs[i];
+      for (let k = 0; k < a.length; k++) if (a[k] === j) return;
+      a.push(j);
+    };
+    for (let t = 0; t < tris.length; t++) {
+      const tr = tris[t];
+      link(tr.a, tr.b); link(tr.b, tr.a);
+      link(tr.b, tr.c); link(tr.c, tr.b);
+      link(tr.c, tr.a); link(tr.a, tr.c);
+    }
+    return nbrs;
+  }
+
+  function cellsFromNeighbors(sites, ring, nbrs) {
+    const cells = new Array(sites.length);
+    for (let i = 0; i < sites.length; i++) {
+      const s = sites[i];
+      let poly = ring.map((p) => [p[0], p[1]]);
+      const ns = nbrs ? nbrs[i] : null;
+      const m = ns ? ns.length : sites.length;
+      for (let k = 0; k < m; k++) {
+        const j = ns ? ns[k] : k;
+        if (j === i) continue;
+        const o = sites[j];
+        const dx = s[0] - o[0];
+        const dy = s[1] - o[1];
+        if (dx * dx + dy * dy < 1e-16) {
+          poly = [];
+          break;
+        }
+        poly = clipHalf(poly, s[0], s[1], o[0], o[1]);
+        if (poly.length < 3) {
+          poly = [];
+          break;
+        }
+      }
+      cells[i] = { i, site: [s[0], s[1]], poly };
+    }
+    return cells;
+  }
+
+  function tilingOk(cells, ring, sites) {
+    const A = Math.abs(polyArea(ring));
+    if (!(A > 0)) return false;
+    let sum = 0;
+    for (let i = 0; i < cells.length; i++) {
+      const poly = cells[i].poly;
+      if (!poly.length) {
+        if (pointInConvex(ring, sites[i][0], sites[i][1], 1e-4)) return false;
+        continue;
+      }
+      if (!ringConvex(poly)) return false;
+      sum += Math.abs(polyArea(poly));
+      if (pointInConvex(ring, sites[i][0], sites[i][1], 1e-5) && !pointInConvex(poly, sites[i][0], sites[i][1], 1e-4)) return false;
+    }
+    return Math.abs(sum - A) / A < 0.005;
+  }
+
+  function diagram(sites, ring) {
+    if (sites.length >= 3) {
+      const cells = cellsFromNeighbors(sites, ring, delaunayNeighbors(sites));
+      if (tilingOk(cells, ring, sites)) return cells;
+    }
+    return cellsFromNeighbors(sites, ring, null);
+  }
+
+  function polyCentroid(poly) {
+    let a = 0, cx = 0, cy = 0;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const c = poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+      a += c;
+      cx += (poly[j][0] + poly[i][0]) * c;
+      cy += (poly[j][1] + poly[i][1]) * c;
+    }
+    if (Math.abs(a) < 1e-12) return [poly[0][0], poly[0][1]];
+    return [cx / (3 * a), cy / (3 * a)];
+  }
+
+  function geomKey(tag, pts) {
+    let h1 = hash(tag, pts.length);
+    let h2 = hash('k', tag, pts.length);
+    for (let i = 0; i < pts.length; i++) {
+      h1 = hash(h1, pts[i][0], i);
+      h2 = hash(h2, pts[i][1], i);
+    }
+    return h1.toString(16) + h2.toString(16);
+  }
+
+  function relaxCount(o) {
+    let r = o && o.relax != null ? o.relax : 0;
+    if (r < 0) r = 0;
+    else if (r > 3) r = 3;
+    return r | 0;
+  }
+
+  /**
+   * voronoi(sites, clip, opts) : cells of a Voronoi diagram clipped to a convex clip.
+   *   sites   [[x,y], ...] or [{x,y}, ...]
+   *   clip    [x,y,w,h], {x,y,w,h}, a polygon [[x,y],...], or null (opts.bounds or the frame)
+   *   relax   0..3    Lloyd iterations. 0 leaves the sites where they are.
+   * Returns [{ i, site, poly }], one per site, in order. poly is a CCW ring with no
+   * repeated close, convex when the clip is convex, empty when the site owns nothing.
+   * site is the position after relaxation (the point the cell contains).
+   * Cached by the sites, the clip and relax.
+   */
+  function voronoi(sitesIn, clip, o) {
+    const opts = o || {};
+    const relax = relaxCount(opts);
+    const ring = clipToRing(clip, opts);
+    const sites = normalizeSites(sitesIn);
+    const key = geomKey('s', sites) + '|' + geomKey('c', ring) + '|' + relax;
+    if (voronoiCache.has(key)) {
+      const hit = voronoiCache.get(key);
+      voronoiCache.delete(key);
+      voronoiCache.set(key, hit);
+      return hit;
+    }
+    let cur = sites.map((s) => [s[0], s[1]]);
+    let cells = diagram(cur, ring);
+    for (let k = 0; k < relax; k++) {
+      cur = cells.map((c) => (c.poly.length >= 3 ? polyCentroid(c.poly) : [c.site[0], c.site[1]]));
+      cells = diagram(cur, ring);
+    }
+    voronoiCache.set(key, cells);
+    while (voronoiCache.size > 32) voronoiCache.delete(voronoiCache.keys().next().value);
+    return cells;
+  }
+  lib.voronoi = voronoi;
+
+  function distToSeg(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const l2 = dx * dx + dy * dy || 1;
+    let t = ((px - ax) * dx + (py - ay) * dy) / l2;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+  }
+
+  function edgeOnRing(a, b, ring, eps) {
+    for (let i = 0; i < ring.length; i++) {
+      const c = ring[i];
+      const d = ring[(i + 1) % ring.length];
+      if (distToSeg(a[0], a[1], c[0], c[1], d[0], d[1]) <= eps && distToSeg(b[0], b[1], c[0], c[1], d[0], d[1]) <= eps) return true;
+    }
+    return false;
+  }
+
+  function pointOnRing(p, ring, eps) {
+    for (let i = 0; i < ring.length; i++) {
+      const c = ring[i];
+      const d = ring[(i + 1) % ring.length];
+      if (distToSeg(p[0], p[1], c[0], c[1], d[0], d[1]) <= eps) return true;
+    }
+    return false;
+  }
+
+  function offsetConvex(poly, distOrFn) {
+    const n = poly.length;
+    if (n < 3) return [];
+    const lines = [];
+    for (let i = 0; i < n; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % n];
+      let dx = b[0] - a[0];
+      let dy = b[1] - a[1];
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) continue;
+      dx /= len;
+      dy /= len;
+      const dist = typeof distOrFn === 'function' ? distOrFn(a, b) : distOrFn;
+      lines.push({ x: a[0] - dy * dist, y: a[1] + dx * dist, dx, dy });
+    }
+    if (lines.length < 3) return [];
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+      const L1 = lines[(i + lines.length - 1) % lines.length];
+      const L2 = lines[i];
+      const det = L1.dx * L2.dy - L1.dy * L2.dx;
+      if (Math.abs(det) < 1e-12) continue;
+      const t = ((L2.x - L1.x) * L2.dy - (L2.y - L1.y) * L2.dx) / det;
+      out.push([L1.x + L1.dx * t, L1.y + L1.dy * t]);
+    }
+    const cleaned = cleanRing(out, 1e-6);
+    if (cleaned.length < 3 || polyArea(cleaned) <= 0) return [];
+    return cleaned;
+  }
+
+  function filletPoly(poly, r, seed, cellIndex, sharp) {
+    const n = poly.length;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const prev = poly[(i + n - 1) % n];
+      const cur = poly[i];
+      const next = poly[(i + 1) % n];
+      if (sharp && sharp(cur)) {
+        out.push([cur[0], cur[1]]);
+        continue;
+      }
+      const v1x = prev[0] - cur[0], v1y = prev[1] - cur[1];
+      const v2x = next[0] - cur[0], v2y = next[1] - cur[1];
+      const l1 = Math.hypot(v1x, v1y), l2 = Math.hypot(v2x, v2y);
+      if (l1 < 1e-6 || l2 < 1e-6) { out.push([cur[0], cur[1]]); continue; }
+      const u1x = v1x / l1, u1y = v1y / l1;
+      const u2x = v2x / l2, u2y = v2y / l2;
+      let dot = u1x * u2x + u1y * u2y;
+      if (dot > 0.999) { out.push([cur[0], cur[1]]); continue; }
+      dot = dot < -1 ? -1 : dot > 1 ? 1 : dot;
+      const ang = Math.acos(dot);
+      const half = ang / 2;
+      const jitter = 0.75 + 0.5 * h3(cellIndex, i, seed);
+      let rad = r * jitter;
+      const tanH = Math.tan(half) || 1e-6;
+      const maxT = Math.min(l1, l2) * 0.45;
+      let t = Math.min(maxT, rad / tanH);
+      rad = t * tanH;
+      if (t < 0.35 || rad < 0.35) { out.push([cur[0], cur[1]]); continue; }
+      const n1x = u1y, n1y = -u1x;
+      const n2x = -u2y, n2y = u2x;
+      let bx = n1x + n2x, by = n1y + n2y;
+      const bl = Math.hypot(bx, by) || 1;
+      bx /= bl;
+      by /= bl;
+      const dist = rad / (Math.sin(half) || 1e-6);
+      const ccx = cur[0] + bx * dist, ccy = cur[1] + by * dist;
+      const p1x = cur[0] + u1x * t, p1y = cur[1] + u1y * t;
+      const p2x = cur[0] + u2x * t, p2y = cur[1] + u2y * t;
+      let a1 = Math.atan2(p1y - ccy, p1x - ccx);
+      let a2 = Math.atan2(p2y - ccy, p2x - ccx);
+      let sweep = a2 - a1;
+      while (sweep <= -Math.PI) sweep += TAU;
+      while (sweep > Math.PI) sweep -= TAU;
+      const steps = Math.max(2, Math.ceil(Math.abs(sweep) / (Math.PI / 7)));
+      for (let s = 0; s <= steps; s++) {
+        const a = a1 + sweep * (s / steps);
+        out.push([ccx + Math.cos(a) * rad, ccy + Math.sin(a) * rad]);
+      }
+    }
+    return cleanRing(out, 1e-4);
+  }
+
+  /**
+   * cells(ctx, cells, opts) : organic cells, gapped and rounded.
+   *   inset    0     px to pull each edge inward (the gap). Edges that lie on opts.clip stay put,
+   *                  so the gap does not open a frame around the clip.
+   *   round    0     corner radius (px). Corners on opts.clip stay sharp.
+   *   fill     null  a colour, or (i, cell) => colour. Falsy skips the fill.
+   *   stroke   null  a colour, or true for pal.ink. width (default 1.5), alpha, strokeAlpha.
+   *   seed     1     jitters the corner radius
+   *   clip     null  rect or polygon the cells were clipped to (see inset / round)
+   * A flush cell (no inset, no round) is drawn a hair fat so shared edges do not crack.
+   */
+  function cells(ctx, list, o = {}) {
+    if (!list || !list.length) return;
+    const inset = o.inset || 0;
+    const round = o.round || 0;
+    const seed = seedInt(o.seed === undefined ? 1 : o.seed);
+    const width = o.width != null ? o.width : 1.5;
+    const ring = o.clip != null ? clipToRing(o.clip, o) : null;
+    const seal = !(inset > 0) && !(round > 0);
+    ctx.save();
+    for (let i = 0; i < list.length; i++) {
+      const cell = list[i];
+      const src = cell && cell.poly ? cell.poly : Array.isArray(cell) ? cell : null;
+      if (!src || src.length < 3) continue;
+      let poly = src;
+      if (inset > 0) {
+        poly = offsetConvex(poly, ring
+          ? (a, b) => (edgeOnRing(a, b, ring, 0.75) ? 0 : inset)
+          : inset);
+      } else if (seal) {
+        poly = offsetConvex(poly, -0.65);
+      }
+      if (!poly || poly.length < 3) continue;
+      if (round > 0) {
+        poly = filletPoly(poly, round, seed, i, ring ? (p) => pointOnRing(p, ring, 0.75) : null);
+      }
+      if (!poly || poly.length < 3) continue;
+      const fill = typeof o.fill === 'function' ? o.fill(i, cell) : o.fill;
+      ctx.save();
+      if (o.alpha != null) ctx.globalAlpha *= o.alpha;
+      ctx.beginPath();
+      lib.tracePath(ctx, poly, true);
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+        if (seal) {
+          ctx.lineJoin = 'round';
+          ctx.lineWidth = 1.25;
+          ctx.strokeStyle = fill;
+          ctx.stroke();
+        }
+      }
+      if (o.stroke) {
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.lineWidth = width;
+        ctx.strokeStyle = o.stroke === true ? pal.ink : o.stroke;
+        if (o.strokeAlpha != null) ctx.globalAlpha *= o.strokeAlpha;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+  lib.cells = cells;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
