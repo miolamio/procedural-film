@@ -81,6 +81,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `camera(ctx, { x, y, zoom, rot }, fn)`: draws `fn` under a camera transform centred on the frame.
 - `pal`: named colours from the art bible.
 - `text(ctx, str, x, y, opts)`: a thin single-line wordmark drawn with system sans-serif (no font files).
+- `particles(ctx, T, opts)`, `particleAt(i, T, opts)`: sparks, dust, pollen and smoke as a closed function of time (no stored particle state). Birth is `i / rate` plus a seeded jitter; motion is analytic — gravity toward canvas +y (down), exponential drag, and `noise1` wind. `loop` repeats the field; `onTwos` quantises drawing to the 12 fps grid.
 - `geo(id)`: an entry of `FILM.GEO`, read-only. `profile` (symmetric about `cx`: `hw(y)`, `x(y, side)`, `side(sign)`, `outline()`, `widest`), `outline` (a closed silhouette sampled densely, drawn as it stands: `outline()`), `points` (`pt(name)`), `polyline` (`pts`).
 
 ### Shared geometry

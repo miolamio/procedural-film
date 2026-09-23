@@ -2097,6 +2097,318 @@
   };
 
   // ===========================================================================
+  // Particles (stateless: position is a closed function of seed, index and time)
+  // ===========================================================================
+
+  /**
+   * Sparks, dust, pollen and smoke with no per-frame state.
+   * Particle i is born at t_i = i / rate plus a seeded jitter in [0, 1/rate), and lives `life`.
+   * While it is alive its position is analytic: exponential drag, constant gravity, and a wind
+   * displacement wind * noise1(age) * age. Nothing is alive for T < 0. Because births are spaced
+   * about 1/rate apart, the number alive at any T is at most ceil(rate * life) + 1.
+   *
+   * Gravity is px/s^2 toward +y, and canvas +y points down, so gravity > 0 pulls downward
+   * (smoke that should rise wants an upward angle and, if it must keep rising, a negative gravity).
+   * After the apex of an upward throw with wind 0, y increases monotonically.
+   *
+   *   seed, n, emitter { x, y, r } or { pts }   pts are absolute; otherwise a disk of radius r
+   *   rate, life, v0 [min, max], angle, spread  spread is the full cone width in radians
+   *   gravity, drag, wind, size, color, fade    fade is the exponent on (1 - age/life); 0 or false holds
+   *   kind   'spark' | 'dust' | 'smoke' | 'pollen'
+   *   additive   'lighter' composite, for sparks on a dark plate
+   *   loop       period in seconds. State at T equals state at T+period for T >= 0.
+   *              Only floor(rate * period - 1) + 1 births fit in one period; later indices stay dead
+   *              so a loop cannot exceed the birth rate.
+   *   onTwos     quantise T onto the 12 fps grid before simulating (drawing holds on twos)
+   *
+   * particleAt(i, T, opts) → { x, y, age, alive } for the same options.
+   */
+  function normParticles(o) {
+    const s = o || {};
+    const v0 = Array.isArray(s.v0) && s.v0.length ? s.v0 : [40, 140];
+    const vMin = Number(v0[0]);
+    const vMax = v0.length > 1 ? Number(v0[1]) : vMin;
+    const e = s.emitter;
+    let emitter;
+    if (!e) emitter = { x: W() / 2, y: H() / 2, r: 0, pts: null };
+    else {
+      emitter = {
+        x: e.x != null ? e.x : 0,
+        y: e.y != null ? e.y : 0,
+        r: e.r > 0 ? e.r : 0,
+        pts: e.pts && e.pts.length ? e.pts : null,
+      };
+    }
+    const rate = s.rate > 0 ? s.rate : 24;
+    const life = s.life > 0 ? s.life : 1;
+    const loop = s.loop > 0 ? s.loop : 0;
+    let slots = s.n == null ? 48 : s.n;
+    slots = slots > 0 ? slots | 0 : 0;
+    if (loop > 0) {
+      const fit = Math.floor(rate * loop - 1) + 1;
+      slots = fit > 0 ? Math.min(slots, fit) : 0;
+    }
+    let fade = 1;
+    if (s.fade === false || s.fade === 0) fade = 0;
+    else if (typeof s.fade === 'number' && s.fade > 0) fade = s.fade;
+    return {
+      seedN: hash(s.seed === undefined ? 1 : s.seed) | 0,
+      n: slots,
+      emitter,
+      rate,
+      life,
+      vMin,
+      vMax,
+      angle: s.angle != null ? s.angle : -Math.PI / 2,
+      spread: s.spread != null ? s.spread : 0.8,
+      gravity: s.gravity != null ? s.gravity : 480,
+      drag: s.drag != null ? s.drag : 1,
+      wind: s.wind || 0,
+      size: s.size > 0 ? s.size : 3,
+      color: s.color || pal.ink,
+      fade,
+      kind: String(s.kind || 'dust').toLowerCase(),
+      additive: !!s.additive,
+      onTwos: !!s.onTwos,
+      loop,
+    };
+  }
+
+  // Simulation clock. onTwos quantises first, then loop folds T into one period.
+  function particleTime(T, o) {
+    if (!(T >= 0) || T !== T) return -1;
+    let t = o.onTwos ? lib.onTwos(T) : T;
+    if (!(t >= 0)) return -1;
+    const p = o.loop;
+    if (p > 0) {
+      let x = t - Math.floor(t / p) * p;
+      if (x < 0) x += p;
+      else if (x >= p) x -= p;
+      t = x;
+    }
+    return t;
+  }
+
+  function emitXY(i, e, seedN, out) {
+    const pts = e.pts;
+    if (pts) {
+      const n = pts.length;
+      const p0 = XY(pts[0]);
+      if (n === 1) {
+        out.x0 = p0[0];
+        out.y0 = p0[1];
+        return;
+      }
+      let total = 0;
+      for (let k = 1; k < n; k++) {
+        const a = XY(pts[k - 1]);
+        const b = XY(pts[k]);
+        total += Math.hypot(b[0] - a[0], b[1] - a[1]);
+      }
+      let d = total > 0 ? h3(i, seedN, 3) * total : 0;
+      for (let k = 1; k < n; k++) {
+        const a = XY(pts[k - 1]);
+        const b = XY(pts[k]);
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (d <= len || k === n - 1) {
+          const u = len > 0 ? d / len : 0;
+          out.x0 = a[0] + (b[0] - a[0]) * u;
+          out.y0 = a[1] + (b[1] - a[1]) * u;
+          return;
+        }
+        d -= len;
+      }
+      out.x0 = p0[0];
+      out.y0 = p0[1];
+      return;
+    }
+    const r = e.r;
+    if (!(r > 0)) {
+      out.x0 = e.x;
+      out.y0 = e.y;
+      return;
+    }
+    const a = h3(i, seedN, 4) * TAU;
+    const rad = Math.sqrt(h3(i, seedN, 5)) * r;
+    out.x0 = e.x + Math.cos(a) * rad;
+    out.y0 = e.y + Math.sin(a) * rad;
+  }
+
+  // Integrate drag + gravity from the birth pose. Wind is a displacement, so wind 0 leaves y ballistic.
+  function placeParticle(age, o, wSeed, out) {
+    const g = o.gravity;
+    const k = o.drag;
+    const vx = out.vx0;
+    const vy = out.vy0;
+    let x;
+    let y;
+    if (k > 1e-3 || k < -1e-3) {
+      const e = Math.exp(-k * age);
+      const inv = 1 / k;
+      const gk = g * inv;
+      const grow = (1 - e) * inv;
+      x = out.x0 + vx * grow;
+      y = out.y0 + gk * age + (vy - gk) * grow;
+      out.vx = vx * e;
+      out.vy = gk + (vy - gk) * e;
+    } else {
+      x = out.x0 + vx * age;
+      y = out.y0 + vy * age + 0.5 * g * age * age;
+      out.vx = vx;
+      out.vy = vy + g * age;
+    }
+    if (o.wind) {
+      const n1 = noise1(age * 0.85, wSeed);
+      const n2 = noise1(age * 0.85 + 3.7, wSeed + 17);
+      x += o.wind * n1 * age;
+      y += o.wind * 0.25 * n2 * age;
+    }
+    out.x = x;
+    out.y = y;
+  }
+
+  // `t` is already the simulation clock (see particleTime). Fills `out`.
+  function evalParticle(i, t, o, out) {
+    out.x = 0;
+    out.y = 0;
+    out.age = -1;
+    out.alive = false;
+    out.vx = 0;
+    out.vy = 0;
+    if (i < 0 || i >= o.n || !(o.rate > 0) || !(o.life > 0)) return out;
+    const seedN = o.seedN;
+    const gap = 1 / o.rate;
+    // Jitter stays strictly under one gap so births cannot bunch enough to break the live-count bound.
+    const t0 = (i + h3(i, seedN, 1) * 0.999) * gap;
+    let age = t - t0;
+    if (o.loop > 0 && age < 0) age += o.loop;
+    out.age = age;
+    out.alive = age >= 0 && age < o.life;
+    emitXY(i, o.emitter, seedN, out);
+    const speed = o.vMin + (o.vMax - o.vMin) * h3(i, seedN, 6);
+    const ang = o.angle + (h3(i, seedN, 7) - 0.5) * o.spread;
+    out.vx0 = Math.cos(ang) * speed;
+    out.vy0 = Math.sin(ang) * speed;
+    out.sizeK = 0.72 + 0.56 * h3(i, seedN, 8);
+    const wSeed = (seedN ^ Math.imul(i + 1, 0x9e3779b1)) | 0;
+    const at = age > 0 ? age : 0;
+    placeParticle(at, o, wSeed, out);
+    return out;
+  }
+
+  function particleAt(i, T, opts) {
+    const o = normParticles(opts);
+    const out = { x: 0, y: 0, age: -1, alive: false };
+    const t = particleTime(T, o);
+    if (!(t >= 0)) return out;
+    evalParticle(i | 0, t, o, out);
+    return { x: out.x, y: out.y, age: out.age, alive: out.alive };
+  }
+
+  const PARTICLE_STEPS = 8;
+
+  function particleBucket(paths, alphas, a) {
+    if (!(a > 0.025)) return null;
+    if (a > 1) a = 1;
+    const bi = Math.min(PARTICLE_STEPS - 1, (a * PARTICLE_STEPS * 0.999999) | 0);
+    let p = paths[bi];
+    if (!p) {
+      p = paths[bi] = new Path2D();
+      alphas[bi] = (bi + 1) / PARTICLE_STEPS;
+    }
+    return p;
+  }
+
+  function addDot(path, x, y, r) {
+    if (!(r > 0.3)) return;
+    // Diamonds, not arcs: a few hundred arc fills blew the frame budget. Smoke uses addDisc.
+    path.moveTo(x, y - r);
+    path.lineTo(x + r * 0.72, y);
+    path.lineTo(x, y + r);
+    path.lineTo(x - r * 0.72, y);
+    path.closePath();
+  }
+
+  function addDisc(path, x, y, r) {
+    if (!(r > 0.4)) return;
+    path.moveTo(x + r, y);
+    path.arc(x, y, r, 0, TAU);
+  }
+
+  function addSpark(path, x, y, vx, vy, size) {
+    const sp = Math.hypot(vx, vy);
+    const len = Math.min(size * 8, Math.max(size * 2.2, sp * 0.05));
+    const inv = sp > 1 ? 1 / sp : 0;
+    const ux = inv ? vx * inv : 1;
+    const uy = inv ? vy * inv : 0;
+    const nx = -uy;
+    const ny = ux;
+    const w = size * 0.42;
+    path.moveTo(x + ux * size * 0.85, y + uy * size * 0.85);
+    path.lineTo(x - ux * len + nx * w, y - uy * len + ny * w);
+    path.lineTo(x - ux * (len * 0.55), y - uy * (len * 0.55));
+    path.lineTo(x - ux * len - nx * w, y - uy * len - ny * w);
+    path.closePath();
+  }
+
+  function particles(ctx, T, opts) {
+    const o = normParticles(opts);
+    const t = particleTime(T, o);
+    if (!(t >= 0) || !(o.n > 0)) return;
+    let i0 = 0;
+    let i1 = o.n - 1;
+    if (!(o.loop > 0)) {
+      i1 = Math.min(i1, Math.floor(o.rate * t));
+      i0 = Math.max(0, Math.floor(o.rate * (t - o.life) - 1));
+    }
+    if (i1 < i0) return;
+    const paths = new Array(PARTICLE_STEPS);
+    const alphas = new Array(PARTICLE_STEPS);
+    const rec = {};
+    const smoke = o.kind === 'smoke';
+    const spark = o.kind === 'spark';
+    const pollen = o.kind === 'pollen';
+    for (let i = i0; i <= i1; i++) {
+      evalParticle(i, t, o, rec);
+      if (!rec.alive) continue;
+      const u = rec.age / o.life;
+      let a = o.fade > 0 ? Math.pow(1 - u, o.fade) : 1;
+      const sz = o.size * rec.sizeK;
+      if (smoke) {
+        // One disc. A second circle, or a diamond the size of a puff, read as a brick.
+        const R = Math.min(40, sz * (0.55 + u));
+        const p = particleBucket(paths, alphas, a * 0.62);
+        if (p) addDisc(p, rec.x, rec.y, R);
+      } else if (spark) {
+        const p = particleBucket(paths, alphas, a);
+        if (p) addSpark(p, rec.x, rec.y, rec.vx, rec.vy, sz);
+      } else if (pollen) {
+        const p = particleBucket(paths, alphas, a * 0.92);
+        if (p) addDot(p, rec.x, rec.y, sz);
+      } else {
+        const p = particleBucket(paths, alphas, a * 0.7);
+        if (p) addDot(p, rec.x, rec.y, sz * 0.65);
+      }
+    }
+    ctx.save();
+    try {
+      if (o.additive) ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = o.color;
+      const base = ctx.globalAlpha;
+      for (let b = 0; b < PARTICLE_STEPS; b++) {
+        if (!paths[b]) continue;
+        ctx.globalAlpha = base * alphas[b];
+        ctx.fill(paths[b]);
+      }
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  lib.particleAt = particleAt;
+  lib.particles = particles;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
