@@ -114,7 +114,7 @@ One continuous zoom out through several nested layers of context, each layer its
 - Duration: 3.0 s
 - Plate: paper
 - Camera: one log-linear zoom-out, each layer landing on its own beat with its own anchor
-- Leans on: `guideCircle`
+- Leans on: `layers`, `camera`, `guideCircle`
 - Example: `examples/butterfly-life/src/scenes/13-pull-back-continent.js`
 
 ## 12. Population/column shot
