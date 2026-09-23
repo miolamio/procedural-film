@@ -63,6 +63,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 - `FILM.mount(canvas)` sets the target canvas.
 - `FILM.activeShot(T)` returns the timeline entry.
 - Global post: paper grain over illustrated shots, fine noise over schematic shots, both re-seeded on a 12 fps "boil" clock so the texture shimmers like drawn animation.
+- Optional per-shot `grade: { warmth, fade, vignette, paperAge, tint, tintAmount }`. `warmth` is −1..1; `fade`, `vignette`, `paperAge` and `tintAmount` are 0..1; `tint` is a `lib.pal` name. `core` applies it after the shot draws and before the grain (`multiply` / `screen` / `overlay`, one vignette gradient). Across `transitionIn` it interpolates from the outgoing grade to the incoming one. Omit `grade` and the frame is unchanged.
 
 ### Lib (minimum surface)
 
