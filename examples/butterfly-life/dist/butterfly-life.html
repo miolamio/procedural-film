@@ -6250,6 +6250,639 @@
   lib.wire3d = wire3d;
 
   // ===========================================================================
+  // Maps and plots
+  // ===========================================================================
+
+  const DEG = Math.PI / 180;
+  const MERC_LIMIT = 85.0511287798;
+
+  function finite(v, d) {
+    return v != null && isFinite(v) ? v : d;
+  }
+
+  // px per degree. A number is isotropic; [sx, sy] stretches longitude and latitude apart
+  // (the butterfly G6 plate is 27 by 32). Orthographic ignores sy and uses sx as the radius.
+  function projScale(scale) {
+    if (Array.isArray(scale)) {
+      const sx = finite(scale[0], 1);
+      return [sx, scale.length > 1 ? finite(scale[1], sx) : sx];
+    }
+    const s = finite(scale, 1);
+    return [s, s];
+  }
+
+  function mercNorth(lat) {
+    const φ = clamp(lat, -MERC_LIMIT, MERC_LIMIT) * DEG;
+    return Math.log(Math.tan(Math.PI / 4 + φ / 2)) / DEG;
+  }
+
+  /**
+   * projection(opts) → { project(lon, lat) → [x, y] | null, invert(x, y) → [lon, lat] | null }
+   *   kind   'equirect' | 'mercator' | 'ortho'   (default equirect)
+   *   lon0   0      longitude at `at` (degrees, west negative)
+   *   lat0   0      latitude at `at`
+   *   scale  1      px per degree, or [sx, sy]. ortho: globe radius in px (a pair uses the first)
+   *   at     [0, 0] screen point of (lon0, lat0). y grows south, as on the frame.
+   *   rot    0      roll about `at`, radians, clockwise on the screen (same sense as ctx.rotate)
+   * ortho returns null on the far side of the limb (the limb itself is kept). mercator returns
+   * null past ±85.05°, so a meridian stops instead of running away to infinity.
+   */
+  function projection(o = {}) {
+    const kind = o.kind || 'equirect';
+    const lon0 = finite(o.lon0, 0);
+    const lat0 = finite(o.lat0, 0);
+    const pair = projScale(o.scale);
+    const sx = pair[0];
+    const sy = pair[1];
+    const radius = Array.isArray(o.scale) ? finite(o.scale[0], 1) : finite(o.scale, 1);
+    const at = o.at || [0, 0];
+    const ax = finite(at[0], 0);
+    const ay = finite(at[1], 0);
+    const rot = finite(o.rot, 0);
+    const cr = Math.cos(rot);
+    const sr = Math.sin(rot);
+    const ortho = kind === 'ortho';
+    const merc = kind === 'mercator';
+
+    // mx east, my north, in px. Screen y is down.
+    function toScreen(mx, my) {
+      let dx = mx;
+      let dy = -my;
+      if (rot) {
+        const ndx = dx * cr - dy * sr;
+        const ndy = dx * sr + dy * cr;
+        dx = ndx;
+        dy = ndy;
+      }
+      return [ax + dx, ay + dy];
+    }
+    function fromScreen(x, y) {
+      let dx = x - ax;
+      let dy = y - ay;
+      if (rot) {
+        const ndx = dx * cr + dy * sr;
+        const ndy = -dx * sr + dy * cr;
+        dx = ndx;
+        dy = ndy;
+      }
+      return [dx, -dy];
+    }
+
+    function project(lon, lat) {
+      if (!isFinite(lon) || !isFinite(lat)) return null;
+      if (ortho) {
+        if (!(radius > 0)) return null;
+        const λ = (lon - lon0) * DEG;
+        const φ = lat * DEG;
+        const φ1 = lat0 * DEG;
+        const cosc = Math.sin(φ1) * Math.sin(φ) + Math.cos(φ1) * Math.cos(φ) * Math.cos(λ);
+        if (!(cosc >= 0)) return null;
+        const mx = radius * Math.cos(φ) * Math.sin(λ);
+        const my = radius * (Math.cos(φ1) * Math.sin(φ) - Math.sin(φ1) * Math.cos(φ) * Math.cos(λ));
+        return toScreen(mx, my);
+      }
+      if (merc) {
+        if (lat <= -MERC_LIMIT || lat >= MERC_LIMIT) return null;
+        return toScreen((lon - lon0) * sx, (mercNorth(lat) - mercNorth(lat0)) * sy);
+      }
+      return toScreen((lon - lon0) * sx, (lat - lat0) * sy);
+    }
+
+    function invert(x, y) {
+      if (!isFinite(x) || !isFinite(y)) return null;
+      const m = fromScreen(x, y);
+      const mx = m[0];
+      const my = m[1];
+      if (ortho) {
+        if (!(radius > 0)) return null;
+        const ρ = Math.hypot(mx, my);
+        if (ρ > radius * (1 + 1e-9)) return null;
+        const φ1 = lat0 * DEG;
+        if (ρ <= 1e-9 * radius) return [lon0, lat0];
+        const c = Math.asin(clamp(ρ / radius, 0, 1));
+        const sinC = Math.sin(c);
+        const cosC = Math.cos(c);
+        const φ = Math.asin(clamp(cosC * Math.sin(φ1) + (my * sinC * Math.cos(φ1)) / ρ, -1, 1));
+        const λ = Math.atan2(mx * sinC, ρ * Math.cos(φ1) * cosC - my * Math.sin(φ1) * sinC);
+        return [lon0 + λ / DEG, φ / DEG];
+      }
+      if (merc) {
+        const latM = my / (sy || 1) + mercNorth(lat0);
+        const φ = 2 * Math.atan(Math.exp(latM * DEG)) - Math.PI / 2;
+        return [lon0 + mx / (sx || 1), φ / DEG];
+      }
+      return [lon0 + mx / (sx || 1), lat0 + my / (sy || 1)];
+    }
+
+    return {
+      kind: ortho ? 'ortho' : merc ? 'mercator' : 'equirect',
+      project,
+      invert,
+      at: [ax, ay],
+      r: ortho ? radius : null,
+      lon0,
+      lat0,
+      rot,
+      scale: ortho ? radius : [sx, sy],
+    };
+  }
+  lib.projection = projection;
+
+  function midLonLat(a, b) {
+    let dlon = b[0] - a[0];
+    if (dlon > 180) dlon -= 360;
+    else if (dlon < -180) dlon += 360;
+    let lon = a[0] + dlon * 0.5;
+    if (lon > 180) lon -= 360;
+    else if (lon < -180) lon += 360;
+    return [lon, (a[1] + b[1]) * 0.5];
+  }
+
+  // Last visible point between a hidden sample and a visible one, so a line ends on the limb
+  // instead of stopping a sample early or bridging the far side.
+  function limbPoint(project, hidden, visible) {
+    let a = hidden;
+    let b = visible;
+    for (let k = 0; k < 16; k++) {
+      const m = midLonLat(a, b);
+      if (project(m[0], m[1])) b = m;
+      else a = m;
+    }
+    return project(b[0], b[1]);
+  }
+
+  function visibleRuns(project, llPts) {
+    const runs = [];
+    let run = null;
+    let prevLL = null;
+    let prevP = null;
+    const flush = () => {
+      if (run && run.length >= 2) runs.push(run);
+      run = null;
+    };
+    for (let i = 0; i < llPts.length; i++) {
+      const ll = llPts[i];
+      const p = project(ll[0], ll[1]);
+      if (p && prevP) {
+        // A dateline wrap (or any sample that teleports across the map) must break the stroke.
+        // Limb crossings are already split by a null sample, so this only catches the jump.
+        let sudden = false;
+        if (run && run.length >= 2) {
+          const jump = Math.hypot(p[0] - prevP[0], p[1] - prevP[1]);
+          const prevJump = Math.hypot(run[run.length - 1][0] - run[run.length - 2][0], run[run.length - 1][1] - run[run.length - 2][1]);
+          sudden = jump > 80 && jump > Math.max(prevJump, 1) * 8;
+        }
+        if (sudden) {
+          flush();
+          run = [p];
+        } else run.push(p);
+      } else if (p && !prevP) {
+        const edge = prevLL ? limbPoint(project, prevLL, ll) : null;
+        run = edge ? [edge, p] : [p];
+      } else if (!p && prevP) {
+        const edge = prevLL ? limbPoint(project, ll, prevLL) : null;
+        if (edge) run.push(edge);
+        flush();
+      }
+      prevLL = ll;
+      prevP = p;
+    }
+    flush();
+    return runs;
+  }
+
+  function splitDash(run, on, off) {
+    const period = on + off;
+    const pieces = [];
+    let cur = null;
+    let along = 0;
+    for (let i = 1; i < run.length; i++) {
+      const ax = run[i - 1][0];
+      const ay = run[i - 1][1];
+      const bx = run[i][0];
+      const by = run[i][1];
+      const len = Math.hypot(bx - ax, by - ay);
+      if (!(len > 0)) continue;
+      let consumed = 0;
+      let guard = 0;
+      while (consumed < len - 1e-4 && guard++ < 20000) {
+        const phase = along % period;
+        const onNow = phase < on;
+        const room = onNow ? on - phase : period - phase;
+        const take = Math.min(Math.max(room, 1e-6), len - consumed);
+        const t0 = consumed / len;
+        const t1 = (consumed + take) / len;
+        const x1 = ax + (bx - ax) * t1;
+        const y1 = ay + (by - ay) * t1;
+        if (onNow) {
+          if (!cur) cur = [[ax + (bx - ax) * t0, ay + (by - ay) * t0]];
+          cur.push([x1, y1]);
+        }
+        consumed += take;
+        along += take;
+        const onNext = along % period < on - 1e-8;
+        if (onNow && !onNext) {
+          if (cur && cur.length >= 2) pieces.push(cur);
+          cur = null;
+        }
+      }
+    }
+    if (cur && cur.length >= 2) pieces.push(cur);
+    return pieces;
+  }
+
+  function inkGeo(ctx, runs, o) {
+    const dash = Array.isArray(o.dash) && o.dash[0] > 0 ? o.dash : null;
+    const on = dash ? o.dash[0] : 0;
+    const off = dash ? (o.dash[1] > 0 ? o.dash[1] : o.dash[0]) : 0;
+    const baseSeed = o.seed != null ? o.seed : 1;
+    let n = 0;
+    for (let r = 0; r < runs.length; r++) {
+      const pieces = dash ? splitDash(runs[r], on, off) : [runs[r]];
+      for (let p = 0; p < pieces.length; p++) {
+        const piece = pieces[p];
+        if (piece.length < 2) continue;
+        const meet = !dash && piece.length > 3 && Math.hypot(piece[0][0] - piece[piece.length - 1][0], piece[0][1] - piece[piece.length - 1][1]) < 1.5;
+        inkPath(ctx, piece, {
+          color: o.color,
+          width: o.width,
+          alpha: o.alpha,
+          seed: baseSeed + n * 17,
+          smooth: dash ? false : o.smooth,
+          step: o.penStep,
+          wobble: o.wobble,
+          wobbleFreq: o.wobbleFreq,
+          tremble: o.tremble,
+          rough: o.rough,
+          boil: o.boil,
+          boilAmp: o.boilAmp,
+          taper: o.taper,
+          minWidth: o.minWidth,
+          swell: o.swell,
+          widthJitter: o.widthJitter,
+          closed: meet,
+        });
+        n++;
+      }
+    }
+  }
+
+  function clipDisc(ctx, proj, clipCircle) {
+    if (!clipCircle) return 0;
+    const radius = clipCircle === true ? proj.r : clipCircle;
+    if (!(radius > 0) || !proj.at) return 0;
+    ctx.beginPath();
+    ctx.arc(proj.at[0], proj.at[1], radius, 0, TAU);
+    ctx.clip();
+    return radius;
+  }
+
+  /**
+   * graticule(ctx, proj, opts) : meridians and parallels through inkPath.
+   *   step        10     degrees between lines
+   *   color       pal.inkFaint
+   *   width       1.4
+   *   alpha       0.9
+   *   dash        null   [on, off] in px; each dash is its own ink stroke
+   *   clipCircle  false  true clips to the ortho disc (proj.r); a number is that radius
+   *   seed, wobble, smooth, penStep, taper  passed through to the pen
+   * Lines stop at the limb. A parallel that goes behind the globe is two strokes, not one
+   * line across the back.
+   */
+  function graticule(ctx, proj, o = {}) {
+    if (!ctx || !proj || typeof proj.project !== 'function') return;
+    const step = o.step > 0 ? o.step : 10;
+    const sample = o.sample > 0 ? o.sample : Math.min(step, 4);
+    const ink = {
+      color: o.color || pal.inkFaint,
+      width: o.width != null ? o.width : 1.4,
+      alpha: o.alpha != null ? o.alpha : 0.9,
+      seed: o.seed != null ? o.seed : 3,
+      smooth: o.smooth !== false,
+      penStep: o.penStep || 4,
+      wobble: o.wobble != null ? o.wobble : 0.8,
+      wobbleFreq: o.wobbleFreq,
+      tremble: o.tremble != null ? o.tremble : 0.2,
+      rough: o.rough,
+      boil: o.boil,
+      boilAmp: o.boilAmp,
+      taper: o.taper != null ? o.taper : [6, 6],
+      minWidth: o.minWidth,
+      swell: o.swell != null ? o.swell : 0,
+      widthJitter: o.widthJitter != null ? o.widthJitter : 0.22,
+      dash: o.dash,
+    };
+    const lats = [];
+    const lons = [];
+    const iLat0 = Math.ceil(-90 / step - 1e-9);
+    const iLat1 = Math.floor(90 / step + 1e-9);
+    for (let i = iLat0; i <= iLat1; i++) {
+      const lat = i * step;
+      if (lat <= -90 + 1e-6 || lat >= 90 - 1e-6) continue;
+      lats.push(Math.abs(lat) < 1e-9 ? 0 : lat);
+    }
+    const iLon0 = Math.ceil(-180 / step - 1e-9);
+    const iLon1 = Math.floor(180 / step + 1e-9);
+    for (let i = iLon0; i <= iLon1; i++) {
+      const lon = i * step;
+      if (lon >= 180 - 1e-6 || lon < -180 - 1e-6) continue;
+      lons.push(Math.abs(lon) < 1e-9 ? 0 : lon);
+    }
+    const nLat = Math.max(1, Math.ceil(180 / sample));
+    const nLon = Math.max(1, Math.ceil(360 / sample));
+    ctx.save();
+    try {
+      clipDisc(ctx, proj, o.clipCircle);
+      for (let a = 0; a < lons.length; a++) {
+        const lon = lons[a];
+        const pts = new Array(nLat + 1);
+        for (let i = 0; i <= nLat; i++) pts[i] = [lon, -90 + (180 * i) / nLat];
+        ink.seed = (o.seed != null ? o.seed : 3) + a * 2;
+        inkGeo(ctx, visibleRuns(proj.project, pts), ink);
+      }
+      for (let b = 0; b < lats.length; b++) {
+        const lat = lats[b];
+        const pts = new Array(nLon + 1);
+        for (let i = 0; i <= nLon; i++) {
+          let lon = -180 + (360 * i) / nLon;
+          if (lon > 180) lon = 180;
+          pts[i] = [Math.abs(lon) < 1e-9 ? 0 : lon, lat];
+        }
+        ink.seed = (o.seed != null ? o.seed : 3) + 1000 + b * 2;
+        inkGeo(ctx, visibleRuns(proj.project, pts), ink);
+      }
+    } finally {
+      ctx.restore();
+    }
+  }
+  lib.graticule = graticule;
+
+  function densifyLonLat(pts, maxDeg) {
+    const out = [];
+    const push = (lon, lat) => {
+      const prev = out[out.length - 1];
+      if (prev && Math.abs(prev[0] - lon) < 1e-9 && Math.abs(prev[1] - lat) < 1e-9) return;
+      out.push([lon, lat]);
+    };
+    push(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      let dlon = b[0] - a[0];
+      if (dlon > 180) dlon -= 360;
+      else if (dlon < -180) dlon += 360;
+      const dlat = b[1] - a[1];
+      const n = Math.max(1, Math.ceil(Math.hypot(dlon, dlat) / maxDeg));
+      for (let k = 1; k <= n; k++) {
+        const t = k / n;
+        let lon = a[0] + dlon * t;
+        if (lon > 180) lon -= 360;
+        else if (lon < -180) lon += 360;
+        push(lon, a[1] + dlat * t);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * drawGeoLine(ctx, proj, [[lon, lat], ...], opts) : a geographic polyline.
+   * The stroke breaks wherever a segment crosses the far side (or a mercator pole), and each
+   * visible run is its own inkPath, so the line cannot bridge the back of a globe.
+   * opts are inkPath options, plus dash: [on, off] and sample (max degrees between samples, default 2).
+   */
+  function drawGeoLine(ctx, proj, pts, o = {}) {
+    if (!ctx || !proj || typeof proj.project !== 'function' || !pts || pts.length < 2) return;
+    const ll = [];
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (!p || !isFinite(p[0]) || !isFinite(p[1])) continue;
+      ll.push([p[0], p[1]]);
+    }
+    if (ll.length < 2) return;
+    const dense = densifyLonLat(ll, o.sample > 0 ? o.sample : 2);
+    inkGeo(ctx, visibleRuns(proj.project, dense), {
+      color: o.color,
+      width: o.width,
+      alpha: o.alpha,
+      seed: o.seed,
+      smooth: o.smooth,
+      penStep: o.step,
+      wobble: o.wobble,
+      wobbleFreq: o.wobbleFreq,
+      tremble: o.tremble,
+      rough: o.rough,
+      boil: o.boil,
+      boilAmp: o.boilAmp,
+      taper: o.taper,
+      minWidth: o.minWidth,
+      swell: o.swell,
+      widthJitter: o.widthJitter,
+      dash: o.dash,
+    });
+  }
+  lib.drawGeoLine = drawGeoLine;
+
+  // Heckbert's "nice number": 1, 2 or 5 times a power of ten.
+  function niceStep(span, intervals) {
+    const raw = Math.abs(span) / Math.max(1, intervals);
+    if (!(raw > 0) || !isFinite(raw)) return 1;
+    const exp = Math.floor(Math.log10(raw));
+    const base = Math.pow(10, exp);
+    const frac = raw / base;
+    const mant = frac < 1.5 ? 1 : frac < 3 ? 2 : frac < 7 ? 5 : 10;
+    return mant * base;
+  }
+
+  function niceTickValues(min, max, intervals) {
+    if (!isFinite(min) || !isFinite(max)) return [];
+    if (max < min) {
+      const swap = min;
+      min = max;
+      max = swap;
+    }
+    if (!(max > min)) return [min];
+    const step = niceStep(max - min, intervals == null ? 5 : intervals);
+    const i0 = Math.ceil(min / step - 1e-6);
+    const i1 = Math.floor(max / step + 1e-6);
+    const out = [];
+    const cap = Math.min(i1, i0 + 40);
+    for (let i = i0; i <= cap; i++) {
+      const r = i * step;
+      const v = Math.abs(r) < Math.abs(step) * 1e-8 ? 0 : Number(r.toPrecision(12));
+      if (v < min - Math.abs(step) * 1e-4 || v > max + Math.abs(step) * 1e-4) continue;
+      if (!out.length || v !== out[out.length - 1]) out.push(v);
+    }
+    return out;
+  }
+
+  function tickSpec(ticks, axis) {
+    if (ticks == null || typeof ticks === 'number') return ticks == null ? 5 : ticks;
+    if (Array.isArray(ticks)) return 5;
+    const s = ticks[axis];
+    return s == null ? 5 : s;
+  }
+
+  function resolveTicks(min, max, spec) {
+    if (Array.isArray(spec)) {
+      const out = [];
+      for (let i = 0; i < spec.length; i++) if (isFinite(spec[i])) out.push(spec[i]);
+      out.sort((a, b) => a - b);
+      return out;
+    }
+    return niceTickValues(min, max, spec);
+  }
+
+  function fmtTick(v) {
+    if (!isFinite(v)) return '';
+    const av = Math.abs(v);
+    if (av !== 0 && (av >= 10000 || av < 0.01)) {
+      const e = Math.floor(Math.log10(av));
+      const m = v / Math.pow(10, e);
+      return String(Math.round(m * 100) / 100) + 'e' + e;
+    }
+    return String(Math.round(v * 1000) / 1000);
+  }
+
+  // Fraction of the polyline by screen length. inkPath has no reveal option; the slice is done here.
+  function sliceReveal(px, reveal) {
+    if (reveal == null || reveal >= 1) return px;
+    if (!(reveal > 0) || px.length < 2) return [];
+    let total = 0;
+    const seg = new Array(px.length - 1);
+    for (let i = 1; i < px.length; i++) {
+      const d = Math.hypot(px[i][0] - px[i - 1][0], px[i][1] - px[i - 1][1]);
+      seg[i - 1] = d;
+      total += d;
+    }
+    if (!(total > 0)) return px.slice();
+    let remain = total * reveal;
+    const out = [[px[0][0], px[0][1]]];
+    for (let i = 1; i < px.length; i++) {
+      const d = seg[i - 1];
+      if (remain >= d - 1e-9) {
+        out.push(px[i]);
+        remain -= d;
+      } else {
+        const t = d > 0 ? remain / d : 0;
+        out.push([px[i - 1][0] + (px[i][0] - px[i - 1][0]) * t, px[i - 1][1] + (px[i][1] - px[i - 1][1]) * t]);
+        break;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * plot(ctx, opts) : axes, nice ticks and one or more curves.
+   *   box      [x, y, w, h]     data rectangle; y is the top edge
+   *   x, y     [min, max]       data ranges
+   *   ticks    5                target division count, { x, y } counts, or explicit value arrays
+   *   series   [{ pts: [[x, y], ...], color, width, reveal, seed, alpha }]
+   *            reveal is 0..1 along the drawn curve. The series is sliced here.
+   *   labels   { x, y, title } or [xLabel, yLabel]
+   *   color    pal.ink          axes, grid and tick labels
+   *   width    1.8
+   *   seed     1
+   * Returns { x: [tick values], y: [tick values] }. Tick steps are 1, 2 or 5 × 10^k.
+   */
+  function plot(ctx, o = {}) {
+    const box = o.box || [80, 80, 400, 300];
+    const xr = o.x || [0, 1];
+    const yr = o.y || [0, 1];
+    let xMin = finite(xr[0], 0);
+    let xMax = finite(xr[1], 1);
+    let yMin = finite(yr[0], 0);
+    let yMax = finite(yr[1], 1);
+    if (xMax === xMin) xMax = xMin + 1;
+    if (yMax === yMin) yMax = yMin + 1;
+    const xTicks = resolveTicks(xMin, xMax, tickSpec(o.ticks, 'x'));
+    const yTicks = resolveTicks(yMin, yMax, tickSpec(o.ticks, 'y'));
+    if (ctx) {
+      const color = o.color || pal.ink;
+      const width = o.width != null ? o.width : 1.8;
+      const seed = o.seed != null ? o.seed : 1;
+      const xSpan = xMax - xMin;
+      const ySpan = yMax - yMin;
+      const X = (v) => box[0] + ((v - xMin) / xSpan) * box[2];
+      const Y = (v) => box[1] + box[3] - ((v - yMin) / ySpan) * box[3];
+      const labs = Array.isArray(o.labels) ? { x: o.labels[0], y: o.labels[1] } : o.labels || {};
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(box[0], box[1], box[2], box[3]);
+      ctx.clip();
+      ctx.globalAlpha *= 0.28;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      for (let i = 0; i < xTicks.length; i++) {
+        const x = X(xTicks[i]);
+        ctx.moveTo(x, box[1]);
+        ctx.lineTo(x, box[1] + box[3]);
+      }
+      for (let i = 0; i < yTicks.length; i++) {
+        const y = Y(yTicks[i]);
+        ctx.moveTo(box[0], y);
+        ctx.lineTo(box[0] + box[2], y);
+      }
+      ctx.stroke();
+      ctx.restore();
+      const axis = { color, width, seed, smooth: false, wobble: 0.7, step: 6, taper: [4, 4], swell: 0 };
+      inkPath(ctx, [[box[0], box[1] + box[3]], [box[0] + box[2], box[1] + box[3]]], axis);
+      inkPath(ctx, [[box[0], box[1] + box[3]], [box[0], box[1]]], Object.assign({}, axis, { seed: seed + 1 }));
+      for (let i = 0; i < xTicks.length; i++) {
+        const x = X(xTicks[i]);
+        const y = box[1] + box[3];
+        inkPath(ctx, [[x, y], [x, y + 9]], Object.assign({}, axis, { width: width * 0.8, seed: seed + 20 + i, step: 3 }));
+        lib.text(ctx, fmtTick(xTicks[i]), x, y + 28, { size: 18, color, align: 'center', baseline: 'top' });
+      }
+      for (let i = 0; i < yTicks.length; i++) {
+        const y = Y(yTicks[i]);
+        inkPath(ctx, [[box[0], y], [box[0] - 9, y]], Object.assign({}, axis, { width: width * 0.8, seed: seed + 40 + i, step: 3 }));
+        lib.text(ctx, fmtTick(yTicks[i]), box[0] - 16, y, { size: 18, color, align: 'right', baseline: 'middle' });
+      }
+      if (labs.x) lib.text(ctx, labs.x, box[0] + box[2] / 2, box[1] + box[3] + 58, { size: 22, color, align: 'center', baseline: 'top' });
+      if (labs.y) {
+        ctx.save();
+        ctx.translate(box[0] - 96, box[1] + box[3] / 2);
+        ctx.rotate(-Math.PI / 2);
+        lib.text(ctx, labs.y, 0, 0, { size: 22, color, align: 'center', baseline: 'middle' });
+        ctx.restore();
+      }
+      if (labs.title) lib.text(ctx, labs.title, box[0], box[1] - 18, { size: 28, color, align: 'left', baseline: 'bottom' });
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(box[0], box[1], box[2], box[3]);
+      ctx.clip();
+      const series = o.series || [];
+      for (let s = 0; s < series.length; s++) {
+        const ser = series[s] || {};
+        const src = ser.pts || [];
+        const px = [];
+        for (let i = 0; i < src.length; i++) {
+          const p = src[i];
+          if (!p || !isFinite(p[0]) || !isFinite(p[1])) continue;
+          px.push([X(p[0]), Y(p[1])]);
+        }
+        const drawn = sliceReveal(px, ser.reveal);
+        if (drawn.length >= 2) {
+          inkPath(ctx, drawn, {
+            color: ser.color || color,
+            width: ser.width != null ? ser.width : width + 0.6,
+            alpha: ser.alpha,
+            seed: ser.seed != null ? ser.seed : seed + 80 + s,
+            smooth: ser.smooth !== false,
+            wobble: ser.wobble != null ? ser.wobble : 1.1,
+            step: ser.step || 3.5,
+            taper: ser.taper != null ? ser.taper : [10, 16],
+          });
+        }
+      }
+      ctx.restore();
+    }
+    return { x: xTicks, y: yTicks };
+  }
+  lib.plot = plot;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
