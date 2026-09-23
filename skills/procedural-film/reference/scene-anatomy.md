@@ -35,6 +35,7 @@ Expect 1000+ lines for a dense shot — density is part of the look (hundreds of
 - `info.p` for whole-shot ramps; `info.T` (or `info.shot.start + t`) for cross-shot continuity like stripe drift and boil.
 - A line that draws on uses `inkPath` `reveal` (0..1 by arc length, or `[from, to]` for a running dash) and `nib` on the tip; do not slice the point list.
 - Caches only for t-independent data. Anything time-varying derives from `t` alone.
+- Particle fields are `lib.particles` (sparks, dust, pollen, smoke): position is a closed function of time, never stored between frames. `loop` repeats background dust; `onTwos` holds the drawing on the 12 fps grid.
 
 ## Text
 
