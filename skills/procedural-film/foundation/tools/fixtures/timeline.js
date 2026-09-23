@@ -1,8 +1,8 @@
-// Fixture timeline for testing the tools (not the film). 34 seconds, 17 shots.
+// Fixture timeline for testing the tools (not the film). 40 seconds, 20 shots.
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 34,
+  duration: 40,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -21,6 +21,9 @@ FILM.TIMELINE = {
     { id: 'fx-parallax', file: '15-fx-parallax.js', start: 28, end: 30, mode: 'illustrated', brief: 'A pull-back: leaf at z 1, grass nearer, hills and sky farther, zoom 3 to 1.' },
     { id: 'fx-wire3d', file: '16-fx-wire3d.js', start: 30, end: 32, mode: 'schematic', brief: 'A turntable: a double helix with rungs and a crystal, back edges dashed.' },
     { id: 'fx-map', file: '17-fx-map.js', start: 32, end: 34, mode: 'schematic', brief: 'A spinning orthographic globe with a migration arc, and a curve drawing on.' },
+    { id: 'fx-whip', file: '18-fx-whip.js', start: 34, end: 36, mode: 'illustrated', transitionIn: { kind: 'whip', dur: 0.4, dir: 'up' }, brief: 'Whip up into a new plate.' },
+    { id: 'fx-inkwash', file: '19-fx-inkwash.js', start: 36, end: 38, mode: 'illustrated', transitionIn: { kind: 'inkwash', dur: 0.5, color: 'ink', seed: 4 }, brief: 'Incoming plate bleeds in through ink blots.' },
+    { id: 'fx-morphcut', file: '20-fx-morphcut.js', start: 38, end: 40, mode: 'illustrated', transitionIn: { kind: 'morph', dur: 0.6, from: 'egg', to: 'leaf' }, brief: 'Egg silhouette opens into the leaf plate.' },
   ],
   cues: [
     { t: 0, kind: 'open' },

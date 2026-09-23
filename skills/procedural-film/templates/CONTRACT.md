@@ -54,7 +54,11 @@ FILM.scene({
 
 Start and end times come from `FILM.TIMELINE`, never from the scene file, so re-timing is a one-file change.
 `core` wraps each `draw` in `ctx.save()` / `ctx.restore()` and resets the transform, alpha, composite mode and filters first.
-A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles supported kinds (`cut` default, `fade`, `flash`, `iris`, `wipe`) by drawing both shots into offscreen layers.
+A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles supported kinds (`cut` default, `fade`, `flash`, `iris`, `wipe`, `whip`, `inkwash`, `morph`) by drawing both shots into offscreen layers.
+- `whip`: `{ kind: 'whip', dur, dir: 'left' | 'right' | 'up' | 'down' }` — the outgoing frame leaves and the incoming frame enters; a directional smear (`lib.smear` ghosts) and speed lines sit on the seam.
+- `inkwash`: `{ kind: 'inkwash', dur, color, seed }` — a blot mask with a fixed noise edge grows monotonically from empty to full; the incoming frame shows inside it, with `color` on the wet rim. `color` is a `lib.pal` name or a hex.
+- `morph`: `{ kind: 'morph', dur, from, to }` — `from` and `to` are `FILM.GEO` ids. A `lib.morph` of those outlines holds the outgoing frame outside and the incoming frame inside.
+- On the first frame of `whip`, `inkwash` and `morph` the picture is the outgoing shot alone; once `dur` has elapsed it is the incoming shot alone. `fade`, `iris` and `wipe` are already partway across on their first frame.
 
 ### Core
 

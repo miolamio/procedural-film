@@ -665,9 +665,12 @@ async function main() {
       if (offGrid(s.start)) tlWarnings.push(`shot '${s.id}' starts at ${s.start}s, off the 16th-note grid at ${TL.bpm} bpm`);
       const tr = s.transitionIn;
       if (tr) {
-        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe'];
+        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph'];
         if (!kinds.includes(tr.kind)) tlProblems.push(`shot '${s.id}' transitionIn kind '${tr.kind}' is not one of ${kinds.join(', ')}`);
         if (!(tr.dur >= 0) || tr.dur > s.dur) tlProblems.push(`shot '${s.id}' transitionIn dur ${tr.dur} must be between 0 and the shot length ${s.dur}`);
+        if (tr.kind === 'whip' && !['left', 'right', 'up', 'down'].includes(tr.dir)) {
+          tlProblems.push(`shot '${s.id}' whip transition dir '${tr.dir}' is not one of left, right, up, down`);
+        }
         if (i === 0 && tr.kind !== 'cut') tlWarnings.push(`shot '${s.id}' is first; its transitionIn is ignored`);
       }
       const m = String(s.mode || '').toLowerCase();
@@ -729,6 +732,18 @@ async function main() {
       if (!shotId) geoRows.push(`${covered} of ${hard} hard cuts are measured match cuts; every other cut is a free cut (list a match cut in an entry's cuts to hold it)`);
     } catch (e) {
       geoProblems.push(`${C.rel(src.geoFile)} failed to evaluate: ${e.message}`);
+    }
+  }
+  {
+    const ids = geo && typeof geo === 'object' ? geo : {};
+    for (const s of TL.shots) {
+      const tr = s.transitionIn;
+      if (!tr || tr.kind !== 'morph') continue;
+      for (const key of ['from', 'to']) {
+        const id = tr[key];
+        if (typeof id !== 'string' || !id) tlProblems.push(`shot '${s.id}' morph transition ${key} is missing`);
+        else if (!Object.prototype.hasOwnProperty.call(ids, id)) tlProblems.push(`shot '${s.id}' morph transition ${key} '${id}' is not in FILM.GEO`);
+      }
     }
   }
 
