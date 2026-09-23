@@ -2097,6 +2097,348 @@
   };
 
   // ===========================================================================
+  // Watercolour wash
+  // ===========================================================================
+
+  /**
+   * wash(ctx, clip, opts) : translucent watercolour inside a clip. The plate is cached by the clip,
+   * the options and FILM.S; a frame only blits it. Never keyed by raw time.
+   *   color        pal.sage
+   *   alpha        0.62     opacity the interior settles to
+   *   seed         17
+   *   layers       4        noise-deformed contours, each a translucent fill (1..8)
+   *   bleed        6        how far a contour may wander, px, outward and inward
+   *   edgeDarken   0.35     rim pigment, 0..1 toward pal.ink
+   *   granulation  0.3      seeded sediment, modulated by a paper-grain tooth
+   *   blooms       0        wet pools: light centre, darker ring
+   *   dry          0        0 wet (soft, wide) .. 1 dry (tight, grainier)
+   *   boil         false    true keeps 3 variants on the 12 fps clock
+   *   bounds                required when clip is a function, a Path2D or null
+   */
+  function hashClip(clip, bounds) {
+    if (Array.isArray(clip) && clip.length) {
+      const polys = toPolys(clip);
+      let h = hash('p', polys.length);
+      for (let p = 0; p < polys.length; p++) {
+        const poly = polys[p];
+        h = hash(h, poly.length);
+        for (let i = 0; i < poly.length; i++) h = hash(h, poly[i][0], poly[i][1]);
+      }
+      return h >>> 0;
+    }
+    const b = bounds || { x: 0, y: 0, w: 0, h: 0 };
+    if (typeof clip === 'function') return hash('f', String(clip), b.x, b.y, b.w, b.h) >>> 0;
+    if (typeof Path2D !== 'undefined' && clip instanceof Path2D) return hash('d', b.x, b.y, b.w, b.h) >>> 0;
+    return hash('n', b.x, b.y, b.w, b.h) >>> 0;
+  }
+
+  // Squared Euclidean distance to the nearest feature pixel (feature[i] nonzero). Separable Felzenszwalb.
+  function distance2(feature, w, h) {
+    const INF = 1e12;
+    const N = w * h;
+    const horiz = new Float64Array(N);
+    const out = new Float64Array(N);
+    const len = Math.max(w, h);
+    const v = new Int32Array(len);
+    const z = new Float64Array(len + 1);
+    const f = new Float64Array(len);
+    const d = new Float64Array(len);
+    const sep = (p, q) => {
+      const denom = 2 * (q - p);
+      return denom ? (f[q] + q * q - (f[p] + p * p)) / denom : 0;
+    };
+    const dt = (n) => {
+      let k = 0;
+      v[0] = 0;
+      z[0] = -Infinity;
+      z[1] = Infinity;
+      for (let q = 1; q < n; q++) {
+        let s = sep(v[k], q);
+        while (k > 0 && s <= z[k]) {
+          k--;
+          s = sep(v[k], q);
+        }
+        k++;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = Infinity;
+      }
+      k = 0;
+      for (let q = 0; q < n; q++) {
+        while (z[k + 1] < q) k++;
+        const p = v[k];
+        const dx = q - p;
+        d[q] = dx * dx + f[p];
+      }
+    };
+    for (let x = 0; x < w; x++) {
+      for (let y = 0; y < h; y++) f[y] = feature[y * w + x] ? 0 : INF;
+      dt(h);
+      for (let y = 0; y < h; y++) horiz[y * w + x] = d[y];
+    }
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) f[x] = horiz[row + x];
+      dt(w);
+      for (let x = 0; x < w; x++) out[row + x] = d[x];
+    }
+    return out;
+  }
+
+  function bilerp(grid, gw, gh, x, y) {
+    if (x < 0) x = 0;
+    else if (x > gw - 1) x = gw - 1;
+    if (y < 0) y = 0;
+    else if (y > gh - 1) y = gh - 1;
+    const i = x | 0;
+    const j = y | 0;
+    const tx = x - i;
+    const ty = y - j;
+    const i2 = i + 1 < gw ? i + 1 : i;
+    const j2 = j + 1 < gh ? j + 1 : j;
+    const jw = j * gw;
+    const j2w = j2 * gw;
+    const a = grid[jw + i] * (1 - tx) + grid[jw + i2] * tx;
+    const b = grid[j2w + i] * (1 - tx) + grid[j2w + i2] * tx;
+    return a * (1 - ty) + b * ty;
+  }
+
+  function renderWash(clip, shape, S, color, alpha, seed, layers, bleed, edgeDarken, granulation, blooms, dry, variant) {
+    const pad = bleed + 4;
+    const srcB = shape.polys ? shape.bounds : {
+      x: shape.bounds.x - pad,
+      y: shape.bounds.y - pad,
+      w: shape.bounds.w + pad * 2,
+      h: shape.bounds.h + pad * 2,
+    };
+    const x0 = Math.floor(srcB.x);
+    const y0 = Math.floor(srcB.y);
+    const lw = Math.max(1, Math.ceil(srcB.x + srcB.w) - x0);
+    const lh = Math.max(1, Math.ceil(srcB.y + srcB.h) - y0);
+    const cw = Math.max(1, Math.round(lw * S));
+    const ch = Math.max(1, Math.round(lh * S));
+    const c = newCanvas(cw, ch);
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.setTransform(cw / lw, 0, 0, ch / lh, 0, 0);
+    g.translate(-x0, -y0);
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    if (shape.polys) {
+      for (let i = 0; i < shape.polys.length; i++) lib.tracePath(g, shape.polys[i], true);
+      g.fill('evenodd');
+    } else if (typeof clip === 'function') {
+      clip(g);
+      g.fill();
+    } else if (typeof Path2D !== 'undefined' && clip instanceof Path2D) {
+      g.fill(clip);
+    } else {
+      g.fillRect(shape.bounds.x, shape.bounds.y, shape.bounds.w, shape.bounds.h);
+    }
+    const img = g.getImageData(0, 0, cw, ch);
+    const px = img.data;
+    const n = cw * ch;
+    const inside = new Uint8Array(n);
+    const outside = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const on = px[i * 4 + 3] >= 128 ? 1 : 0;
+      inside[i] = on;
+      outside[i] = on ^ 1;
+    }
+    const dIn2 = distance2(inside, cw, ch);
+    const dOut2 = distance2(outside, cw, ch);
+
+    const wet = 1 - dry;
+    const step = 5;
+    const gw = Math.ceil(lw / step) + 2;
+    const gh = Math.ceil(lh / step) + 2;
+    const grids = new Array(layers);
+    const gseed = seed + variant * 9176;
+    for (let li = 0; li < layers; li++) {
+      const grid = new Float32Array(gw * gh);
+      const s = gseed + li * 19;
+      for (let j = 0; j < gh; j++) {
+        for (let i = 0; i < gw; i++) {
+          const n = (noise2(i * 0.16, j * 0.16, s) * 0.68 + noise2(i * 0.46, j * 0.46, s + 2) * 0.32) * 1.45;
+          grid[j * gw + i] = n < -1 ? -1 : n > 1 ? 1 : n;
+        }
+      }
+      grids[li] = grid;
+    }
+    const gran = new Float32Array(gw * gh);
+    const gs = seed + 400 + variant * 13;
+    for (let j = 0; j < gh; j++) {
+      for (let i = 0; i < gw; i++) gran[j * gw + i] = noise2(i * 0.38, j * 0.38, gs) * 0.72 + noise2(i * 1.05, j * 1.05, gs + 4) * 0.28;
+    }
+
+    const spots = [];
+    if (blooms > 0) {
+      let sx = 0, sy = 0, sn = 0;
+      const stride = Math.max(1, (Math.sqrt(n / 5000) | 0));
+      for (let py = 0; py < ch; py += stride) {
+        const row = py * cw;
+        for (let qx = 0; qx < cw; qx += stride) {
+          if (inside[row + qx]) { sx += qx; sy += py; sn++; }
+        }
+      }
+      const rnd = rng(seed + 77);
+      const span = Math.min(lw, lh);
+      for (let i = 0; i < blooms; i++) {
+        let bx = x0 + lw * 0.5;
+        let by = y0 + lh * 0.5;
+        if (sn) {
+          bx = x0 + (sx / sn) * (lw / cw);
+          by = y0 + (sy / sn) * (lh / ch);
+        }
+        let placed = sn > 0;
+        for (let k = 0; k < 28; k++) {
+          const jx = bx + (rnd() - 0.5) * span * 0.36;
+          const jy = by + (rnd() - 0.5) * span * 0.36;
+          const mx = Math.round((jx - x0) * (cw / lw));
+          const my = Math.round((jy - y0) * (ch / lh));
+          if (mx >= 0 && my >= 0 && mx < cw && my < ch && inside[my * cw + mx]) {
+            bx = jx;
+            by = jy;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) continue;
+        const rad = Math.max(16, lerp(46, Math.min(110, span * 0.22), rnd()) * lerp(0.82, 1.16, wet));
+        spots.push(bx, by, rad);
+      }
+    }
+
+    const rgb = parseColor(color);
+    const ink = parseColor(pal.ink);
+    const paperC = parseColor(pal.paper);
+    const lim = (bleed + 1.05) * S;
+    const lim2 = lim * lim;
+    const feather = Math.max(1, S * (1.05 + 0.65 * wet));
+    const amp = Math.min(Math.max(0, (bleed + 0.35) * S - feather), bleed * (0.58 + 0.42 * wet) * S);
+    const band = (6.4 + 0.7 * wet) * S;
+    const granK = granulation * (0.7 + 0.55 * dry);
+    const scx = lw / cw;
+    const scy = lh / ch;
+    const u8 = (v) => (v <= 0 ? 0 : v >= 255 ? 255 : (v + 0.5) | 0);
+
+    for (let py = 0; py < ch; py++) {
+      const row = py * cw;
+      const ly = y0 + (py + 0.5) * scy;
+      const gy = (ly - y0) / step;
+      for (let qx = 0; qx < cw; qx++) {
+        const i = row + qx;
+        const k = i * 4;
+        if (!inside[i] && dIn2[i] > lim2) {
+          px[k] = px[k + 1] = px[k + 2] = px[k + 3] = 0;
+          continue;
+        }
+        const sdf = inside[i] ? -Math.sqrt(dOut2[i]) : Math.sqrt(dIn2[i]);
+        if (sdf > lim) {
+          px[k] = px[k + 1] = px[k + 2] = px[k + 3] = 0;
+          continue;
+        }
+        const lx = x0 + (qx + 0.5) * scx;
+        const gx = (lx - x0) / step;
+        let acc = 0;
+        for (let li = 0; li < layers; li++) {
+          const dist = sdf + bilerp(grids[li], gw, gh, gx, gy) * amp;
+          let cov;
+          if (dist <= -feather) cov = 1;
+          else if (dist >= feather) cov = 0;
+          else {
+            const t = (dist + feather) / (feather * 2);
+            const u = t * t * (3 - 2 * t);
+            cov = 1 - u;
+          }
+          acc += cov;
+        }
+        const cov = acc / layers;
+        if (cov <= 0) {
+          px[k] = px[k + 1] = px[k + 2] = px[k + 3] = 0;
+          continue;
+        }
+        const ad = sdf < 0 ? -sdf : sdf;
+        let edge = ad >= band ? 0 : 1 - ad / band;
+        edge = edge * edge * (3 - 2 * edge);
+        const rim = cov < 0.98 ? cov * (1 - cov) * 4 : 0;
+        let dark = (edge * 0.94 + rim * 0.4) * edgeDarken * (0.92 + 0.22 * dry);
+        if (dark > 0.8) dark = 0.8;
+        const gn = bilerp(gran, gw, gh, gx, gy);
+        const tooth = 0.6 + 0.4 * h3(qx, py, seed + 91);
+        const fine = h3(qx >> 1, py >> 1, seed + 5) * 2 - 1;
+        const spec = (gn * 0.78 + fine * 0.22) * tooth;
+        let mul = 1 + spec * granK * 1.15;
+        mul -= Math.max(0, -spec) * granK * 0.22 * (0.3 + 0.7 * edge);
+        if (edge > 0.45 && mul > 1) mul = 1;
+        if (mul < 0.46) mul = 0.46;
+        else if (mul > 1.26) mul = 1.26;
+        let r = rgb[0] + (ink[0] - rgb[0]) * dark;
+        let gc = rgb[1] + (ink[1] - rgb[1]) * dark;
+        let bb = rgb[2] + (ink[2] - rgb[2]) * dark;
+        for (let s = 0; s < spots.length; s += 3) {
+          const dx = lx - spots[s];
+          const dy = ly - spots[s + 1];
+          const rad = spots[s + 2] * (1 + gn * 0.1);
+          const dsq = dx * dx + dy * dy;
+          if (dsq >= rad * rad) continue;
+          const bd = Math.sqrt(dsq) / rad;
+          const pool = 1 - bd * bd;
+          const light = pool * (0.55 + 0.45 * pool) * (1 - dry * 0.35);
+          const ring = Math.exp(-((bd - 0.58) * (bd - 0.58)) / 0.045);
+          r += (paperC[0] - r) * light * 0.8;
+          gc += (paperC[1] - gc) * light * 0.8;
+          bb += (paperC[2] - bb) * light * 0.8;
+          const rd = ring * (0.26 + 0.16 * wet);
+          r += (ink[0] - r) * rd;
+          gc += (ink[1] - gc) * rd;
+          bb += (ink[2] - bb) * rd;
+        }
+        r *= mul;
+        gc *= mul;
+        bb *= mul;
+        const mot = 0.5 + 0.5 * bilerp(grids[0], gw, gh, gx * 0.37, gy * 0.37);
+        let a = cov * alpha * (0.9 + 0.1 * mot);
+        a *= 1 + edge * 0.16;
+        if (a > 1) a = 1;
+        if (a < 0) a = 0;
+        px[k] = u8(r);
+        px[k + 1] = u8(gc);
+        px[k + 2] = u8(bb);
+        px[k + 3] = a <= 0 ? 0 : u8(a * 255);
+        if (!px[k + 3]) px[k] = px[k + 1] = px[k + 2] = 0;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return { c, x: x0, y: y0, w: lw, h: lh };
+  }
+
+  function wash(ctx, clip, o = {}) {
+    const S = renderScale();
+    const color = o.color || pal.sage;
+    const alpha = clamp(o.alpha != null ? o.alpha : 0.62, 0, 1);
+    const seed = seedInt(o.seed === undefined ? 17 : o.seed);
+    const layers = Math.max(1, Math.min(8, o.layers == null ? 4 : o.layers | 0));
+    const bleed = Math.max(0, o.bleed != null ? +o.bleed : 6);
+    const edgeDarken = clamp(o.edgeDarken != null ? o.edgeDarken : 0.35, 0, 1);
+    const granulation = Math.max(0, o.granulation != null ? +o.granulation : 0.3);
+    const blooms = Math.max(0, Math.min(6, o.blooms == null ? 0 : o.blooms | 0));
+    const dry = clamp(o.dry == null ? 0 : o.dry, 0, 1);
+    let variant = 0;
+    if (o.boil === true) variant = lib.boil(lib.T) % 3;
+    else if (typeof o.boil === 'number') variant = Math.abs(o.boil | 0) % 3;
+    const shape = shapeOf(clip, Object.assign({}, o, { pad: bleed + 4 }));
+    const key = ['wash', hashClip(clip, shape.bounds), S, color, alpha, seed, layers, bleed, edgeDarken, granulation, blooms, dry, variant].join('|');
+    const plate = cached(key, () => renderWash(clip, shape, S, color, alpha, seed, layers, bleed, edgeDarken, granulation, blooms, dry, variant));
+    if (!plate || !(plate.w > 0) || !(plate.h > 0)) return;
+    // A 1:1 blit stays exact (no filter fringe past the bleed). Scaled previews keep smoothing.
+    ctx.save();
+    if (Math.abs(S - 1) < 1e-6) ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(plate.c, plate.x, plate.y, plate.w, plate.h);
+    ctx.restore();
+  }
+  lib.wash = wash;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 

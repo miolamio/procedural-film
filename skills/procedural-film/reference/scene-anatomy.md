@@ -37,6 +37,7 @@ Expect 1000+ lines for a dense shot — density is part of the look (hundreds of
 - Beat events use `lead` so the event is visible on its beat frame, not one frame late.
 - `info.p` for whole-shot ramps; `info.T` (or `info.shot.start + t`) for cross-shot continuity like stripe drift and boil.
 - Caches only for t-independent data. Anything time-varying derives from `t` alone.
+- Watercolour tone is `lib.wash(ctx, clip, opts)`, cached like paper and blitted each frame; hatch sits on top of it.
 
 ## Text
 
