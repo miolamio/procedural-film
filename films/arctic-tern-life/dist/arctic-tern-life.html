@@ -5145,6 +5145,270 @@
   lib.wash = wash;
 
   // ===========================================================================
+  // Light and shadow
+  // ===========================================================================
+
+  // dir is where the shadow falls (raw dx,dy for the len·dir offset). The unit
+  // vector is for normals; a missing or zero dir casts straight down.
+  function lightDir(dir) {
+    const dx = dir && isFinite(+dir[0]) ? +dir[0] : 0;
+    const dy = dir && isFinite(+dir[1]) ? +dir[1] : dir ? 0 : 1;
+    const L = Math.hypot(dx, dy);
+    if (L < 1e-8) return { dx: 0, dy: 0, ux: 0, uy: 1 };
+    return { dx, dy, ux: dx / L, uy: dy / L };
+  }
+
+  function asOutline(outline) {
+    let src = outline;
+    if (src && typeof src.outline === 'function') src = src.outline();
+    const polys = toPolys(src);
+    if (!polys || !polys[0] || polys[0].length < 3) return null;
+    return polys[0];
+  }
+
+  // Drop a repeated closing vertex so the last edge is not zero-length.
+  function ringCount(pts) {
+    const n = pts.length;
+    if (n >= 2 && Math.hypot(pts[0][0] - pts[n - 1][0], pts[0][1] - pts[n - 1][1]) < 1e-4) return n - 1;
+    return n;
+  }
+
+  // Outward unit normals, one per edge. Canvas y grows downward, so the sign
+  // follows the shoelace: clockwise outlines (positive area) face the other way.
+  function outwardEdges(pts) {
+    const n = ringCount(pts);
+    let area = 0;
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], q = pts[(i + 1) % n];
+      area += p[0] * q[1] - q[0] * p[1];
+    }
+    const s = area > 0 ? -1 : 1;
+    const N = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], q = pts[(i + 1) % n];
+      let dx = q[0] - p[0], dy = q[1] - p[1];
+      const L = Math.hypot(dx, dy);
+      if (L < 1e-8) N[i] = [0, 0];
+      else N[i] = [(-dy / L) * s, (dx / L) * s];
+    }
+    return { n, N };
+  }
+
+  // Shift by len·dir about the vertex centroid, with a shear along dir whose
+  // mean is zero (the filled centroid still moves by exactly len·dir). len 0
+  // is the identity, so a contact shadow sits on the form. A ground y then
+  // compresses that shadow in y onto the line.
+  function shadowPoints(pts, o, soft) {
+    const d = lightDir(o.dir);
+    const len = +o.len || 0;
+    const ox = len * d.dx, oy = len * d.dy;
+    const n = pts.length;
+    let cx = 0, cy = 0;
+    for (let i = 0; i < n; i++) { cx += pts[i][0]; cy += pts[i][1]; }
+    cx /= n; cy /= n;
+    const shear = (o.shear != null ? +o.shear : 0.26) * (len === 0 ? 0 : 1);
+    const spread = len === 0 ? 1 : 1 + soft * 0.08;
+    const vx = -d.uy, vy = d.ux;
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const px = pts[i][0], py = pts[i][1];
+      const s = ((px - cx) * vx + (py - cy) * vy) * shear;
+      out[i] = [cx + ox + (px - cx + d.ux * s) * spread, cy + oy + (py - cy + d.uy * s) * spread];
+    }
+    // len 0 is the contact shadow under the form, not a projection onto the ground
+    if (o.ground == null || len === 0) return out;
+    const ground = +o.ground;
+    const squash = o.squash != null ? +o.squash : lerp(0.22, 0.4, soft);
+    for (let i = 0; i < n; i++) out[i][1] = ground + (out[i][1] - ground) * squash;
+    return out;
+  }
+
+  function penOpts(o, over) {
+    const s = {
+      color: o.color || pal.ink,
+      seed: o.seed,
+      spacing: o.spacing,
+      width: o.width,
+      angle: o.angle,
+      length: o.length,
+      gap: o.gap,
+      inset: o.inset,
+      overshoot: o.overshoot,
+      boil: o.boil,
+      boilAmp: o.boilAmp,
+      bend: o.bend,
+      bow: o.bow,
+      flow: o.flow,
+      edge: o.edge,
+      taper: o.taper,
+      jitter: o.jitter,
+      r: o.r,
+      angleJitter: o.angleJitter,
+      spacingJitter: o.spacingJitter,
+    };
+    for (const k of Object.keys(s)) if (s[k] == null) delete s[k];
+    if (over) for (const k of Object.keys(over)) if (over[k] != null) s[k] = over[k];
+    return s;
+  }
+
+  // Radial falloff so a soft shadow thins toward its edge. Null when unused.
+  function softDensity(pts, soft, user) {
+    if (!(soft > 0) && user == null) return null;
+    let cx = 0, cy = 0;
+    for (let i = 0; i < pts.length; i++) { cx += pts[i][0]; cy += pts[i][1]; }
+    cx /= pts.length; cy /= pts.length;
+    let rad = 1;
+    for (let i = 0; i < pts.length; i++) {
+      const d0 = Math.hypot(pts[i][0] - cx, pts[i][1] - cy);
+      if (d0 > rad) rad = d0;
+    }
+    const edge = lerp(0.98, 0.42, soft || 0);
+    return (x, y) => {
+      let v = soft > 0 ? smoothstep(1, edge, Math.hypot(x - cx, y - cy) / rad) : 1;
+      if (typeof user === 'function') v *= user(x, y);
+      else if (user != null) v *= user;
+      return clamp(v);
+    };
+  }
+
+  /**
+   * castShadow(ctx, outline, opts) : the silhouette shifted along the light and filled.
+   *   dir      [dx, dy]  shadow direction (the light is -dir). The offset is len·dir,
+   *                      and dir need not be a unit vector.
+   *   len      0         how far the shadow sits from the form. 0 leaves it on the form.
+   *   ground   null      horizontal line y. The shifted shape is compressed in y onto it.
+   *   squash   0.22..0.4  with ground: fraction of the height kept; the default eases up with soft
+   *   shear    0.26      sideways skew along dir; 0 is a pure shift. Forced to 0 at len 0.
+   *   soft     0         0..1, opener spacing, lighter ink, faded edge
+   *   style    'hatch'   'hatch' | 'stipple' | 'flat'
+   *   color    pal.ink
+   *   alpha    0.5       (0.34 for a flat tone), scaled down as soft rises
+   *   seed     hatch/stipple default
+   *   clipOutside false  also clip to the original outline, so len 0 cannot paint outside it
+   *   ...spacing, angle, width and the other hatch / stipple options
+   */
+  function castShadow(ctx, outline, o = {}) {
+    const pts = asOutline(outline);
+    if (!pts) return;
+    const soft = clamp(o.soft == null ? 0 : +o.soft, 0, 1);
+    const shadow = shadowPoints(pts, o, soft);
+    const style = o.style || 'hatch';
+    const baseA = o.alpha != null ? o.alpha : style === 'flat' ? 0.34 : 0.5;
+    const alpha = baseA * (1 - soft * 0.5);
+    const spacing = (o.spacing || (style === 'stipple' ? 7.5 : 8)) * (1 + soft * 0.85);
+    ctx.save();
+    if (o.clipOutside) {
+      ctx.beginPath();
+      lib.tracePath(ctx, pts, true);
+      ctx.clip();
+    }
+    if (style === 'flat') {
+      ctx.beginPath();
+      lib.tracePath(ctx, shadow, true);
+      ctx.fillStyle = o.color || pal.ink;
+      ctx.globalAlpha *= alpha;
+      ctx.fill();
+    } else if (style === 'stipple') {
+      const dens = softDensity(shadow, soft, o.density);
+      stipple(ctx, shadow, penOpts(o, { alpha, spacing, color: o.color || pal.ink, density: dens || undefined }));
+    } else {
+      const dens = softDensity(shadow, soft, o.density);
+      hatch(ctx, shadow, penOpts(o, {
+        alpha, spacing, color: o.color || pal.ink, density: dens || undefined, clip: o.clipOutside ? true : o.clip,
+      }));
+    }
+    ctx.restore();
+  }
+  lib.castShadow = castShadow;
+
+  /**
+   * rimLight(ctx, outline, opts) : a light stroke on the contour where the outward
+   * normal faces the light (dot(n, -dir) above a threshold), fading as it turns away.
+   *   dir        [dx, dy]  shadow direction
+   *   width      8
+   *   color      pal.white
+   *   alpha      0.85
+   *   threshold  0.12      facing test; higher keeps the rim to a narrower crescent
+   */
+  function rimLight(ctx, outline, o = {}) {
+    const pts = asOutline(outline);
+    if (!pts) return;
+    const d = lightDir(o.dir);
+    const edges = outwardEdges(pts);
+    const threshold = o.threshold != null ? o.threshold : 0.12;
+    const STEPS = 5;
+    const paths = [];
+    for (let b = 0; b < STEPS; b++) paths.push(new Path2D());
+    let prev = -2;
+    for (let i = 0; i < edges.n; i++) {
+      const N = edges.N[i];
+      const face = N[0] * -d.ux + N[1] * -d.uy;
+      const p = pts[i], q = pts[(i + 1) % edges.n];
+      if (!(face > threshold)) { prev = -1; continue; }
+      const f = smoothstep(threshold, 0.9, face);
+      let b = Math.floor(f * STEPS);
+      if (b >= STEPS) b = STEPS - 1;
+      if (b !== prev) paths[b].moveTo(p[0], p[1]);
+      paths[b].lineTo(q[0], q[1]);
+      prev = b;
+    }
+    const alpha = o.alpha != null ? o.alpha : 0.85;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = o.width != null ? o.width : 8;
+    ctx.strokeStyle = o.color || pal.white;
+    const g = ctx.globalAlpha;
+    for (let b = 0; b < STEPS; b++) {
+      ctx.globalAlpha = g * alpha * ((b + 1) / STEPS);
+      ctx.stroke(paths[b]);
+    }
+    ctx.restore();
+  }
+  lib.rimLight = rimLight;
+
+  /**
+   * shadeSide(ctx, outline, opts) : hatch inside the form on the side facing away
+   * from the light — the same normal test as rimLight, inverted, and faded across
+   * the terminator. For a convex outline the normal at an interior point is the
+   * direction from the centroid. dir, threshold, soft and every hatch option apply.
+   *   dir     [dx, dy]
+   *   soft    0        opener, lighter hatch
+   *   clip    true     hard-clip to the outline
+   */
+  function shadeSide(ctx, outline, o = {}) {
+    const pts = asOutline(outline);
+    if (!pts) return;
+    const d = lightDir(o.dir);
+    const n = ringCount(pts);
+    let cx = 0, cy = 0;
+    for (let i = 0; i < n; i++) { cx += pts[i][0]; cy += pts[i][1]; }
+    cx /= n; cy /= n;
+    const threshold = o.threshold != null ? o.threshold : 0.05;
+    const user = o.density;
+    const side = (x, y) => {
+      let nx = x - cx, ny = y - cy;
+      const L = Math.hypot(nx, ny);
+      const face = L < 1e-3 ? 0 : (nx / L) * -d.ux + (ny / L) * -d.uy;
+      let v = smoothstep(threshold + 0.18, threshold - 0.62, face);
+      if (typeof user === 'function') v *= user(x, y);
+      else if (typeof user === 'number') v *= user;
+      return clamp(v);
+    };
+    const soft = clamp(o.soft == null ? 0 : +o.soft, 0, 1);
+    const alpha = (o.alpha != null ? o.alpha : 0.82) * (1 - soft * 0.4);
+    hatch(ctx, pts, penOpts(o, {
+      density: side,
+      alpha,
+      clip: o.clip != null ? o.clip : true,
+      spacing: (o.spacing || 8) * (1 + soft * 0.6),
+      angle: o.angle != null ? o.angle : Math.atan2(d.uy, d.ux) + Math.PI / 2,
+      color: o.color || pal.ink,
+    }));
+  }
+  lib.shadeSide = shadeSide;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 

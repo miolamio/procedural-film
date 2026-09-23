@@ -1,8 +1,8 @@
-// Fixture timeline for testing the tools (not the film). 24 seconds, 12 shots.
+// Fixture timeline for testing the tools (not the film). 26 seconds, 13 shots.
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 24,
+  duration: 26,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -16,6 +16,7 @@ FILM.TIMELINE = {
     { id: 'fx-branch', file: '10-fx-branch.js', start: 18, end: 20, mode: 'illustrated', brief: 'Leaf veins from the petiole inside geo leaf, and roots growing downward.' },
     { id: 'fx-cells', file: '11-fx-cells.js', start: 20, end: 22, mode: 'illustrated', brief: 'A scale mosaic in shifted rows and cracked earth on paper.' },
     { id: 'fx-wash', file: '12-fx-wash.js', start: 22, end: 24, mode: 'illustrated', brief: 'The fixture leaf in a sage wash on paper, hatch on top, one bloom.' },
+    { id: 'fx-light', file: '13-fx-light.js', start: 24, end: 26, mode: 'illustrated', brief: 'The fixture egg on paper: hatched ground shadow, shaded side, rim light orbiting.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
