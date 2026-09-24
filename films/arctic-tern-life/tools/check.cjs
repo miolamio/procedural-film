@@ -35,6 +35,7 @@
 //   11 canvas      two full passes at scale 0.25, grain post off. The first fills caches. A canvas
 //                  created on the second fails (shot, count, total area, first T). Warns when peak
 //                  live canvas area exceeds about 16× the frame. A warning does not fail the gate.
+//                  A long film is split across separate browsers. Every frame is still drawn twice.
 //
 // Options: --scale s (default 1), --sweep N (every Nth frame, default 4), --det N (add N evenly spaced determinism
 //          frames on top of the per-shot ones, default 0; never fewer than every shot),
@@ -375,6 +376,19 @@ function flashWorkerCount(nFrames) {
   return 2;
 }
 
+// Check 11 draws every frame twice, and the scene code — not the raster — is the cost.
+// One renderer spends ~80s on the butterfly. A slice of about 64 frames stays near 12s
+// on the heaviest stretch, so one slice per core fits the same 20s budget as check 9.
+// Measured on 12 cores: butterfly 17.7s (gate OK in 129.7s), arctic-tern 7.9s (gate OK in 59.8s).
+function canvasWorkerCount(nFrames) {
+  if (nFrames <= 120) return 1;
+  const cores = os.cpus().length || 2;
+  if (cores < 4) return 1;
+  if (nFrames > 480 && cores >= 8) return Math.min(cores, 12);
+  if (nFrames > 240) return Math.min(cores, 4);
+  return 2;
+}
+
 function splitFrameRange(from, to, workers) {
   const n = Math.max(0, to - from);
   if (!n) return [];
@@ -482,6 +496,73 @@ async function gatherFlashSamples(loadable, { from, to, shotId, fps, cols, rows,
       from: ranges[i][0], to: ranges[i][1], cols, rows, fps, step: 2,
     })));
     return Buffer.concat(parts.map((b64) => Buffer.from(b64, 'base64')));
+  } finally {
+    await Promise.all(pages.map((p) => p.close().catch(() => {})));
+    await Promise.all(browsers.map((b) => b.close().catch(() => {})));
+  }
+}
+
+// Separate browsers, same reason as the flash check: one browser's pages share a renderer thread.
+// Peak is the sum of the per-renderer peaks. The max would miss plates that stay live in
+// different stretches of one playback, and a warm-pass canvas in any stretch still fails.
+function mergeCanvasAudits(parts) {
+  const groups = [];
+  const by = new Map();
+  let peak = 0;
+  let live = 0;
+  let frames = 0;
+  let frameW = 0;
+  let frameH = 0;
+  for (const a of parts) {
+    frames += a.frames || 0;
+    peak += a.peak || 0;
+    live += a.live || 0;
+    if (!frameW && a.frameW) {
+      frameW = a.frameW;
+      frameH = a.frameH;
+    }
+    for (const g of a.groups || []) {
+      const shot = g.shot || '(no shot)';
+      let dst = by.get(shot);
+      if (!dst) {
+        dst = { shot, n: 0, area: 0, T: typeof g.T === 'number' ? g.T : 0 };
+        by.set(shot, dst);
+        groups.push(dst);
+      }
+      dst.n += g.n || 0;
+      dst.area += g.area || 0;
+      if (typeof g.T === 'number' && g.T < dst.T) dst.T = g.T;
+    }
+  }
+  groups.sort((a, b) => a.T - b.T || (a.shot < b.shot ? -1 : a.shot > b.shot ? 1 : 0));
+  return { groups, peak, live, frameW, frameH, frames };
+}
+
+async function gatherCanvasAudit(loadable, { from, to, shotId, pagesOpened, frameWidth, frameHeight }) {
+  const ranges = splitFrameRange(from, to, canvasWorkerCount(to - from));
+  if (!ranges.length) return { groups: [], peak: 0, live: 0, frameW: 0, frameH: 0, frames: 0 };
+  const browsers = await Promise.all(ranges.map(() => C.launch()));
+  const pages = [];
+  try {
+    const opened = await Promise.all(browsers.map((b, i) => C.openPage(b, loadable, {
+      scale: 0.25,
+      prefix: `check-canvas${i}`,
+      only: shotId,
+      frameWidth,
+      frameHeight,
+      readback: false,
+    })));
+    pages.push(...opened);
+    for (const pg of opened) pagesOpened.push(pg);
+    const bad = opened.find((pg) => !pg.info);
+    if (bad) {
+      const err = new Error('FILM did not initialise');
+      err.loadErr = bad.loadErrors;
+      throw err;
+    }
+    for (const pg of opened) pg.page.setDefaultTimeout(180000);
+    const parts = await Promise.all(opened.map((pg, i) => pg.page.evaluate(([a, b]) => window.__h.canvasAudit(a, b), ranges[i])));
+    return mergeCanvasAudits(parts);
   } finally {
     await Promise.all(pages.map((p) => p.close().catch(() => {})));
     await Promise.all(browsers.map((b) => b.close().catch(() => {})));
@@ -1112,29 +1193,24 @@ async function main() {
       }
 
       // ---------------------------------------------------------------- 11 canvas
-      // Own page, so a warm scale-1 cache cannot satisfy the pass. Scale is 0.25 even when
+      // Own browsers, so a warm scale-1 cache cannot satisfy the pass. Scale is 0.25 even when
       // --scale says otherwise. post is off inside canvasAudit. Every frame, twice.
       if (args['canvas-skip']) {
         report(11, 'canvas', 'SKIP', 'skipped (--canvas-skip)');
         canvasReported = true;
       } else {
         const tC = Date.now();
-        let pgC = null;
         try {
-          pgC = await C.openPage(browser, loadable, {
-            scale: 0.25,
-            prefix: 'check-canvas',
-            only: shotId,
-            frameWidth: TL.width,
-            frameHeight: TL.height,
-            readback: false,
-          });
-          pagesOpened.push(pgC);
-          pgC.page.setDefaultTimeout(180000);
-          if (!pgC.info) throw new Error('FILM did not initialise');
           const from = shotId ? Math.round(SHOTS[0].start * FPS) : 0;
           const to = shotId ? Math.max(from, Math.round(SHOTS[0].end * FPS)) : Math.max(0, Math.round(TL.duration * FPS));
-          const audit = await pgC.page.evaluate(([a, b]) => window.__h.canvasAudit(a, b), [from, to]);
+          const audit = await gatherCanvasAudit(loadable, {
+            from,
+            to,
+            shotId,
+            pagesOpened,
+            frameWidth: TL.width,
+            frameHeight: TL.height,
+          });
           const sec = ((Date.now() - tC) / 1000).toFixed(1);
           const frameArea = audit.frameW * audit.frameH;
           const over = frameArea > 0 && audit.peak > frameArea * 16;
@@ -1157,8 +1233,6 @@ async function main() {
         } catch (e) {
           report(11, 'canvas', 'WARN', `not measured: ${e.message}`, []);
           canvasReported = true;
-        } finally {
-          if (pgC) await pgC.close();
         }
       }
 
