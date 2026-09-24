@@ -931,7 +931,14 @@
       cache.set(key, v);
       return v;
     }
-    const v = make();
+    const audit = !!window.__cvAudit;
+    if (audit) window.__cvNextKey = String(key);
+    let v;
+    try {
+      v = make();
+    } finally {
+      if (audit) window.__cvNextKey = null;
+    }
     cache.set(key, v);
     const max = cacheMax();
     while (cache.size > max) cache.delete(cache.keys().next().value);

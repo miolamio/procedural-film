@@ -509,11 +509,13 @@ const CANVAS_HOOK = `
 (function () {
   var areas = new Map();
   var meta = new WeakMap();
+  var recs = new Map();
   var pending = new Set();
   var seq = 0;
   window.__canvases = 0;
   window.__cvLive = 0;
   window.__cvPeak = 0;
+  window.__cvAudit = true;
   window.__cvRecord = false;
   window.__cvList = [];
   window.__cvShot = null;
@@ -550,8 +552,10 @@ const CANVAS_HOOK = `
       seenH: false,
       shot: window.__cvShot || null,
       T: typeof window.__cvT === 'number' ? window.__cvT : null,
+      key: typeof window.__cvNextKey === 'string' ? window.__cvNextKey : '',
     };
     meta.set(el, rec);
+    recs.set(rec.id, rec);
     areas.set(rec.id, 0);
     if (reg) {
       try { reg.register(el, rec.id); } catch (e) {}
@@ -578,6 +582,21 @@ const CANVAS_HOOK = `
       if (rec && rec.pending) commit(rec, el);
     });
     pending.clear();
+  };
+  window.__cvAlive = function () {
+    var out = [];
+    areas.forEach(function (area, id) {
+      var rec = recs.get(id);
+      out.push({
+        w: rec ? rec.w : 0,
+        h: rec ? rec.h : 0,
+        area: area,
+        shot: rec && rec.shot ? rec.shot : '',
+        T: rec && typeof rec.T === 'number' ? rec.T : null,
+        key: rec && rec.key ? rec.key : '',
+      });
+    });
+    return out;
   };
   function hookSize(proto) {
     if (!proto) return;
@@ -651,16 +670,19 @@ window.__h = {
   canvases() {
     return window.__canvases;
   },
-  // Two passes over frames [from, to). The second records every new canvas with the shot and T.
-  canvasAudit(from, to) {
+  // Two passes over frames [from, to). recordFrom skips a warmup prefix: those frames
+  // fill caches, and only a canvas born at recordFrom or later counts as this slice's.
+  // The second pass records every new canvas with the shot and T.
+  canvasAudit(from, to, recordFrom) {
     const fps = FILM.FPS || 24;
     const f0 = from | 0;
     const f1 = to | 0;
+    const rec = recordFrom == null ? f0 : recordFrom | 0;
     const prevPost = FILM.post;
     const run = (record) => {
-      window.__cvRecord = !!record;
       if (record) window.__cvList = [];
       for (let f = f0; f < f1; f++) {
+        window.__cvRecord = !!(record && f >= rec);
         const T = f / fps;
         window.__cvT = T;
         let id = null;
@@ -676,6 +698,7 @@ window.__h = {
         FILM.renderFrame(T);
         if (typeof window.__cvFlush === 'function') window.__cvFlush();
       }
+      window.__cvRecord = false;
     };
     try {
       run(false);
@@ -703,14 +726,20 @@ window.__h = {
       if (typeof rec.T === 'number' && rec.T < g.T) g.T = rec.T;
     }
     window.__cvList = [];
+    try { if (typeof gc === 'function') gc(); } catch (e) {}
     const c = FILM.canvas;
     return {
       groups: groups,
       peak: window.__cvPeak,
       live: window.__cvLive,
+      alive: typeof window.__cvAlive === 'function' ? window.__cvAlive() : [],
+      from: f0,
+      to: f1,
+      recordFrom: rec,
+      fps: fps,
       frameW: c ? c.width : 0,
       frameH: c ? c.height : 0,
-      frames: f1 > f0 ? f1 - f0 : 0,
+      frames: f1 > rec ? f1 - rec : 0,
     };
   },
   // Measure a profile or outline silhouette on the bare frame at T: at K points round it, find the strongest

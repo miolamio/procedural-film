@@ -503,8 +503,57 @@ async function gatherFlashSamples(loadable, { from, to, shotId, fps, cols, rows,
 }
 
 // Separate browsers, same reason as the flash check: one browser's pages share a renderer thread.
-// Peak is the sum of the per-renderer peaks. The max would miss plates that stay live in
-// different stretches of one playback, and a warm-pass canvas in any stretch still fails.
+// The reported peak is one playback's: each cache key once, frame plates summed per shot,
+// other sizes by the busiest slice. A single renderer reports the peak it measured itself.
+// Measured: butterfly 17.3s and no warning (the one-renderer pass was the same), arctic 7.3s
+// at 129.7×, fixtures 4.1s at 19.6×. Both of those peaks match a single renderer.
+const CANVAS_WARMUP = 0;
+
+function playbackPeak(parts) {
+  if (parts.length <= 1) return parts.length ? parts[0].peak || 0 : 0;
+  // Each cache key is one plate. A cold slice rebuilds it; keep the earliest birth.
+  // Compositor slots share a key (layer-0, layer-1), so a whip that only exists
+  // because the page missed the earlier birth does not add a second pair.
+  const keyed = new Map();
+  const loose = new Map();
+  const looseArea = new Map();
+  const frameShots = new Map();
+  let mount = 0;
+  const fw = parts[0].frameW | 0;
+  const fh = parts[0].frameH | 0;
+  for (const slice of parts) {
+    const local = new Map();
+    const frames = new Map();
+    for (const c of slice.alive || []) {
+      if (c.key) {
+        const t = typeof c.T === 'number' ? c.T : -1;
+        const prev = keyed.get(c.key);
+        if (!prev || t < prev.t) keyed.set(c.key, { area: c.area | 0, t });
+        continue;
+      }
+      if (c.T == null) {
+        mount = c.area | 0;
+        continue;
+      }
+      if ((c.w | 0) === fw && (c.h | 0) === fh) {
+        const shot = c.shot || '';
+        frames.set(shot, (frames.get(shot) || 0) + 1);
+        continue;
+      }
+      const k = (c.w | 0) + 'x' + (c.h | 0);
+      local.set(k, (local.get(k) || 0) + 1);
+      looseArea.set(k, c.area | 0);
+    }
+    for (const [shot, n] of frames) frameShots.set(shot, Math.max(frameShots.get(shot) || 0, n));
+    for (const [k, n] of local) loose.set(k, Math.max(loose.get(k) || 0, n));
+  }
+  let total = mount;
+  for (const v of keyed.values()) total += v.area;
+  for (const n of frameShots.values()) total += n * fw * fh;
+  for (const [k, n] of loose) total += n * (looseArea.get(k) || 0);
+  return total;
+}
+
 function mergeCanvasAudits(parts) {
   const groups = [];
   const by = new Map();
@@ -515,7 +564,6 @@ function mergeCanvasAudits(parts) {
   let frameH = 0;
   for (const a of parts) {
     frames += a.frames || 0;
-    peak += a.peak || 0;
     live += a.live || 0;
     if (!frameW && a.frameW) {
       frameW = a.frameW;
@@ -535,13 +583,13 @@ function mergeCanvasAudits(parts) {
     }
   }
   groups.sort((a, b) => a.T - b.T || (a.shot < b.shot ? -1 : a.shot > b.shot ? 1 : 0));
-  return { groups, peak, live, frameW, frameH, frames };
+  return { groups, peak: playbackPeak(parts), live, frameW, frameH, frames };
 }
 
 async function gatherCanvasAudit(loadable, { from, to, shotId, pagesOpened, frameWidth, frameHeight }) {
   const ranges = splitFrameRange(from, to, canvasWorkerCount(to - from));
   if (!ranges.length) return { groups: [], peak: 0, live: 0, frameW: 0, frameH: 0, frames: 0 };
-  const browsers = await Promise.all(ranges.map(() => C.launch()));
+  const browsers = await Promise.all(ranges.map(() => C.launch(['--js-flags=--expose-gc'])));
   const pages = [];
   try {
     const opened = await Promise.all(browsers.map((b, i) => C.openPage(b, loadable, {
@@ -561,7 +609,8 @@ async function gatherCanvasAudit(loadable, { from, to, shotId, pagesOpened, fram
       throw err;
     }
     for (const pg of opened) pg.page.setDefaultTimeout(180000);
-    const parts = await Promise.all(opened.map((pg, i) => pg.page.evaluate(([a, b]) => window.__h.canvasAudit(a, b), ranges[i])));
+    const jobs = ranges.map(([a, b]) => [a > 0 ? Math.max(0, a - CANVAS_WARMUP) : a, b, a]);
+    const parts = await Promise.all(opened.map((pg, i) => pg.page.evaluate(([a, b, rec]) => window.__h.canvasAudit(a, b, rec), jobs[i])));
     return mergeCanvasAudits(parts);
   } finally {
     await Promise.all(pages.map((p) => p.close().catch(() => {})));

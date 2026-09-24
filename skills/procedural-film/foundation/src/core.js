@@ -244,7 +244,9 @@
     const h = FILM.canvas.height;
     let L = layers[i];
     if (!L || L.canvas.width !== w || L.canvas.height !== h) {
+      if (window.__cvAudit) window.__cvNextKey = 'layer-' + i;
       const canvas = makeCanvas(w, h);
+      if (window.__cvAudit) window.__cvNextKey = null;
       L = layers[i] = { canvas, ctx: canvas.getContext('2d', ctxAttrs) };
     }
     return L;
