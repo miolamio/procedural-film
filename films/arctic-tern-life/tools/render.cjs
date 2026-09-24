@@ -14,14 +14,16 @@
 //   --keep             keep the .tmp/ work folder (PNGs and WAV)
 //   --crf N            x264 quality (default 16)   --preset p   x264 preset (default medium)
 //   --fixtures         use tools/fixtures instead of src
+//   --qa               run qa.cjs on the finished file; exit non-zero if it reports a FAIL
 //
 // Video: libx264, yuv420p (BT.709), crf 16, 24 fps, +faststart. Audio: OfflineAudioContext rendered in the
-// page at 48 kHz stereo, written as WAV, muxed as AAC 192k.
+// page at 48 kHz stereo, written as WAV, then loudnorm and AAC 192k. Digital silence (--silent) skips
+// loudnorm: that filter turns an all-zero buffer into NaNs and the AAC encode fails.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const C = require('./common.cjs');
 
 const FFMPEG = process.env.FFMPEG || 'ffmpeg'; // ffmpeg on PATH, or set FFMPEG to a binary
@@ -40,7 +42,10 @@ function runFfmpeg(args, { stdin = false } = {}) {
   return { proc, done };
 }
 
-function encodeArgs({ input, wav, out, frames, crf, preset }) {
+function encodeArgs({ input, wav, out, frames, crf, preset, normalize }) {
+  // The score WAV is already near -14 LUFS. AAC then lifts true peak above -1 dBTP, so the
+  // delivery stage loudnorm aims under that ceiling. One filter; music.js stays the master.
+  const audio = normalize ? ['-af', 'loudnorm=I=-14:LRA=11:TP=-3.5'] : [];
   return [
     '-y', '-hide_banner', '-loglevel', 'error',
     ...input,
@@ -49,6 +54,7 @@ function encodeArgs({ input, wav, out, frames, crf, preset }) {
     '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=lanczos+accurate_rnd+full_chroma_int,format=yuv420p,setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709',
     '-c:v', 'libx264', '-preset', preset, '-crf', String(crf), '-pix_fmt', 'yuv420p', '-r', '24',
     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
+    ...audio,
     '-c:a', 'aac', '-b:a', '192k', '-ar', String(SR), '-ac', '2',
     '-t', (frames / C.FPS).toFixed(6),
     '-movflags', '+faststart',
@@ -57,7 +63,7 @@ function encodeArgs({ input, wav, out, frames, crf, preset }) {
 }
 
 async function main() {
-  const args = C.parseArgs(process.argv.slice(2), ['fixtures', 'silent', 'keep']);
+  const args = C.parseArgs(process.argv.slice(2), ['fixtures', 'silent', 'keep', 'qa']);
   const fixtures = typeof args.fixtures === 'string' ? args.fixtures : !!args.fixtures;
   const silent = !!args.silent;
   const scale = args.scale ? Number(args.scale) : 1;
@@ -143,7 +149,7 @@ async function main() {
     };
 
     if (workers === 1) {
-      enc = runFfmpeg(encodeArgs({ input: ['-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'png', '-i', '-'], wav, out: partial, frames, crf, preset }), { stdin: true });
+      enc = runFfmpeg(encodeArgs({ input: ['-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'png', '-i', '-'], wav, out: partial, frames, crf, preset, normalize: !silent }), { stdin: true });
       const stdin = enc.proc.stdin;
       let pipeErr = null;
       let exited = false;
@@ -185,7 +191,7 @@ async function main() {
       progress(true);
       console.log(`frames rendered in ${((Date.now() - tV) / 1000).toFixed(1)}s, encoding...`);
       const tE = Date.now();
-      enc = runFfmpeg(encodeArgs({ input: ['-framerate', String(FPS), '-start_number', '0', '-i', path.join(work, 'f%06d.png')], wav, out: partial, frames, crf, preset }));
+      enc = runFfmpeg(encodeArgs({ input: ['-framerate', String(FPS), '-start_number', '0', '-i', path.join(work, 'f%06d.png')], wav, out: partial, frames, crf, preset, normalize: !silent }));
       await enc.done;
       console.log(`encoded in ${((Date.now() - tE) / 1000).toFixed(1)}s`);
     }
@@ -217,6 +223,15 @@ async function main() {
   }
   const size = fs.statSync(out).size;
   console.log(`wrote ${out} (${(size / 1024 / 1024).toFixed(2)} MB, ${frames} frames, ${(frames / FPS).toFixed(3)}s) total ${lap()}`);
+  if (args.qa) {
+    const qaArgs = [path.join(__dirname, 'qa.cjs'), '--scale', String(scale), '--timeline', path.join(src.base, 'timeline.js'), out];
+    const qa = spawnSync(process.execPath, qaArgs, { stdio: 'inherit' });
+    if (qa.error) {
+      console.error(`\n[error] could not run qa.cjs: ${qa.error.message}`);
+      process.exit(2);
+    }
+    if (qa.status !== 0) process.exit(qa.status == null ? 1 : qa.status);
+  }
 }
 
 main().catch((e) => {

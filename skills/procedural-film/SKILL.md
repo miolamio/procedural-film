@@ -102,7 +102,7 @@ Done when: every P1 and P2 fix is verified on fresh frames, the art verdict is w
 
 ### 10. Deliver
 
-`node tools/render.cjs` writes the master (crf 16; a 30 s film renders in minutes). Then the transcodes:
+`node tools/render.cjs` writes the master (crf 16; a 30 s film renders in minutes). Then `node tools/qa.cjs exports/<slug>.mp4` checks the file a viewer gets (h264, 24 fps, faststart, loudness). `render.cjs --qa` runs that check on the file it just wrote. Then the transcodes:
 
 ```bash
 ffmpeg -i exports/<slug>.mp4 -vf "scale='if(gt(iw,ih),-2,720)':'if(gt(iw,ih),720,-2)'" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k exports/<slug>-phone.mp4
