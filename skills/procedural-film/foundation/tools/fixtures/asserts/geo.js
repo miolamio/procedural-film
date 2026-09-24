@@ -73,6 +73,60 @@ FILM.assert('outline parts trace the outer union, and at() scales about a point'
   FILM.expect.true(hit, 'zoomed union missed the corner at (1300, 480)');
 });
 
+// Parts built here are not in fixtures/geo.js: validateGeo has already run, and a disconnected
+// entry in that file would fail the gate before these asserts.
+(function () {
+  function rect(x, y, w, h) {
+    return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  }
+  function put(id, parts) {
+    FILM.GEO[id] = { kind: 'outline', parts: parts };
+    return FILM.lib.geo(id);
+  }
+  function bounds(loop) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < loop.length; i++) {
+      const p = loop[i];
+      if (p[0] < minX) minX = p[0];
+      if (p[0] > maxX) maxX = p[0];
+      if (p[1] < minY) minY = p[1];
+      if (p[1] > maxY) maxY = p[1];
+    }
+    return { minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+  }
+
+  FILM.assert('a 1 px neck keeps both rectangles in the union', () => {
+    const loop = put('t-neck', [rect(100, 100, 40, 60), rect(140, 128, 1, 4), rect(141, 100, 40, 60)]).outline(2);
+    const b = bounds(loop);
+    FILM.expect.true(b.minX < 110 && b.maxX > 170 && b.minY < 110 && b.maxY > 150, 'neck bbox ' + b.minX + '..' + b.maxX + ', ' + b.minY + '..' + b.maxY);
+  });
+
+  FILM.assert('a corner touch is one outline after dilation', () => {
+    const loop = put('t-corner', [rect(100, 100, 40, 40), rect(140, 140, 40, 40)]).outline(2);
+    const b = bounds(loop);
+    FILM.expect.true(b.minX < 110 && b.minY < 110 && b.maxX > 170 && b.maxY > 170, 'corner bbox ' + b.minX + '..' + b.maxX + ', ' + b.minY + '..' + b.maxY);
+  });
+
+  FILM.assert('a 2 px gap is one outline after dilation', () => {
+    const loop = put('t-gap2', [rect(100, 100, 40, 40), rect(142, 100, 40, 40)]).outline(2);
+    const b = bounds(loop);
+    FILM.expect.true(b.minX < 110 && b.maxX > 175, '2px gap bbox ' + b.minX + '..' + b.maxX);
+  });
+
+  FILM.assert('a 6 px gap and separated boxes are not a union', () => {
+    FILM.expect.throws(() => put('t-gap6', [rect(100, 100, 40, 40), rect(146, 100, 40, 40)]).outline());
+    FILM.expect.throws(() => put('t-apart', [rect(10, 10, 30, 30), rect(80, 40, 30, 30)]).outline());
+  });
+
+  FILM.assert('a 50-tooth comb outline reaches the far tooth', () => {
+    const parts = [rect(18, 400, 49 * 22 + 4, 24)];
+    for (let i = 0; i < 50; i++) parts.push(rect(18 + i * 22, 400 - 90, 4, 91));
+    const b = bounds(put('t-comb', parts).outline(4));
+    FILM.expect.true(b.maxX > 1094, 'comb died at x ' + b.maxX.toFixed(1) + ', far tooth is 1100');
+    FILM.expect.true(b.minX < 30, 'comb lost the first tooth at x ' + b.minX.toFixed(1));
+  });
+})();
+
 FILM.assert('pt returns a named anchor and throws on an unknown name', () => {
   const g = FILM.lib.geo('sun');
   FILM.expect.near(g.pt('centre'), [860, 360], 0);

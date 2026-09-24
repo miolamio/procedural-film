@@ -166,6 +166,104 @@ function selfCrossing(pts) {
   return null;
 }
 
+// Same raster as unionOutline in src/lib.js: scan fill, 1px 8-connected dilation, then 4-connected
+// components. A gap of 2px closes; a gap of about 6px stays split. Too-large masks are not allocated.
+function scanFillMask(mask, w, h, ox, oy, poly) {
+  const n = poly.length;
+  if (n < 3) return;
+  const buckets = Array.from({ length: h }, () => []);
+  for (let i = 0; i < n; i++) {
+    let x0 = poly[i][0] - ox;
+    let y0 = poly[i][1] - oy;
+    const q = poly[(i + 1) % n];
+    let x1 = q[0] - ox;
+    let y1 = q[1] - oy;
+    if (y0 === y1) continue;
+    if (y0 > y1) {
+      const sx = x0; x0 = x1; x1 = sx;
+      const sy = y0; y0 = y1; y1 = sy;
+    }
+    const yA = Math.ceil(y0 - 1e-9);
+    const yB = Math.floor(y1 - 1e-9);
+    for (let y = yA; y <= yB; y++) {
+      if (y < 0 || y >= h) continue;
+      const t = (y + 0.5 - y0) / (y1 - y0);
+      if (t < 0 || t >= 1) continue;
+      buckets[y].push(x0 + (x1 - x0) * t);
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    const xs = buckets[y];
+    if (xs.length < 2) continue;
+    xs.sort((a, b) => a - b);
+    const row = y * w;
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      let a = Math.ceil(xs[i] - 1e-9);
+      let b = Math.floor(xs[i + 1] - 1e-9);
+      if (a < 0) a = 0;
+      if (b >= w) b = w - 1;
+      for (let x = a; x <= b; x++) mask[row + x] = 1;
+    }
+  }
+}
+
+function countMaskComponents(mask, w, h) {
+  const seen = new Uint8Array(w * h);
+  let count = 0;
+  const stack = [];
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i] || seen[i]) continue;
+    count++;
+    stack.push(i);
+    seen[i] = 1;
+    while (stack.length) {
+      const p = stack.pop();
+      const x = p % w;
+      const y = (p / w) | 0;
+      if (x > 0 && mask[p - 1] && !seen[p - 1]) { seen[p - 1] = 1; stack.push(p - 1); }
+      if (x + 1 < w && mask[p + 1] && !seen[p + 1]) { seen[p + 1] = 1; stack.push(p + 1); }
+      if (y > 0 && mask[p - w] && !seen[p - w]) { seen[p - w] = 1; stack.push(p - w); }
+      if (y + 1 < h && mask[p + w] && !seen[p + w]) { seen[p + w] = 1; stack.push(p + w); }
+    }
+  }
+  return count;
+}
+
+function unionLink(parts) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let p = 0; p < parts.length; p++) {
+    const poly = parts[p];
+    for (let i = 0; i < poly.length; i++) {
+      const x = poly[i][0], y = poly[i][1];
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+    }
+  }
+  const pad = 2;
+  const ox = Math.floor(x0) - pad;
+  const oy = Math.floor(y0) - pad;
+  const w = Math.ceil(x1) - ox + pad + 1;
+  const h = Math.ceil(y1) - oy + pad + 1;
+  if (!(w > 2 && h > 2) || w * h > 4000000) return { w, h, components: 0, tooBig: true };
+  const raw = new Uint8Array(w * h);
+  for (let p = 0; p < parts.length; p++) scanFillMask(raw, w, h, ox, oy, parts[p]);
+  const mask = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!raw[y * w + x]) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < w && ny < h) mask[ny * w + nx] = 1;
+        }
+      }
+    }
+  }
+  return { w, h, components: countMaskComponents(mask, w, h), tooBig: false };
+}
+
 /**
  * Static checks on FILM.GEO against the timeline. Returns { problems, warnings, frames }, where
  * frames lists every frame to measure: { id, T, label, cut? } per side of each declared cut and per 'at'.
@@ -220,6 +318,9 @@ function validateGeo(geo, tl, opts) {
           problems.push(`${at}: parts must be loops of at least 3 [x, y] points`);
           continue;
         }
+        const link = unionLink(g.parts);
+        if (link.tooBig) problems.push(`${at}: union outline is ${link.w}x${link.h} px, past the raster cap`);
+        else if (link.components > 1) problems.push(`${at}: union outline has ${link.components} components after a 1px dilation`);
       } else {
         const pts = g.pts;
         if (!Array.isArray(pts) || pts.length < 8 || !pts.every((p) => Array.isArray(p) && p.length === 2 && p.every(num))) {

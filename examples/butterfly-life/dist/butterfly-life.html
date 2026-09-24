@@ -1692,6 +1692,8 @@
 
   // One circuit of the outer rim. 0 east, 1 south, 2 west, 3 north, fill kept on the right.
   // A one-pixel neck used to close the walk on a wing tip and leave the body behind.
+  // Opens heading east on the top-most rim pixel. The circuit is closed when the walk is back
+  // on that pixel; a cap that expires first throws instead of returning a short loop.
   function traceOuter(mask, w, h) {
     const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x] === 1;
     let sx = -1, sy = -1;
@@ -1700,30 +1702,53 @@
     }
     if (sx < 0) return [];
     const step = [[1, 0], [0, 1], [-1, 0], [0, -1]];
-    const rightOf = [1, 2, 3, 0];
     let x = sx, y = sy, dir = 0;
     const loop = [[x, y]];
-    const seen = new Set();
-    for (let n = 0; n < (w + h) * 8; n++) {
+    // (w + h) * 8 died mid-comb, short of the far tooth. One circuit is well under 4 visits per pixel.
+    const limit = w * h * 4;
+    let closed = false;
+    for (let n = 0; n < limit; n++) {
       let moved = false;
       for (const turn of [1, 0, 3, 2]) {
         const nd = (dir + turn) % 4;
         const nx = x + step[nd][0], ny = y + step[nd][1];
         if (!on(nx, ny)) continue;
-        const key = nx + ',' + ny + ',' + nd;
-        if (seen.has(key)) continue;
         x = nx;
         y = ny;
         dir = nd;
-        seen.add(key);
         loop.push([x, y]);
         moved = true;
         break;
       }
       if (!moved) break;
-      if (x === sx && y === sy && dir === 0 && loop.length > 4) break;
+      if (x === sx && y === sy && loop.length > 4) { closed = true; break; }
     }
+    if (!closed) throw new Error('union outline walk stopped before it was back at the start heading east');
     return loop;
+  }
+
+  // 4-connected islands. The rim walk steps the same way, so a diagonal crack is still two components
+  // until the 1px dilation joins it.
+  function countComponents(mask, w, h) {
+    const seen = new Uint8Array(w * h);
+    let count = 0;
+    const stack = [];
+    for (let i = 0; i < mask.length; i++) {
+      if (!mask[i] || seen[i]) continue;
+      count++;
+      stack.push(i);
+      seen[i] = 1;
+      while (stack.length) {
+        const p = stack.pop();
+        const x = p % w;
+        const y = (p / w) | 0;
+        if (x > 0 && mask[p - 1] && !seen[p - 1]) { seen[p - 1] = 1; stack.push(p - 1); }
+        if (x + 1 < w && mask[p + 1] && !seen[p + 1]) { seen[p + 1] = 1; stack.push(p + 1); }
+        if (y > 0 && mask[p - w] && !seen[p - w]) { seen[p - w] = 1; stack.push(p - w); }
+        if (y + 1 < h && mask[p + w] && !seen[p + w]) { seen[p + w] = 1; stack.push(p + w); }
+      }
+    }
+    return count;
   }
 
   function resampleLoop(raw, step) {
@@ -1771,41 +1796,42 @@
     const oy = Math.floor(y0) - pad;
     const w = Math.ceil(x1) - ox + pad + 1;
     const h = Math.ceil(y1) - oy + pad + 1;
-    let loop;
     if (!(w > 2 && h > 2) || w * h > 4000000) {
-      loop = parts[0] ? parts[0].map((p) => [p[0], p[1]]) : [];
-    } else {
-      const rawMask = new Uint8Array(w * h);
-      for (let p = 0; p < parts.length; p++) scanFill(rawMask, w, h, ox, oy, parts[p]);
-      // One pixel of dilation closes cracks where a serrated tip only touches the wing at a corner.
-      const mask = new Uint8Array(w * h);
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          if (!rawMask[y * w + x]) continue;
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
-              const nx = x + dx, ny = y + dy;
-              if (nx >= 0 && ny >= 0 && nx < w && ny < h) mask[ny * w + nx] = 1;
-            }
+      throw new Error('union outline is ' + w + 'x' + h + ' px, past the raster cap');
+    }
+    const rawMask = new Uint8Array(w * h);
+    for (let p = 0; p < parts.length; p++) scanFill(rawMask, w, h, ox, oy, parts[p]);
+    // One pixel of dilation closes cracks where a serrated tip only touches the wing at a corner.
+    // Snap the traced rim back onto this undilated fill so the contour does not grow by a pixel.
+    const mask = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!rawMask[y * w + x]) continue;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx, ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < w && ny < h) mask[ny * w + nx] = 1;
           }
         }
       }
-      const traced = traceOuter(mask, w, h).map(([x, y]) => {
-        if (x >= 0 && y >= 0 && x < w && y < h && rawMask[y * w + x]) return [x, y];
-        let best = null;
-        let bd = 10;
-        for (let dy = -3; dy <= 3; dy++) {
-          for (let dx = -3; dx <= 3; dx++) {
-            const nx = x + dx, ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h || !rawMask[ny * w + nx]) continue;
-            const d = dx * dx + dy * dy;
-            if (d < bd) { bd = d; best = [nx, ny]; }
-          }
-        }
-        return best || [x, y];
-      });
-      loop = resampleLoop(traced.map((q) => [ox + q[0] + 0.5, oy + q[1] + 0.5]), st);
     }
+    const components = countComponents(mask, w, h);
+    if (components > 1) throw new Error('union outline has ' + components + ' components after a 1px dilation');
+    const traced = traceOuter(mask, w, h).map(([x, y]) => {
+      if (x >= 0 && y >= 0 && x < w && y < h && rawMask[y * w + x]) return [x, y];
+      let best = null;
+      let bd = 10;
+      for (let dy = -3; dy <= 3; dy++) {
+        for (let dx = -3; dx <= 3; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h || !rawMask[ny * w + nx]) continue;
+          const d = dx * dx + dy * dy;
+          if (d < bd) { bd = d; best = [nx, ny]; }
+        }
+      }
+      return best || [x, y];
+    });
+    const loop = resampleLoop(traced.map((q) => [ox + q[0] + 0.5, oy + q[1] + 0.5]), st);
     unionCache.set(key, loop);
     return loop.map((p) => [p[0], p[1]]);
   }
