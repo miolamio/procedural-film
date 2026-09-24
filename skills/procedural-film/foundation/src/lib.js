@@ -483,31 +483,38 @@
     }
   }
 
-  // Outer contour of the filled pixels, 8-connected, starting at the top-most left pixel.
+  // One circuit of the outer rim. 0 east, 1 south, 2 west, 3 north, fill kept on the right.
+  // A one-pixel neck used to close the walk on a wing tip and leave the body behind.
   function traceOuter(mask, w, h) {
+    const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x] === 1;
     let sx = -1, sy = -1;
     for (let y = 0; y < h && sx < 0; y++) {
-      const row = y * w;
-      for (let x = 0; x < w; x++) if (mask[row + x]) { sx = x; sy = y; break; }
+      for (let x = 0; x < w; x++) if (on(x, y) && !on(x, y - 1)) { sx = x; sy = y; break; }
     }
     if (sx < 0) return [];
-    const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
-    const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x] === 1;
-    const loop = [[sx, sy]];
-    let x = sx, y = sy, dir = 6;
-    const max = w * h;
-    for (let n = 0; n < max; n++) {
-      let found = -1;
-      for (let k = 0; k < 8; k++) {
-        const d = (dir + k) % 8;
-        if (on(x + dirs[d][0], y + dirs[d][1])) { found = d; break; }
+    const step = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+    const rightOf = [1, 2, 3, 0];
+    let x = sx, y = sy, dir = 0;
+    const loop = [[x, y]];
+    const seen = new Set();
+    for (let n = 0; n < (w + h) * 8; n++) {
+      let moved = false;
+      for (const turn of [1, 0, 3, 2]) {
+        const nd = (dir + turn) % 4;
+        const nx = x + step[nd][0], ny = y + step[nd][1];
+        if (!on(nx, ny)) continue;
+        const key = nx + ',' + ny + ',' + nd;
+        if (seen.has(key)) continue;
+        x = nx;
+        y = ny;
+        dir = nd;
+        seen.add(key);
+        loop.push([x, y]);
+        moved = true;
+        break;
       }
-      if (found < 0) break;
-      x += dirs[found][0];
-      y += dirs[found][1];
-      if (x === sx && y === sy) break;
-      loop.push([x, y]);
-      dir = (found + 6) % 8;
+      if (!moved) break;
+      if (x === sx && y === sy && dir === 0 && loop.length > 4) break;
     }
     return loop;
   }
@@ -561,9 +568,35 @@
     if (!(w > 2 && h > 2) || w * h > 4000000) {
       loop = parts[0] ? parts[0].map((p) => [p[0], p[1]]) : [];
     } else {
+      const rawMask = new Uint8Array(w * h);
+      for (let p = 0; p < parts.length; p++) scanFill(rawMask, w, h, ox, oy, parts[p]);
+      // One pixel of dilation closes cracks where a serrated tip only touches the wing at a corner.
       const mask = new Uint8Array(w * h);
-      for (let p = 0; p < parts.length; p++) scanFill(mask, w, h, ox, oy, parts[p]);
-      const traced = traceOuter(mask, w, h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (!rawMask[y * w + x]) continue;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx, ny = y + dy;
+              if (nx >= 0 && ny >= 0 && nx < w && ny < h) mask[ny * w + nx] = 1;
+            }
+          }
+        }
+      }
+      const traced = traceOuter(mask, w, h).map(([x, y]) => {
+        if (x >= 0 && y >= 0 && x < w && y < h && rawMask[y * w + x]) return [x, y];
+        let best = null;
+        let bd = 10;
+        for (let dy = -3; dy <= 3; dy++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h || !rawMask[ny * w + nx]) continue;
+            const d = dx * dx + dy * dy;
+            if (d < bd) { bd = d; best = [nx, ny]; }
+          }
+        }
+        return best || [x, y];
+      });
       loop = resampleLoop(traced.map((q) => [ox + q[0] + 0.5, oy + q[1] + 0.5]), st);
     }
     unionCache.set(key, loop);
