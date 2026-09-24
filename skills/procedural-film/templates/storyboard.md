@@ -43,7 +43,7 @@ The plan every agent works from. Fill each section; the guidance in *italics* is
 
 *Exact pixel tables for every shape that survives a match cut, in frame pixels on the frames either side of the cut. Every table is mirrored as data in `src/geo.js` (shape in docs/CONTRACT.md, "Shared geometry"); scenes read it with `lib.geo(id)` instead of copying numbers, and gate check 7 measures each profile and outline on the rendered frames either side of its cuts. Name the cuts each table holds.*
 
-*Pick the form by the shape. A shape symmetric about a vertical axis is a `profile`: half-widths by y. Anything else that must line up is an `outline`: the silhouette itself, sampled every few px in drawing order. Control points smoothed later round off every kink and tip, so they are not a contract. Anchors, projections and arcs are `points`, and centre lines are a `polyline`. Before signing off, draw each table once (`node tools/stubgen.cjs` draws every profile and outline in the stub pass) and check it reads as the thing it claims: a wing with no width, legs that cannot reach the ground, a label on the wrong feature. A wrong table compounds into every scene that uses it.*
+*Pick the form by the shape. A shape symmetric about a vertical axis is a `profile`: half-widths by y. `axis: 'x'` is that profile on its side: stations along x, half-heights, axis `y = cy`. Anything else that must line up is an `outline`: one closed loop, the silhouette itself, sampled every few px in drawing order. A figure of several pieces is an `outline` with `parts`, one loop each; check 7 measures the outer contour of the union. Control points smoothed later round off every kink and tip, so they are not a contract. Anchors, projections and arcs are `points`, and centre lines are a `polyline`. A cut in the middle of a camera move is `{ cut, zoom, about }` on that same entry; the scene draws `lib.geo(id).at(zoom, about)` and does not keep a second copy of the points. The field shapes are in [`templates/CONTRACT.md`](CONTRACT.md). Before signing off, draw each table once (`node tools/stubgen.cjs` draws every profile and outline in the stub pass) and check it reads as the thing it claims: a wing with no width, legs that cannot reach the ground, a label on the wrong feature. A wrong table compounds into every scene that uses it.*
 
 ### G1: *<shape name>* (shots NN, NN; cuts NN > NN)
 
@@ -107,7 +107,7 @@ FILM.TIMELINE = {
       end: 18,
       mode: 'illustrated',            // or 'schematic'
       title: 'Emergence',
-      transitionIn: { kind: 'flash', dur: 0.125 },   // omit for a hard cut; kinds: cut, fade, flash, iris, wipe
+      transitionIn: { kind: 'flash', dur: 0.125 },   // omit for a hard cut; kinds: cut, fade, flash, iris, wipe, whip, inkwash, morph
       brief: 'On the midpoint downbeat a cream flash reveals the adult sliding out…',
     },
     // …one entry per storyboard shot, boundaries on the beat grid, tiling [0, duration]
