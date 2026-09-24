@@ -500,21 +500,218 @@ function uniqueName(prefix) {
   return `${prefix}-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Installed before film scripts (check pages only, never shipped). A scene that keeps
+// document.createElement, or constructs OffscreenCanvas, still passes through here.
+// Check 6 reads window.__canvases. Check 11 also records size, shot and T, and the
+// peak area of canvases still alive (a collected bitmap drops out via FinalizationRegistry).
+const CANVAS_HOOK = `
+<script>
+(function () {
+  var areas = new Map();
+  var meta = new WeakMap();
+  var pending = new Set();
+  var seq = 0;
+  window.__canvases = 0;
+  window.__cvLive = 0;
+  window.__cvPeak = 0;
+  window.__cvRecord = false;
+  window.__cvList = [];
+  window.__cvShot = null;
+  window.__cvT = null;
+  var reg = typeof FinalizationRegistry === 'function'
+    ? new FinalizationRegistry(function (id) {
+        var a = areas.get(id);
+        if (a == null) return;
+        areas.delete(id);
+        window.__cvLive -= a;
+        if (window.__cvLive < 0) window.__cvLive = 0;
+      })
+    : null;
+  function commit(rec, el) {
+    var w = el.width | 0;
+    var h = el.height | 0;
+    var area = w * h;
+    window.__cvLive += area - rec.area;
+    rec.w = w;
+    rec.h = h;
+    rec.area = area;
+    rec.pending = false;
+    areas.set(rec.id, area);
+    if (window.__cvLive > window.__cvPeak) window.__cvPeak = window.__cvLive;
+  }
+  function note(el, sized) {
+    var rec = {
+      id: ++seq,
+      area: 0,
+      w: 0,
+      h: 0,
+      pending: true,
+      seenW: false,
+      seenH: false,
+      shot: window.__cvShot || null,
+      T: typeof window.__cvT === 'number' ? window.__cvT : null,
+    };
+    meta.set(el, rec);
+    areas.set(rec.id, 0);
+    if (reg) {
+      try { reg.register(el, rec.id); } catch (e) {}
+    }
+    window.__canvases++;
+    if (window.__cvRecord) window.__cvList.push(rec);
+    if (sized) commit(rec, el);
+    else pending.add(el);
+  }
+  function resize(el, prop) {
+    var rec = meta.get(el);
+    if (!rec) return;
+    if (prop === 'width') rec.seenW = true;
+    else rec.seenH = true;
+    // createElement's bitmap is 300x150 until both dimensions are assigned.
+    // Counting that default would spike the peak above the real plate.
+    if (rec.pending && !(rec.seenW && rec.seenH)) return;
+    commit(rec, el);
+    pending.delete(el);
+  }
+  window.__cvFlush = function () {
+    pending.forEach(function (el) {
+      var rec = meta.get(el);
+      if (rec && rec.pending) commit(rec, el);
+    });
+    pending.clear();
+  };
+  function hookSize(proto) {
+    if (!proto) return;
+    ['width', 'height'].forEach(function (prop) {
+      var desc;
+      try { desc = Object.getOwnPropertyDescriptor(proto, prop); } catch (e) { return; }
+      if (!desc || typeof desc.get !== 'function' || typeof desc.set !== 'function' || desc.configurable === false) return;
+      Object.defineProperty(proto, prop, {
+        configurable: true,
+        enumerable: desc.enumerable,
+        get: function () { return desc.get.call(this); },
+        set: function (v) {
+          desc.set.call(this, v);
+          resize(this, prop);
+        },
+      });
+    });
+  }
+  try { if (typeof HTMLCanvasElement === 'function') hookSize(HTMLCanvasElement.prototype); } catch (e) {}
+  try { if (typeof OffscreenCanvas === 'function') hookSize(OffscreenCanvas.prototype); } catch (e) {}
+  var patched = false;
+  try {
+    var cdesc = Object.getOwnPropertyDescriptor(Document.prototype, 'createElement');
+    if (cdesc && typeof cdesc.value === 'function') {
+      var orig = cdesc.value;
+      Object.defineProperty(Document.prototype, 'createElement', {
+        value: function (tag, o) {
+          var el = orig.call(this, tag, o);
+          if (tag != null && String(tag).toLowerCase() === 'canvas') note(el, false);
+          return el;
+        },
+        writable: cdesc.writable !== false,
+        enumerable: cdesc.enumerable !== false,
+        configurable: cdesc.configurable !== false,
+      });
+      patched = true;
+    }
+  } catch (e) { patched = false; }
+  if (!patched) {
+    var make = document.createElement.bind(document);
+    document.createElement = function (tag, o) {
+      var el = make(tag, o);
+      if (tag != null && String(tag).toLowerCase() === 'canvas') note(el, false);
+      return el;
+    };
+  }
+  if (typeof OffscreenCanvas === 'function') {
+    var NativeOS = OffscreenCanvas;
+    var WrappedOS = function OffscreenCanvas(w, h) {
+      var c = new NativeOS(w, h);
+      note(c, true);
+      return c;
+    };
+    WrappedOS.prototype = NativeOS.prototype;
+    try { Object.setPrototypeOf(WrappedOS, NativeOS); } catch (e) {}
+    try {
+      Object.getOwnPropertyNames(NativeOS).forEach(function (k) {
+        if (k === 'prototype' || k === 'length' || k === 'name') return;
+        var d = Object.getOwnPropertyDescriptor(NativeOS, k);
+        if (d) Object.defineProperty(WrappedOS, k, d);
+      });
+    } catch (e) {}
+    try { window.OffscreenCanvas = WrappedOS; } catch (e) {}
+  }
+})();
+</script>`;
+
 // Harness injected into tool pages only (never shipped). It may use performance.now.
 const HARNESS = `
-(function () {
-  // count canvases created by the film (tools only): a warm second pass that creates more means a cache that churns
-  const make = document.createElement.bind(document);
-  window.__canvases = 0;
-  document.createElement = function (tag, o) {
-    const el = make(tag, o);
-    if (String(tag).toLowerCase() === 'canvas') window.__canvases++;
-    return el;
-  };
-})();
 window.__h = {
   canvases() {
     return window.__canvases;
+  },
+  // Two passes over frames [from, to). The second records every new canvas with the shot and T.
+  canvasAudit(from, to) {
+    const fps = FILM.FPS || 24;
+    const f0 = from | 0;
+    const f1 = to | 0;
+    const prevPost = FILM.post;
+    const run = (record) => {
+      window.__cvRecord = !!record;
+      if (record) window.__cvList = [];
+      for (let f = f0; f < f1; f++) {
+        const T = f / fps;
+        window.__cvT = T;
+        let id = null;
+        try {
+          const s = FILM.activeShot(T);
+          id = s && s.id;
+        } catch (e) {
+          id = null;
+        }
+        window.__cvShot = id || null;
+        FILM.errors = [];
+        FILM.post = false;
+        FILM.renderFrame(T);
+        if (typeof window.__cvFlush === 'function') window.__cvFlush();
+      }
+    };
+    try {
+      run(false);
+      run(true);
+    } finally {
+      FILM.post = prevPost;
+      window.__cvRecord = false;
+      window.__cvShot = null;
+      window.__cvT = null;
+    }
+    const groups = [];
+    const by = new Map();
+    const list = window.__cvList || [];
+    for (let i = 0; i < list.length; i++) {
+      const rec = list[i];
+      const id = rec.shot || '(no shot)';
+      let g = by.get(id);
+      if (!g) {
+        g = { shot: id, n: 0, area: 0, T: typeof rec.T === 'number' ? rec.T : 0 };
+        by.set(id, g);
+        groups.push(g);
+      }
+      g.n += 1;
+      g.area += rec.area;
+      if (typeof rec.T === 'number' && rec.T < g.T) g.T = rec.T;
+    }
+    window.__cvList = [];
+    const c = FILM.canvas;
+    return {
+      groups: groups,
+      peak: window.__cvPeak,
+      live: window.__cvLive,
+      frameW: c ? c.width : 0,
+      frameH: c ? c.height : 0,
+      frames: f1 > f0 ? f1 - f0 : 0,
+    };
   },
   // Measure a profile or outline silhouette on the bare frame at T: at K points round it, find the strongest
   // luminance edge within +-win px along the outward normal. Returns the offsets in frame px
@@ -592,11 +789,11 @@ window.__h = {
     }
     return out;
   },
-  mount(scale, only) {
+  mount(scale, only, readback) {
     const c = document.createElement('canvas');
     c.id = 'tool-canvas';
     document.body.appendChild(c);
-    FILM.mount(c, { scale, readback: true });
+    FILM.mount(c, { scale, readback: readback !== false });
     FILM.strict = false;
     FILM.only = only || null;
     return { w: c.width, h: c.height, duration: FILM.DURATION, frames: FILM.FRAMES };
@@ -801,6 +998,7 @@ function pageHtml(files, { title = 'tool' } = {}) {
 <script>window.__loadErrors=[];window.addEventListener('error',function(e){window.__loadErrors.push({message:e.message,file:(e.filename||'').split('/').pop(),line:e.lineno,col:e.colno});});</script>
 </head><body>
 ${ASSERT_PREAMBLE}
+${CANVAS_HOOK}
 ${tags}
 <script>${HARNESS}</script>
 </body></html>`;
@@ -822,7 +1020,7 @@ async function launch(extraArgs = []) {
  * Returns { page, info, state, loadErrors, tmpFile, pageErrors, consoleErrors, blocked, reopen, close }.
  * reopen() navigates the same page again: fresh JS state, nothing drawn yet, canvas mounted.
  */
-async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?render=1', only = null, frameWidth = null, frameHeight = null } = {}) {
+async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?render=1', only = null, frameWidth = null, frameHeight = null, readback = true } = {}) {
   fs.mkdirSync(TMP, { recursive: true });
   const tmpFile = path.join(TMP, uniqueName(prefix) + '.html');
   fs.writeFileSync(tmpFile, pageHtml(files, { title: prefix }));
@@ -870,7 +1068,7 @@ async function openPage(browser, files, { scale = 1, prefix = 'page', query = '?
       hasAudio: !!(window.FILM && window.FILM.audio && typeof window.FILM.audio.render === 'function'),
     }));
     pg.info = null;
-    if (pg.state.hasFilm && pg.state.hasTimeline) pg.info = await page.evaluate(([s, o]) => window.__h.mount(s, o), [scale, only]);
+    if (pg.state.hasFilm && pg.state.hasTimeline) pg.info = await page.evaluate(([s, o, rb]) => window.__h.mount(s, o, rb), [scale, only, readback]);
     return pg.info;
   };
   let closed = false;

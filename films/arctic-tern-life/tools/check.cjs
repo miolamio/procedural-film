@@ -32,12 +32,15 @@
 //                  in any one-second window fails
 //   10 density     warns when a bare frame is empty or the subject is only a spark (safe-area edge detail,
 //                  largest empty block of a 3×5 grid). A warning does not fail the gate.
+//   11 canvas      two full passes at scale 0.25, grain post off. The first fills caches. A canvas
+//                  created on the second fails (shot, count, total area, first T). Warns when peak
+//                  live canvas area exceeds about 16× the frame. A warning does not fail the gate.
 //
 // Options: --scale s (default 1), --sweep N (every Nth frame, default 4), --det N (add N evenly spaced determinism
 //          frames on top of the per-shot ones, default 0; never fewer than every shot),
 //          --budget ms (fail if the slowest swept frame exceeds this; default: warn above 150 ms),
 //          --geo-tol px (median edge offset allowed for check 7, in frame px; default 12),
-//          --flash-skip (do not run check 9)
+//          --flash-skip (do not run check 9), --canvas-skip (do not run check 11)
 'use strict';
 
 const fs = require('fs');
@@ -576,7 +579,8 @@ function sampleDensity(page, T, grad) {
 
 async function main() {
   let densityReported = false;
-  const args = C.parseArgs(process.argv.slice(2), ['fixtures', 'flash-skip']);
+  let canvasReported = false;
+  const args = C.parseArgs(process.argv.slice(2), ['fixtures', 'flash-skip', 'canvas-skip']);
   const fixtures = typeof args.fixtures === 'string' ? args.fixtures : !!args.fixtures;
   const scale = args.scale ? Number(args.scale) : 1;
   const sweepStep = Math.max(1, Number(args.sweep || 4));
@@ -1107,6 +1111,57 @@ async function main() {
         }
       }
 
+      // ---------------------------------------------------------------- 11 canvas
+      // Own page, so a warm scale-1 cache cannot satisfy the pass. Scale is 0.25 even when
+      // --scale says otherwise. post is off inside canvasAudit. Every frame, twice.
+      if (args['canvas-skip']) {
+        report(11, 'canvas', 'SKIP', 'skipped (--canvas-skip)');
+        canvasReported = true;
+      } else {
+        const tC = Date.now();
+        let pgC = null;
+        try {
+          pgC = await C.openPage(browser, loadable, {
+            scale: 0.25,
+            prefix: 'check-canvas',
+            only: shotId,
+            frameWidth: TL.width,
+            frameHeight: TL.height,
+            readback: false,
+          });
+          pagesOpened.push(pgC);
+          pgC.page.setDefaultTimeout(180000);
+          if (!pgC.info) throw new Error('FILM did not initialise');
+          const from = shotId ? Math.round(SHOTS[0].start * FPS) : 0;
+          const to = shotId ? Math.max(from, Math.round(SHOTS[0].end * FPS)) : Math.max(0, Math.round(TL.duration * FPS));
+          const audit = await pgC.page.evaluate(([a, b]) => window.__h.canvasAudit(a, b), [from, to]);
+          const sec = ((Date.now() - tC) / 1000).toFixed(1);
+          const frameArea = audit.frameW * audit.frameH;
+          const over = frameArea > 0 && audit.peak > frameArea * 16;
+          const lines = (audit.groups || []).map((g) => {
+            const n = g.n;
+            const t = typeof g.T === 'number' ? g.T : 0;
+            return `shot ${g.shot}: ${n} canvas${n === 1 ? '' : 'es'}, total area ${Math.round(g.area)}, first T=${t.toFixed(3)}`;
+          });
+          const warn = over
+            ? `warn: peak live canvas area ${Math.round(audit.peak)} is ${(audit.peak / frameArea).toFixed(1)}× the frame (${audit.frameW}×${audit.frameH})`
+            : null;
+          const ok = lines.length ? false : over ? 'WARN' : true;
+          const summary = lines.length === 1
+            ? `${lines[0]} (${sec}s)`
+            : lines.length
+              ? `${lines.length} shots allocated canvases on the warm pass (${sec}s)`
+              : `${audit.frames} frames twice at scale 0.25 (${sec}s): warm pass allocated nothing${over ? '; peak live area exceeds 16× the frame' : ''}`;
+          report(11, 'canvas', ok, summary, [...(lines.length > 1 ? lines : []), ...(warn ? [warn] : [])]);
+          canvasReported = true;
+        } catch (e) {
+          report(11, 'canvas', 'WARN', `not measured: ${e.message}`, []);
+          canvasReported = true;
+        } finally {
+          if (pgC) await pgC.close();
+        }
+      }
+
       // ---------------------------------------------------------------- 2 determinism
       // Every shot is always covered: first, middle and last frame, plus one frame inside each non-cut
       // transition. --det adds evenly spaced frames on top and can never drop a shot.
@@ -1291,6 +1346,7 @@ async function main() {
   }
 
   if (!densityReported) report(10, 'density', 'WARN', 'not measured', []);
+  if (!canvasReported) report(11, 'canvas', args['canvas-skip'] ? 'SKIP' : 'WARN', args['canvas-skip'] ? 'skipped (--canvas-skip)' : 'not measured', []);
 
   results.sort((a, b) => a.n - b.n);
   const failed = results.filter((r) => r.ok === false);
