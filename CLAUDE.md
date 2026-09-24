@@ -37,6 +37,8 @@ node examples/butterfly-life/tools/build.cjs            # dist/<slug>.html
 
 There is no unit-test suite. The gate (`check.cjs`) is the test: run it on the example and with `--fixtures` after any engine or tool change. The foundation has no timeline of its own, so test it via `--fixtures`. ffmpeg must be on `PATH` or set in `FFMPEG`.
 
+Check 6 on `examples/butterfly-life` warns and does not fail the gate. The slow frames are the reference film's own drawing: `scale-mosaic` peaks around 540 ms, `spring-egg` around 300 ms. That warning is a known property of the example, not a regression to chase on every engine change.
+
 Visual changes are verified by looking at rendered frames (`snap.cjs` output under `.frames/`), not by reading code.
 
 ## Commit style
