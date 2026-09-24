@@ -89,9 +89,16 @@ Start with the whole film on one sheet: `node tools/snap.cjs --samples 24 --shee
 
 Then review every shot on rendered frames at three scales, each of which hides what the others show: the contact sheet (composition and reading at thumbnail size), the full frame at native size (hierarchy, empty areas, density), and native crops of the subject and its key materials (`snap --crop x,y,w,h`: anatomy, construction, whether detail follows the form or just scatters noise). Critic subagents score composition, faithfulness to the storyboard, motion and density. They take separate passes for composition, anatomy and motion. They **measure** ratio-critical geometry in pixels against the art bible (the Measure ratios of section 10, band fractions, thirds, safe-area arithmetic) rather than judging by eye alone, and snap both sides of every cut with the tables overlaid (`snap --geo G1,G3`); check 7 already holds the listed match cuts, so critics spend their eye on the unlisted ones.
 
+Beside those three scales, the art checklist:
+
+- Compare with a reference at native size (`reference/example-paper-frame.jpg`, `reference/example-blueprint-frame.jpg`, or the agreed reference for this film). The contact sheet hides stroke texture and line weight.
+- On the thumbnail, check hierarchy and quiet: what reads first, and whether there is empty space around the subject.
+- A green gate is not an art verdict. Write a separate art verdict.
+- Every note names one element and the scale it was seen at (thumbnail, native frame, or native crop). No "looks better" with no subject.
+
 Fix in waves — prioritised briefs (P1 first, each citing evidence frames), file ownership (resume the owning agent rather than spawning a fresh one), re-snap after every fix. The director spot-checks every P1 fix on fresh frames: a fix is done when the re-rendered frame shows it, never on an agent's description of the change. Spot-check determinism by snapping the same frames in two different orders and comparing file hashes.
 
-Done when: every P1 and P2 fix is verified on fresh frames and the gate is green.
+Done when: every P1 and P2 fix is verified on fresh frames, the art verdict is written, and the gate is green.
 
 ### 10. Deliver
 

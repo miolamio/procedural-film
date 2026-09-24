@@ -70,3 +70,10 @@ The gate does not catch these; critics do, one wave late. Avoid them instead:
 
 Read the storyboard entry, the art bible and the shared geometry → write the file →
 `node tools/snap.cjs --shot <id> --only --samples 6 --sheet` → open the contact sheet and look at every frame → fix → re-snap. For a match cut, snap both sides with the table overlaid (`--geo G1`). When the sheet is on-brief, gate your shot alone: `node tools/check.cjs --shot <id>`. The whole-film gate belongs to the director. Run while siblings are half-written, it fails on their files, not yours.
+
+That snap writes each sample at native size next to the sheet. Open those frames, and a native crop of the subject (`--crop x,y,w,h`). The art checklist, beside the sheet:
+
+- Compare with a reference at native size (the example frames beside this file, `example-paper-frame.jpg` and `example-blueprint-frame.jpg`, or the agreed reference for this film). The contact sheet hides stroke texture and line weight.
+- On the thumbnail, check hierarchy and quiet: what reads first, and whether there is empty space around the subject.
+- A green gate is not an art verdict. Write a separate art verdict.
+- Every note names one element and the scale it was seen at (thumbnail, native frame, or native crop). No "looks better" with no subject.
