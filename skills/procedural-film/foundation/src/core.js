@@ -746,9 +746,10 @@
     ctx.restore();
   }
 
-  // Threshold field cached by size and seed, never by time. A pixel turns on once p passes it,
-  // so the mask only grows. Every pixel gets a threshold: blots first, then distance outside
-  // them, ranked so the last interior frame (cut 233 at p = 11/12) covers at least 95%.
+  // Threshold field cached by size and seed, never by time. A pixel turns on once its
+  // threshold is passed, so the mask only grows. Blots first, then distance outside them,
+  // ranked so a cut of 233 — round((11/12) * 254), the last interior frame of a 0.5s seam —
+  // covers at least 95%. Shorter seams never reach p = 11/12; inkwashComposite scales them.
   const inkFields = new Map();
   let inkStore = null;
 
@@ -933,7 +934,17 @@
     const cw = Math.max(1, w >> 1);
     const ch = Math.max(1, h >> 1);
     const thr = inkField(cw, ch, seed);
-    const cut = Math.max(0, Math.min(254, Math.round(p * 254)));
+    // p = k/n on interior frames and stays below 1, so round(p * 254) only hits the
+    // rank field's closing cut on a 0.5s seam (last p = 11/12). A pure quantile of p
+    // stops at (n-1)/n — about 83% at dur 0.25, not closed. Scale a shorter seam's p
+    // up to that same cut; a longer one already passes it. p = 0 stays cut 0, and the
+    // cut only rises, so the mask only grows.
+    const tuned = interiorFrames(0.5);
+    const refP = tuned > 1 ? (tuned - 1) / tuned : 1;
+    const n = interiorFrames(tr.dur);
+    const pLast = n > 1 ? (n - 1) / n : 1;
+    const gain = pLast < refP ? refP / pLast : 1;
+    const cut = Math.max(0, Math.min(254, Math.round(Math.min(1, p * gain) * 254)));
     const pack = inkPack(w, h);
     const md = pack.mask.data;
     const rd = pack.rim.data;

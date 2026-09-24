@@ -1,6 +1,7 @@
 // Check 8: whip, inkwash and morph. First frame of each transition matches the outgoing shot
 // alone; the first frame at or after dur matches the incoming shot alone. The inkwash mask
-// (pixels of the incoming shot, or the ink rim) only grows.
+// (pixels of the incoming shot, or the ink rim) only grows. The last interior frame of an
+// inkwash is measured on solid contrast plates, so shared colours do not count as coverage.
 // No Math.random / Date. Loaded only by check.cjs --fixtures.
 
 function trFrames(dur) {
@@ -100,6 +101,93 @@ FILM.assert('inkwash mask area is monotonic', () => {
     FILM.expect.true(prevArea > first, `inkwash mask did not grow (${first} -> ${prevArea})`);
   } finally {
     shot.transitionIn.dur = saved;
+    FILM.post = prevPost;
+  }
+});
+
+function trSnap() {
+  const c = FILM.canvas;
+  return new Uint8ClampedArray(FILM.ctx.getImageData(0, 0, c.width, c.height).data);
+}
+
+function trFill(color) {
+  return function (ctx) {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, FILM.W, FILM.H);
+  };
+}
+
+// Outgoing pixels on the last interior frame, as a fraction of the pixels where the two
+// plates differ. The rim is ink, not the outgoing plate, so it does not count as still open.
+function trOutgoingFrac(comp, out, inn) {
+  let differ = 0;
+  let still = 0;
+  for (let i = 0; i < comp.length; i += 4) {
+    if (out[i] === inn[i] && out[i + 1] === inn[i + 1] && out[i + 2] === inn[i + 2]) continue;
+    differ++;
+    if (comp[i] === out[i] && comp[i + 1] === out[i + 1] && comp[i + 2] === out[i + 2]) still++;
+  }
+  return { differ: differ, still: still, frac: differ ? still / differ : 1 };
+}
+
+FILM.assert('inkwash closes on the last interior frame for any dur', () => {
+  const shot = FILM.shots.find((s) => s.id === 'fx-inkwash');
+  FILM.expect.true(!!shot, 'missing fx-inkwash');
+  const prev = FILM.shots[shot.index - 1];
+  FILM.expect.true(!!prev, 'missing the shot before fx-inkwash');
+  const inDef = FILM.registry[shot.id];
+  const outDef = FILM.registry[prev.id];
+  FILM.expect.true(!!(inDef && outDef && shot.transitionIn), 'missing inkwash plates');
+  const savedDur = shot.transitionIn.dur;
+  const savedEnd = prev.end;
+  const savedIn = inDef.draw;
+  const savedOut = outDef.draw;
+  const prevPost = FILM.post;
+  const P = FILM.lib.pal;
+  // Solid plates. The striped fixture shares colours, which would count as already covered.
+  inDef.draw = trFill(P.leaf);
+  outDef.draw = trFill(P.paper);
+  FILM.post = false;
+  try {
+    for (const dur of [0.25, 0.5, 1.0]) {
+      const n = trFrames(dur);
+      FILM.expect.true(n >= 2, `dur ${dur} has no interior frame after p = 0`);
+      const T = shot.start + (n - 1) / FILM.FPS;
+      shot.transitionIn.dur = dur;
+      FILM.renderFrame(T);
+      const comp = trSnap();
+      shot.transitionIn.dur = 0;
+      FILM.renderFrame(T);
+      const inn = trSnap();
+      prev.end = T + 1 / FILM.FPS;
+      FILM.renderFrame(T);
+      const out = trSnap();
+      prev.end = savedEnd;
+      const got = trOutgoingFrac(comp, out, inn);
+      FILM.expect.true(got.differ > 0, `dur ${dur} contrast plates did not differ`);
+      FILM.expect.true(
+        got.frac <= 0.01,
+        `dur ${dur} leaves ${(got.frac * 100).toFixed(2)}% outgoing on the last interior frame (${got.still}/${got.differ})`
+      );
+    }
+    // p = 0 is the outgoing plate alone, including when the seam is not the fixture's 0.5s.
+    shot.transitionIn.dur = 0.25;
+    const T0 = shot.start;
+    FILM.renderFrame(T0);
+    const at0 = trSnap();
+    prev.end = T0 + 1 / FILM.FPS;
+    FILM.renderFrame(T0);
+    const plate = trSnap();
+    let mismatch = 0;
+    for (let i = 0; i < at0.length; i += 4) {
+      if (at0[i] !== plate[i] || at0[i + 1] !== plate[i + 1] || at0[i + 2] !== plate[i + 2]) mismatch++;
+    }
+    FILM.expect.eq(mismatch, 0);
+  } finally {
+    shot.transitionIn.dur = savedDur;
+    prev.end = savedEnd;
+    inDef.draw = savedIn;
+    outDef.draw = savedOut;
     FILM.post = prevPost;
   }
 });
