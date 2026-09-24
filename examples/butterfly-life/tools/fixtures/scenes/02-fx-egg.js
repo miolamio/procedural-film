@@ -4,6 +4,12 @@ FILM.scene({
   draw(ctx, t, info) {
     const L = info.lib, P = L.pal;
     L.blueprint(ctx, { seed: 8, center: [540, 960] });
+    // Screen-fixed, so the camera zoom below does not move the check-7 samples.
+    L.inkPath(ctx, L.geo('eggSide').outline(4), { closed: true, smooth: false, color: P.lavender, width: 6, seed: 11, wobble: 0, taper: 0 });
+    const pair = L.geo('pair');
+    for (let i = 0; i < pair.parts.length; i++) {
+      L.inkPath(ctx, pair.parts[i], { closed: true, smooth: false, color: P.lineWhite, width: 6, seed: 12 + i, wobble: 0, taper: 0 });
+    }
     const zoom = L.mapRange(t, 0, info.dur, 1, 1.12, 'inOutSine');
     // centred on the frame centre, so at zoom 1 the geo table (frame pixels) lands where it says
     L.camera(ctx, { x: info.W / 2, y: info.H / 2, zoom }, () => {

@@ -97,7 +97,7 @@ FILM.GEO = {
 It is pure data with no `lib` calls: tools evaluate it on its own.
 Scenes read shapes with `lib.geo(id)` instead of copying numbers, so a table fix reaches every shot at once.
 `cuts` lists the match cuts to hold (default: every pair of consecutive listed shots); `at: [{ shot, t }]` adds a single frame to measure.
-A `profile` is symmetric about a vertical axis only: a shape lying on its side, or a figure of several parts, is an `outline` of its outer silhouette, one closed loop. A cut in the middle of a camera move needs the silhouette as it lands on that frame, as its own entry.
+A `profile` is symmetric about `x = cx` (stations `ys`, half-widths `hs`). `axis: 'x'` lies on its side: stations `xs`, half-heights `hs`, axis `y = cy`. A figure of several parts is an `outline` with `parts`; check 7 measures the outer contour of the union. A cut in the middle of a camera move is `{ cut: 'a>b', zoom, about: [x, y] }`. This film's profiles stay on a vertical axis.
 Check 7 measures every `profile` and `outline` on the rendered frames either side of each cut and fails a cut whose drawn edge strays from the table.
 
 ### Audio

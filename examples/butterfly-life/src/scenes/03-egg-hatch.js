@@ -16,7 +16,6 @@
   // ===========================================================================
   // G1 egg geometry (docs/storyboard.md, Shared geometry G1), exact numbers
   // ===========================================================================
-  const G1 = [[520, 180], [560, 225], [620, 262], [700, 282], [790, 285], [880, 276], [980, 250], [1080, 208], [1160, 160], [1220, 110], [1260, 60], [1280, 0]];
   const AX = 540;
   const BASE_Y = 520;
   const TIP_Y = 1280;
@@ -25,53 +24,12 @@
   const CRACK_Y = 1170;
   const HALF_Y = 900; // after the second bite the shell is eaten back to half its height
 
-  // monotone cubic (Fritsch-Carlson) through the G1 half-widths, so every table value is hit exactly
-  function monotone(pts) {
-    const n = pts.length;
-    const xs = pts.map((p) => p[0]);
-    const ys = pts.map((p) => p[1]);
-    const d = [];
-    const m = [];
-    for (let i = 0; i < n - 1; i++) d[i] = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
-    m[0] = d[0];
-    m[n - 1] = d[n - 2];
-    for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
-    for (let i = 0; i < n - 1; i++) {
-      if (d[i] === 0) {
-        m[i] = m[i + 1] = 0;
-        continue;
-      }
-      const a = m[i] / d[i], b = m[i + 1] / d[i];
-      const s = a * a + b * b;
-      if (s > 9) {
-        const k = 3 / Math.sqrt(s);
-        m[i] = k * a * d[i];
-        m[i + 1] = k * b * d[i];
-      }
-    }
-    return (y) => {
-      if (y <= xs[0]) return ys[0];
-      if (y >= xs[n - 1]) return ys[n - 1];
-      let i = 0;
-      while (y > xs[i + 1]) i++;
-      const h = xs[i + 1] - xs[i];
-      const u = (y - xs[i]) / h;
-      const u2 = u * u, u3 = u2 * u;
-      return (2 * u3 - 3 * u2 + 1) * ys[i] + (u3 - 2 * u2 + u) * h * m[i] + (-2 * u3 + 3 * u2) * ys[i + 1] + (u3 - u2) * h * m[i + 1];
-    };
-  }
-  const HWF = monotone(G1);
-  const HW = new Float64Array(TIP_Y - BASE_Y + 1);
-  for (let y = BASE_Y; y <= TIP_Y; y++) {
-    // the last 20 px close on a sqrt curve so the tip is round (vertical tangent), not pointed
-    HW[y - BASE_Y] = y <= 1260 ? Math.max(0, HWF(y)) : 60 * Math.sqrt(Math.max(0, 1 - (y - 1260) / 20));
-  }
+  // Body half-width is FILM.GEO G1. The last 20 px stays this shot's sqrt cap.
   function hw(y) {
-    if (y <= BASE_Y) return HW[0];
+    if (y <= BASE_Y) return FILM.lib.geo('G1').hw(BASE_Y);
     if (y >= TIP_Y) return 0;
-    const i = Math.floor(y - BASE_Y);
-    const f = y - BASE_Y - i;
-    return HW[i] + (HW[Math.min(HW.length - 1, i + 1)] - HW[i]) * f;
+    if (y > 1260) return 60 * Math.sqrt(Math.max(0, 1 - (y - 1260) / 20));
+    return FILM.lib.geo('G1').hw(y);
   }
   // silhouette: right side down, left side up (closed)
   const EGG = (() => {

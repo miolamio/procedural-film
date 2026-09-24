@@ -169,8 +169,9 @@ function selfCrossing(pts) {
 /**
  * Static checks on FILM.GEO against the timeline. Returns { problems, warnings, frames }, where
  * frames lists every frame to measure: { id, T, label, cut? } per side of each declared cut and per 'at'.
- *   profile  : { kind: 'profile', cx, ys, hs, shots, cuts?: ['a>b', ...], at?: [{ shot, t }] }
- *   outline  : { kind: 'outline', pts: [[x, y], ...] closed and densely sampled, shots, cuts?, at? }
+ *   profile  : { kind: 'profile', cx, ys, hs, shots, cuts?, at? } or axis 'x' with cy, xs, hs.
+ *             cuts entries are 'a>b' or { cut: 'a>b', zoom, about: [x, y] }.
+ *   outline  : { kind: 'outline', pts | parts, shots, cuts?, at? }
  *   points   : { kind: 'points', pts: { name: [x, y] }, shots }
  *   polyline : { kind: 'polyline', pts: [[x, y], ...], shots }
  * cuts defaults to every pair of consecutive listed shots; 'a>b' measures a's last and b's first frame.
@@ -200,16 +201,25 @@ function validateGeo(geo, tl, opts) {
     for (const s of shots) if (!byId.has(s)) problems.push(`${at}: shot '${s}' is not in the timeline`);
     if (g.kind === 'profile' || g.kind === 'outline') {
       if (g.kind === 'profile') {
-        const { ys, hs } = g;
-        if (!num(g.cx)) problems.push(`${at}: cx must be a number`);
-        if (!Array.isArray(ys) || !Array.isArray(hs) || ys.length !== hs.length || ys.length < 3) {
-          problems.push(`${at}: ys and hs must be arrays of the same length, at least 3`);
+        const horizontal = g.axis === 'x';
+        const stations = horizontal ? g.xs : g.ys;
+        const { hs } = g;
+        const origin = horizontal ? g.cy : g.cx;
+        if (!num(origin)) problems.push(`${at}: ${horizontal ? 'cy' : 'cx'} must be a number`);
+        if (!Array.isArray(stations) || !Array.isArray(hs) || stations.length !== hs.length || stations.length < 3) {
+          problems.push(`${at}: ${horizontal ? 'xs' : 'ys'} and hs must be arrays of the same length, at least 3`);
           continue;
         }
-        if (![...ys, ...hs].every(num)) problems.push(`${at}: ys and hs must hold numbers only`);
-        for (let i = 1; i < ys.length; i++) if (!(ys[i] > ys[i - 1])) problems.push(`${at}: ys must increase (${ys[i - 1]} then ${ys[i]})`);
+        if (![...stations, ...hs].every(num)) problems.push(`${at}: ${horizontal ? 'xs' : 'ys'} and hs must hold numbers only`);
+        for (let i = 1; i < stations.length; i++) if (!(stations[i] > stations[i - 1])) problems.push(`${at}: ${horizontal ? 'xs' : 'ys'} must increase (${stations[i - 1]} then ${stations[i]})`);
         if (hs.some((h) => h < 0)) problems.push(`${at}: half-widths must be >= 0`);
-        if (num(g.cx) && !inFrame(g.cx, ys[0])) problems.push(`${at}: cx ${g.cx} is far outside the frame`);
+        if (g.interp != null && g.interp !== 'linear' && g.interp !== 'monotone') problems.push(`${at}: interp '${g.interp}' is not linear or monotone`);
+        if (num(origin) && !inFrame(horizontal ? stations[0] : origin, horizontal ? origin : stations[0])) problems.push(`${at}: the axis is far outside the frame`);
+      } else if (Array.isArray(g.parts) && g.parts.length) {
+        if (!g.parts.every((poly) => Array.isArray(poly) && poly.length >= 3 && poly.every((p) => Array.isArray(p) && p.length === 2 && p.every(num)))) {
+          problems.push(`${at}: parts must be loops of at least 3 [x, y] points`);
+          continue;
+        }
       } else {
         const pts = g.pts;
         if (!Array.isArray(pts) || pts.length < 8 || !pts.every((p) => Array.isArray(p) && p.length === 2 && p.every(num))) {
@@ -235,16 +245,34 @@ function validateGeo(geo, tl, opts) {
         const listed = tl.shots.filter((s) => shots.includes(s.id));
         for (let i = 1; i < listed.length; i++) if (listed[i].index === listed[i - 1].index + 1) cuts.push(`${listed[i - 1].id}>${listed[i].id}`);
       }
-      if (!Array.isArray(cuts)) problems.push(`${at}: cuts must be an array of 'a>b' strings`);
+      if (!Array.isArray(cuts)) problems.push(`${at}: cuts must be an array of 'a>b' strings or { cut, zoom, about }`);
       else
         for (const c of cuts) {
-          const [a, b] = String(c).split('>').map((x) => x && x.trim());
+          const spec = typeof c === 'string'
+            ? { name: c, zoom: null, about: null }
+            : c && typeof c === 'object' && typeof c.cut === 'string'
+              ? { name: c.cut, zoom: c.zoom == null ? null : Number(c.zoom), about: c.about }
+              : null;
+          if (!spec) {
+            problems.push(`${at}: cut ${JSON.stringify(c)} must be 'a>b' or { cut, zoom, about }`);
+            continue;
+          }
+          if (spec.zoom != null && (!(spec.zoom > 0) || !Array.isArray(spec.about) || spec.about.length < 2 || !spec.about.every(num))) {
+            problems.push(`${at}: cut '${spec.name}' needs zoom > 0 and about: [x, y]`);
+            continue;
+          }
+          const [a, b] = spec.name.split('>').map((x) => x && x.trim());
+          const labelCut = spec.zoom != null ? `${spec.name} @${spec.zoom}` : spec.name;
           const A = byId.get(a), B = byId.get(b);
-          if (!A || !B) problems.push(`${at}: cut '${c}' names a shot that is not in the timeline`);
-          else if (B.index !== A.index + 1 && !(A.index === tl.shots.length - 1 && B.index === 0)) problems.push(`${at}: cut '${c}': '${b}' does not follow '${a}'`);
+          if (!A || !B) problems.push(`${at}: cut '${spec.name}' names a shot that is not in the timeline`);
+          else if (B.index !== A.index + 1 && !(A.index === tl.shots.length - 1 && B.index === 0)) problems.push(`${at}: cut '${spec.name}': '${b}' does not follow '${a}'`);
           else {
-            if (B.transitionIn && B.transitionIn.kind !== 'cut' && B.transitionIn.dur > 0) warnings.push(`${at}: cut '${c}' is a ${B.transitionIn.kind}, not a hard cut; its first frame blends both shots`);
-            frames.push({ id, T: lastT(A), label: `${a} last`, cut: c }, { id, T: firstT(B), label: `${b} first`, cut: c });
+            if (B.transitionIn && B.transitionIn.kind !== 'cut' && B.transitionIn.dur > 0) warnings.push(`${at}: cut '${spec.name}' is a ${B.transitionIn.kind}, not a hard cut; its first frame blends both shots`);
+            const view = spec.zoom != null ? { zoom: spec.zoom, about: [spec.about[0], spec.about[1]] } : null;
+            frames.push(
+              { id, T: lastT(A), label: `${a} last`, cut: labelCut, zoom: view && view.zoom, about: view && view.about },
+              { id, T: firstT(B), label: `${b} first`, cut: labelCut, zoom: view && view.zoom, about: view && view.about },
+            );
           }
         }
       for (const x of Array.isArray(g.at) ? g.at : []) {
@@ -387,8 +415,9 @@ window.__h = {
   // Measure a profile or outline silhouette on the bare frame at T: at K points round it, find the strongest
   // luminance edge within +-win px along the outward normal. Returns the offsets in frame px
   // (positive = outside the silhouette), each edge's strength, and for a profile its side (-1 left, +1 right).
-  geoMeasure(id, T, win, K) {
-    const g = FILM.lib.geo(id);
+  geoMeasure(id, T, win, K, view) {
+    let g = FILM.lib.geo(id);
+    if (view && view.zoom) g = g.at(view.zoom, view.about);
     FILM.errors = [];
     FILM.post = false;
     FILM.renderFrame(T);
@@ -398,7 +427,7 @@ window.__h = {
     const lum = (x, y) => { const k = (y * W + x) * 4; return 0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2]; };
     // K points evenly spaced by arc length round the outline (a profile is sampled into one first);
     // at each, scan along the outward normal for the strongest luminance step
-    const P = g.kind === 'outline' ? g.pts : g.outline(4), m = P.length;
+    const P = g.kind === 'outline' && g.pts && !g.parts ? g.pts : g.outline(4), m = P.length;
     let area = 0;
     const cum = [0];
     for (let i = 0; i < m; i++) {
@@ -439,7 +468,7 @@ window.__h = {
         const gr = Math.abs(A - B) / TAPS.length;
         if (gr > best) { best = gr; bt = t; }
       }
-      const side = g.kind === 'profile' ? (x < g.cx - 0.5 ? -1 : x > g.cx + 0.5 ? 1 : 0) : 0;
+      const side = g.kind !== 'profile' ? 0 : g.axis === 'x' ? (y < g.cy - 0.5 ? -1 : y > g.cy + 0.5 ? 1 : 0) : (x < g.cx - 0.5 ? -1 : x > g.cx + 0.5 ? 1 : 0);
       if (best >= 0) rows.push({ x: Math.round(x), y: Math.round(y), side, off: Math.round(bt * 10) / 10, edge: Math.round(best) });
     }
     return { rows, errors: FILM.errors.map((e) => e.message) };

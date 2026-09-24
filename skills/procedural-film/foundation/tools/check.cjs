@@ -961,7 +961,9 @@ async function main() {
         const K = 48;
         const byCut = new Map();
         for (const fr of geoFrames) {
-          const r = await pg.page.evaluate(([id, T, K]) => window.__h.geoMeasure(id, T, 40, K), [fr.id, fr.T, K]);
+          const r = await pg.page.evaluate((arg) => window.__h.geoMeasure(arg.id, arg.T, 40, arg.K, arg.view), {
+            id: fr.id, T: fr.T, K, view: fr.zoom ? { zoom: fr.zoom, about: fr.about } : null,
+          });
           for (const e of r.errors) geoProblems.push(`${fr.id} at ${fr.label} (T=${C.fmtT(fr.T)}): draw error ${e}`);
           const seen = r.rows.filter((o) => o.edge >= 10); // an edge weaker than this is paper grain or grid
           const near = seen.filter((o) => Math.abs(o.off) <= geoTol);

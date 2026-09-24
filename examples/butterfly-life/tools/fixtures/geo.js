@@ -52,6 +52,27 @@ FILM.GEO = {
         [144, 1509.4], [141.7, 1504.7],
     ],
   },
+  // horizontal profile: a capsule lying on y 280, blunt ends at x 140 and x 400. Linear, like a table joined by straight lines.
+  eggSide: {
+    kind: 'profile',
+    axis: 'x',
+    interp: 'linear',
+    cy: 280,
+    xs: [140, 180, 260, 340, 400],
+    hs: [0, 36, 48, 36, 0],
+    shots: ['fx-egg'],
+    at: [{ shot: 'fx-egg', t: 0 }],
+  },
+  // two overlapping rectangles. outline() is their outer union, not either loop alone.
+  pair: {
+    kind: 'outline',
+    parts: [
+      [[620, 200], [820, 200], [820, 280], [620, 280]],
+      [[740, 240], [960, 240], [960, 340], [740, 340]],
+    ],
+    shots: ['fx-egg'],
+    at: [{ shot: 'fx-egg', t: 0 }],
+  },
   // named anchors and a polyline are validated, not measured
   sun: { kind: 'points', pts: { centre: [860, 360] }, shots: ['fx-meadow'] },
   stem: { kind: 'polyline', pts: [[180, 1480], [520, 1260], [930, 1110]], shots: ['fx-meadow'] },

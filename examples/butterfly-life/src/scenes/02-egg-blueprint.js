@@ -30,27 +30,11 @@
   // G1 egg profile (docs/storyboard.md, Shared geometry G1)
   // ---------------------------------------------------------------------------
 
-  const YS = [520, 560, 620, 700, 790, 880, 980, 1080, 1160, 1220, 1260, 1280];
-  const HS = [180, 225, 262, 282, 285, 276, 250, 208, 160, 110, 60, 0];
-  // the last 20 px is an elliptical cap so the tip is round: through (60, 1260) with slope -1.25, vertical at 1280
+  // Body half-width is FILM.GEO G1. The last 20 px stays a local elliptical cap
+  // (half-width 60 at y 1260, vertical at 1280). The shared spline ends in a point.
   const CAP_B = 70;
   const CAP_YC = 1280 - CAP_B;
   const CAP_A = Math.sqrt((60 * 1.25 * CAP_B * CAP_B) / (CAP_B - 20));
-  const SLOPES = (() => {
-    const n = YS.length;
-    const d = [];
-    const m = new Array(n).fill(0);
-    for (let i = 0; i < n - 1; i++) d.push((HS[i + 1] - HS[i]) / (YS[i + 1] - YS[i]));
-    m[0] = d[0];
-    for (let i = 1; i < n - 1; i++) {
-      if (d[i - 1] * d[i] <= 0) continue;
-      const h0 = YS[i] - YS[i - 1], h1 = YS[i + 1] - YS[i];
-      const w1 = 2 * h1 + h0, w2 = h1 + 2 * h0;
-      m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
-    }
-    m[10] = -1.25;
-    return m;
-  })();
 
   function hw(y) {
     if (y <= 520) return 180;
@@ -59,11 +43,7 @@
       const u = (y - CAP_YC) / CAP_B;
       return CAP_A * Math.sqrt(Math.max(0, 1 - u * u));
     }
-    let i = 0;
-    while (YS[i + 1] < y) i++;
-    const h = YS[i + 1] - YS[i];
-    const s = (y - YS[i]) / h, s2 = s * s, s3 = s2 * s;
-    return (2 * s3 - 3 * s2 + 1) * HS[i] + (s3 - 2 * s2 + s) * h * SLOPES[i] + (-2 * s3 + 3 * s2) * HS[i + 1] + (s3 - s2) * h * SLOPES[i + 1];
+    return FILM.lib.geo('G1').hw(y);
   }
 
   // one side of the silhouette, base to tip (sign -1 left, +1 right)

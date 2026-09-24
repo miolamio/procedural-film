@@ -469,21 +469,172 @@
    * geo(id) : a shared-geometry entry from FILM.GEO (src/geo.js), the machine-readable copy of the
    * storyboard's Shared geometry tables. Scenes that share a shape across a match cut read it here
    * instead of copying numbers, and tools/check.cjs measures the drawn frames against it.
-   *   kind 'profile'  : a silhouette symmetric about x = cx, half-widths hs at heights ys (ys increasing).
-   *                     hw(y) interpolates with a monotone cubic (Fritsch-Carlson), so every table value
-   *                     is hit exactly and the curve never overshoots between them.
-   *                     x(y, side) : edge x (side -1 left, +1 right); side(sign, step) : one edge, top to
-   *                     bottom; outline(step) : the closed silhouette, clockwise from the top left;
-   *                     widest : { y, hw }.
-   *   kind 'outline'  : any closed silhouette, pts already sampled densely (<= 12 px apart) in the order it is
-   *                     drawn. It is the drawn outline, not control points: draw it as it stands
-   *                     (inkPath(ctx, g.outline(), { closed: true, smooth: false })), because smoothing
-   *                     control points rounds off every kink and tip the storyboard drew.
+   *   kind 'profile'  : a silhouette symmetric about an axis. Default axis 'y' is the vertical line x = cx,
+   *                     half-widths hs at heights ys (ys increasing). axis 'x' is the horizontal line y = cy,
+   *                     half-heights hs at stations xs (xs increasing): a shape lying on its side.
+   *                     hw(u) is the half-extent at station u. Default interpolation is a monotone cubic
+   *                     (Fritsch-Carlson), so every table value is hit exactly and the curve never overshoots.
+   *                     interp: 'linear' joins the stations with straight segments.
+   *                     x(u, side) / y(u, side) : the edge point (side -1 and +1 are the two sides);
+   *                     side(sign, step) : one edge along the axis; outline(step) : the closed silhouette;
+   *                     widest : { y, hw } or { x, hw }.
+   *   kind 'outline'  : any closed silhouette. pts is one loop already sampled densely (<= 12 px apart) in the
+   *                     order it is drawn. parts is several loops; outline() is the outer contour of their
+   *                     union, so a bird of wings, body, head and tail does not need a hand-traced silhouette.
+   *                     Draw a single loop as it stands (inkPath(ctx, g.outline(), { closed: true, smooth: false })),
+   *                     because smoothing control points rounds off every kink and tip the storyboard drew.
+   *   at(zoom, about) : the same shape with every point moved to about + zoom * (p - about). Check 7 uses it
+   *                     for a match cut that lands in the middle of a camera move.
    *   kind 'points'   : named anchors. pt(name) returns [x, y] and throws on a misspelt name.
    *   kind 'polyline' : an ordered point list, pts.
    * Every entry also carries its table fields (cx, ys, hs, pts, shots, cuts, ...) read-only.
    */
   const geoCache = new Map();
+  const unionCache = new Map();
+
+  function scanFill(mask, w, h, ox, oy, poly) {
+    const n = poly.length;
+    if (n < 3) return;
+    const buckets = Array.from({ length: h }, () => []);
+    for (let i = 0; i < n; i++) {
+      let x0 = poly[i][0] - ox;
+      let y0 = poly[i][1] - oy;
+      const q = poly[(i + 1) % n];
+      let x1 = q[0] - ox;
+      let y1 = q[1] - oy;
+      if (y0 === y1) continue;
+      if (y0 > y1) {
+        const sx = x0; x0 = x1; x1 = sx;
+        const sy = y0; y0 = y1; y1 = sy;
+      }
+      const yA = Math.ceil(y0 - 1e-9);
+      const yB = Math.floor(y1 - 1e-9);
+      for (let y = yA; y <= yB; y++) {
+        if (y < 0 || y >= h) continue;
+        const t = (y + 0.5 - y0) / (y1 - y0);
+        if (t < 0 || t >= 1) continue;
+        buckets[y].push(x0 + (x1 - x0) * t);
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      const xs = buckets[y];
+      if (xs.length < 2) continue;
+      xs.sort((a, b) => a - b);
+      const row = y * w;
+      for (let i = 0; i + 1 < xs.length; i += 2) {
+        let a = Math.ceil(xs[i] - 1e-9);
+        let b = Math.floor(xs[i + 1] - 1e-9);
+        if (a < 0) a = 0;
+        if (b >= w) b = w - 1;
+        for (let x = a; x <= b; x++) mask[row + x] = 1;
+      }
+    }
+  }
+
+  // Outer contour of the filled pixels, 8-connected, starting at the top-most left pixel.
+  function traceOuter(mask, w, h) {
+    let sx = -1, sy = -1;
+    for (let y = 0; y < h && sx < 0; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) if (mask[row + x]) { sx = x; sy = y; break; }
+    }
+    if (sx < 0) return [];
+    const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+    const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x] === 1;
+    const loop = [[sx, sy]];
+    let x = sx, y = sy, dir = 6;
+    const max = w * h;
+    for (let n = 0; n < max; n++) {
+      let found = -1;
+      for (let k = 0; k < 8; k++) {
+        const d = (dir + k) % 8;
+        if (on(x + dirs[d][0], y + dirs[d][1])) { found = d; break; }
+      }
+      if (found < 0) break;
+      x += dirs[found][0];
+      y += dirs[found][1];
+      if (x === sx && y === sy) break;
+      loop.push([x, y]);
+      dir = (found + 6) % 8;
+    }
+    return loop;
+  }
+
+  function resampleLoop(raw, step) {
+    if (raw.length < 3) return raw;
+    const out = [[raw[0][0], raw[0][1]]];
+    let acc = 0;
+    for (let i = 1; i < raw.length; i++) {
+      acc += Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]);
+      if (acc >= step) {
+        out.push([raw[i][0], raw[i][1]]);
+        acc = 0;
+      }
+    }
+    const last = raw[raw.length - 1];
+    const tail = out[out.length - 1];
+    if (tail[0] !== last[0] || tail[1] !== last[1]) out.push([last[0], last[1]]);
+    const head = out[0];
+    if (Math.hypot(head[0] - out[out.length - 1][0], head[1] - out[out.length - 1][1]) > 1.5) out.push([head[0], head[1]]);
+    return out;
+  }
+
+  function unionOutline(parts, step) {
+    const st = step > 0 ? step : 6;
+    let key = hash('union', parts.length, st);
+    for (let p = 0; p < parts.length; p++) {
+      const poly = parts[p];
+      key = hash(key, poly.length);
+      for (let i = 0; i < poly.length; i++) key = hash(key, poly[i][0], poly[i][1]);
+    }
+    const hit = unionCache.get(key);
+    if (hit) return hit.map((p) => [p[0], p[1]]);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let p = 0; p < parts.length; p++) {
+      const poly = parts[p];
+      for (let i = 0; i < poly.length; i++) {
+        const x = poly[i][0], y = poly[i][1];
+        if (x < x0) x0 = x;
+        if (y < y0) y0 = y;
+        if (x > x1) x1 = x;
+        if (y > y1) y1 = y;
+      }
+    }
+    const pad = 2;
+    const ox = Math.floor(x0) - pad;
+    const oy = Math.floor(y0) - pad;
+    const w = Math.ceil(x1) - ox + pad + 1;
+    const h = Math.ceil(y1) - oy + pad + 1;
+    let loop;
+    if (!(w > 2 && h > 2) || w * h > 4000000) {
+      loop = parts[0] ? parts[0].map((p) => [p[0], p[1]]) : [];
+    } else {
+      const mask = new Uint8Array(w * h);
+      for (let p = 0; p < parts.length; p++) scanFill(mask, w, h, ox, oy, parts[p]);
+      const traced = traceOuter(mask, w, h);
+      loop = resampleLoop(traced.map((q) => [ox + q[0] + 0.5, oy + q[1] + 0.5]), st);
+    }
+    unionCache.set(key, loop);
+    return loop.map((p) => [p[0], p[1]]);
+  }
+
+  function shapedAt(base, zoom, about) {
+    const z = zoom == null || !(+zoom > 0) ? 1 : +zoom;
+    const ax = about && isFinite(+about[0]) ? +about[0] : 0;
+    const ay = about && isFinite(+about[1]) ? +about[1] : 0;
+    const map = (p) => [ax + (p[0] - ax) * z, ay + (p[1] - ay) * z];
+    const view = {
+      id: base.id,
+      kind: base.kind,
+      axis: base.axis || 'y',
+      outline(step) { return base.outline(step).map(map); },
+      at() { return view; },
+    };
+    if (base.cx != null) view.cx = ax + (base.cx - ax) * z;
+    if (base.cy != null) view.cy = ay + (base.cy - ay) * z;
+    return view;
+  }
+
   function monotoneSlopes(ys, hs) {
     const n = ys.length;
     const d = [];
@@ -503,32 +654,53 @@
     const deep = (v) => (Array.isArray(v) ? Object.freeze(v.map(deep)) : v && typeof v === 'object' ? Object.freeze(Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)]))) : v);
     const out = Object.assign({ id }, deep(g));
     if (g.kind === 'profile') {
-      const ys = g.ys, hs = g.hs, n = ys.length, cx = g.cx;
-      const m = monotoneSlopes(ys, hs);
-      const hw = (y) => {
-        if (y <= ys[0]) return hs[0];
-        if (y >= ys[n - 1]) return hs[n - 1];
+      const horizontal = g.axis === 'x';
+      const stations = horizontal ? g.xs : g.ys;
+      const hs = g.hs;
+      const n = stations.length;
+      const origin = horizontal ? g.cy : g.cx;
+      const linear = g.interp === 'linear';
+      const slopes = linear ? null : monotoneSlopes(stations, hs);
+      const hw = (u) => {
+        if (u <= stations[0]) return hs[0];
+        if (u >= stations[n - 1]) return hs[n - 1];
         let i = 0;
-        while (ys[i + 1] < y) i++;
-        const h = ys[i + 1] - ys[i];
-        const s = (y - ys[i]) / h, s2 = s * s, s3 = s2 * s;
-        return (2 * s3 - 3 * s2 + 1) * hs[i] + (s3 - 2 * s2 + s) * h * m[i] + (-2 * s3 + 3 * s2) * hs[i + 1] + (s3 - s2) * h * m[i + 1];
+        while (stations[i + 1] < u) i++;
+        if (linear) {
+          const span = stations[i + 1] - stations[i];
+          return hs[i] + ((hs[i + 1] - hs[i]) * (u - stations[i])) / span;
+        }
+        const h = stations[i + 1] - stations[i];
+        const s = (u - stations[i]) / h, s2 = s * s, s3 = s2 * s;
+        return (2 * s3 - 3 * s2 + 1) * hs[i] + (s3 - 2 * s2 + s) * h * slopes[i] + (-2 * s3 + 3 * s2) * hs[i + 1] + (s3 - s2) * h * slopes[i + 1];
       };
       const side = (sign, step = 6) => {
         const pts = [];
-        for (let y = ys[0]; y < ys[n - 1]; y += step) pts.push([cx + sign * hw(y), y]);
-        pts.push([cx + sign * hs[n - 1], ys[n - 1]]);
+        const a = stations[0], b = stations[n - 1];
+        const st = step > 0 ? step : 6;
+        for (let u = a; u < b; u += st) {
+          const perp = sign * hw(u);
+          pts.push(horizontal ? [u, origin + perp] : [origin + perp, u]);
+        }
+        const end = sign * hs[n - 1];
+        pts.push(horizontal ? [b, origin + end] : [origin + end, b]);
         return pts;
       };
       let wi = 0;
       for (let i = 1; i < n; i++) if (hs[i] > hs[wi]) wi = i;
+      out.axis = horizontal ? 'x' : 'y';
       out.hw = hw;
-      out.x = (y, s = 1) => cx + s * hw(y);
+      out.x = (u, s = 1) => (horizontal ? u : origin + s * hw(u));
+      out.y = (u, s = 1) => (horizontal ? origin + s * hw(u) : u);
       out.side = side;
       out.outline = (step = 6) => side(-1, step).concat(side(1, step).reverse());
-      out.widest = Object.freeze({ y: ys[wi], hw: hs[wi] });
+      out.widest = Object.freeze(horizontal ? { x: stations[wi], hw: hs[wi] } : { y: stations[wi], hw: hs[wi] });
     } else if (g.kind === 'outline') {
-      out.outline = () => g.pts.map((p) => [p[0], p[1]]);
+      if (Array.isArray(g.parts) && g.parts.length) {
+        out.outline = (step = 6) => unionOutline(g.parts, step);
+      } else {
+        out.outline = () => g.pts.map((p) => [p[0], p[1]]);
+      }
     } else if (g.kind === 'points') {
       out.pt = (name) => {
         const p = g.pts[name];
@@ -536,6 +708,7 @@
         return [p[0], p[1]];
       };
     }
+    out.at = (zoom, about) => shapedAt(out, zoom, about);
     return Object.freeze(out);
   }
   lib.geo = (id) => {

@@ -37,6 +37,42 @@ FILM.assert('sampled outline returns to its start', () => {
   FILM.expect.true(gap < 16, `leaf outline gap is ${gap}px`);
 });
 
+FILM.assert('a horizontal profile is linear half-heights about cy', () => {
+  const g = FILM.lib.geo('eggSide');
+  const raw = FILM.GEO.eggSide;
+  FILM.expect.eq(g.axis, 'x');
+  for (let i = 0; i < raw.xs.length; i++) FILM.expect.near(g.hw(raw.xs[i]), raw.hs[i], 1e-6);
+  const mid = 180 + (260 - 180) * 0.5;
+  FILM.expect.near(g.hw(mid), 36 + (48 - 36) * 0.5, 1e-6);
+  FILM.expect.near(g.y(260, -1), 280 - 48, 1e-6);
+  FILM.expect.near(g.y(260, 1), 280 + 48, 1e-6);
+  const p = g.outline(4);
+  FILM.expect.near(p[0], p[p.length - 1], 1e-6);
+});
+
+FILM.assert('outline parts trace the outer union, and at() scales about a point', () => {
+  const g = FILM.lib.geo('pair');
+  const loop = g.outline(4);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < loop.length; i++) {
+    const p = loop[i];
+    if (p[0] < minX) minX = p[0];
+    if (p[1] < minY) minY = p[1];
+    if (p[0] > maxX) maxX = p[0];
+    if (p[1] > maxY) maxY = p[1];
+  }
+  FILM.expect.near(minX, 620, 2);
+  FILM.expect.near(maxX, 960, 2);
+  FILM.expect.near(minY, 200, 2);
+  FILM.expect.near(maxY, 340, 2);
+  const far = g.at(2, [620, 200]).outline(4);
+  let hit = false;
+  for (let i = 0; i < far.length; i++) {
+    if (Math.hypot(far[i][0] - 1300, far[i][1] - 480) < 4) hit = true;
+  }
+  FILM.expect.true(hit, 'zoomed union missed the corner at (1300, 480)');
+});
+
 FILM.assert('pt returns a named anchor and throws on an unknown name', () => {
   const g = FILM.lib.geo('sun');
   FILM.expect.near(g.pt('centre'), [860, 360], 0);
