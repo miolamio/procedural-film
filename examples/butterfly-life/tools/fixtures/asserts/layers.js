@@ -101,6 +101,32 @@ FILM.assert('a static blurred layer does not create a canvas on the second call'
   FILM.expect.eq(window.__canvases, n1);
 });
 
+FILM.assert('an inline static blur reuses one plate when key is stable', () => {
+  const c = FILM.makeCanvas(64, 64);
+  const ctx = c.getContext('2d');
+  const frame = () => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, c.width, c.height);
+    FILM.lib.layers(ctx, { zoom: 1 }, [{
+      z: 4,
+      static: true,
+      blur: 3,
+      key: 'teal-square',
+      draw(g) {
+        g.fillStyle = FILM.lib.pal.teal;
+        g.fillRect(8, 8, 24, 24);
+      },
+    }]);
+  };
+  frame();
+  const n1 = window.__canvases;
+  const h1 = FILM.pixels(c).hash();
+  FILM.expect.true(FILM.pixels(c).count((r, g, b, a) => a > 20) > 10, 'keyed blur painted nothing');
+  frame();
+  FILM.expect.eq(window.__canvases, n1);
+  FILM.expect.eq(FILM.pixels(c).hash(), h1);
+});
+
 FILM.assert('layers is deterministic', () => {
   const cam = { x: 500, y: 940, zoom: 1.4, rot: -0.2 };
   const once = () => {

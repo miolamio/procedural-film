@@ -22,7 +22,7 @@ const shape = (id, opts) => {
   const g = shapeOf(id);
   return g
     ? `L.inkPath(ctx, L.geo('${g}').outline(), { closed: true, smooth: false, ${opts} }); // ${g} from src/geo.js`
-    : `L.inkPath(ctx, L.ellipsePts(540, 860, 300, 400, 72), { closed: true, ${opts} });`;
+    : `L.inkPath(ctx, L.ellipsePts(info.W / 2, info.H * 860 / 1920, info.W * 300 / 1080, info.H * 400 / 1920, 72), { closed: true, ${opts} });`;
 };
 
 const illustrated = (nn, id) => `// STUB
@@ -34,14 +34,15 @@ FILM.scene({
     const p = L.clamp(t / info.dur);
     const q = L.clamp(L.onTwos(t) / info.dur);
     const seed = L.hash('${id}');
+    const cx = info.W / 2, cy = info.H * 860 / 1920;
     L.paper(ctx);
     ${shape(id, 'width: 5, seed: seed + 1, double: true')}
-    L.inkLine(ctx, 140, 1300, 940, 1300, { width: 3, seed: seed + 2 });
-    L.inkCircle(ctx, 240 + 600 * q, 1230, 44, { width: 3, seed: seed + 3, fill: P.orange });
-    L.text(ctx, 'STUB ${nn}', 540, 330, { size: 60, weight: 600, align: 'center', color: P.annMagenta });
-    L.text(ctx, info.shot.title || '${id}', 540, 1420, { size: 44, align: 'center', color: P.ink });
-    L.text(ctx, '${id}', 540, 1480, { size: 30, align: 'center', color: P.inkSoft });
-    if (p > 0.01) L.inkLine(ctx, 140, 1530, 140 + 800 * p, 1530, { width: 4, color: P.annBlue, seed: seed + 4, taper: 0 });
+    L.inkLine(ctx, info.W * 140 / 1080, info.H * 1300 / 1920, info.W * 940 / 1080, info.H * 1300 / 1920, { width: 3, seed: seed + 2 });
+    L.inkCircle(ctx, info.W * 240 / 1080 + info.W * 600 / 1080 * q, info.H * 1230 / 1920, 44, { width: 3, seed: seed + 3, fill: P.orange });
+    L.text(ctx, 'STUB ${nn}', cx, info.H * 330 / 1920, { size: 60, weight: 600, align: 'center', color: P.annMagenta });
+    L.text(ctx, info.shot.title || '${id}', cx, info.H * 1420 / 1920, { size: 44, align: 'center', color: P.ink });
+    L.text(ctx, '${id}', cx, info.H * 1480 / 1920, { size: 30, align: 'center', color: P.inkSoft });
+    if (p > 0.01) L.inkLine(ctx, info.W * 140 / 1080, info.H * 1530 / 1920, info.W * 140 / 1080 + info.W * 800 / 1080 * p, info.H * 1530 / 1920, { width: 4, color: P.annBlue, seed: seed + 4, taper: 0 });
   },
 });
 `;
@@ -53,15 +54,16 @@ FILM.scene({
   draw(ctx, t, info) {
     const L = info.lib, P = L.pal;
     const p = L.clamp(t / info.dur);
+    const cx = info.W / 2, cy = info.H * 860 / 1920;
     L.blueprint(ctx);
-    L.guideCircle(ctx, 540, 860, 340, { alpha: 0.4 });
+    L.guideCircle(ctx, cx, cy, info.W * 340 / 1080, { alpha: 0.4 });
     ${shapeOf(id) ? shape(id, `width: 3, color: P.lavender, seed: L.hash('${id}')`) : '// (no shared silhouette)'}
-    L.glowDot(ctx, 540, 860, 10 + 8 * p, { rays: 12, rot: p * Math.PI });
-    L.text(ctx, 'STUB ${nn}', 540, 330, { size: 60, weight: 600, align: 'center', color: P.magenta });
-    L.text(ctx, info.shot.title || '${id}', 540, 1420, { size: 44, align: 'center', color: P.lavender });
-    L.text(ctx, '${id}', 540, 1480, { size: 30, align: 'center', color: P.lavender, alpha: 0.6 });
+    L.glowDot(ctx, cx, cy, 10 + 8 * p, { rays: 12, rot: p * Math.PI });
+    L.text(ctx, 'STUB ${nn}', cx, info.H * 330 / 1920, { size: 60, weight: 600, align: 'center', color: P.magenta });
+    L.text(ctx, info.shot.title || '${id}', cx, info.H * 1420 / 1920, { size: 44, align: 'center', color: P.lavender });
+    L.text(ctx, '${id}', cx, info.H * 1480 / 1920, { size: 30, align: 'center', color: P.lavender, alpha: 0.6 });
     ctx.fillStyle = P.lineWhite;
-    ctx.fillRect(140, 1526, 800 * p, 6);
+    ctx.fillRect(info.W * 140 / 1080, info.H * 1526 / 1920, info.W * 800 / 1080 * p, 6);
   },
 });
 `;

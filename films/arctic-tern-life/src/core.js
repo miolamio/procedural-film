@@ -421,12 +421,16 @@
     return { _mixed: true, warmth, fade, vignette, paperAge, tints };
   }
 
-  // Same mix composite() uses, so the grade tracks the dissolve.
+  // Same p the picture uses, so the grade tracks the dissolve.
+  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash and morph step by interior frame.
   function transitionMix(tr, inT) {
     const k = Math.max(0, inT * FILM.FPS);
     const n = tr.dur * FILM.FPS;
     if (!(n > 0)) return 1;
     if (tr.kind === 'flash') return clamp01(k / n);
+    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph') {
+      return clamp01(k / Math.max(1, interiorFrames(tr.dur)));
+    }
     return easeInOutCubic(clamp01((k + 1) / (n + 1)));
   }
 
@@ -743,9 +747,86 @@
   }
 
   // Threshold field cached by size and seed, never by time. A pixel turns on once p passes it,
-  // so the mask only grows. 255 stays off until the frame after the transition.
+  // so the mask only grows. Every pixel gets a threshold: blots first, then distance outside
+  // them, ranked so the last interior frame (cut 233 at p = 11/12) covers at least 95%.
   const inkFields = new Map();
   let inkStore = null;
+
+  function inkClose(thr, w, h) {
+    const nPix = w * h;
+    const dist = new Uint16Array(nPix);
+    const qx = new Int32Array(nPix);
+    const qy = new Int32Array(nPix);
+    let qe = 0;
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        const i = row + x;
+        if (thr[i] !== 255) continue;
+        dist[i] = 65535;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        if (thr[row + x] === 255) continue;
+        qx[qe] = x;
+        qy[qe] = y;
+        qe++;
+      }
+    }
+    let qs = 0;
+    while (qs < qe) {
+      const x = qx[qs];
+      const y = qy[qs];
+      const base = dist[y * w + x] + 1;
+      qs++;
+      if (x > 0) {
+        const j = y * w + (x - 1);
+        if (dist[j] > base) { dist[j] = base; qx[qe] = x - 1; qy[qe] = y; qe++; }
+      }
+      if (x + 1 < w) {
+        const j = y * w + (x + 1);
+        if (dist[j] > base) { dist[j] = base; qx[qe] = x + 1; qy[qe] = y; qe++; }
+      }
+      if (y > 0) {
+        const j = (y - 1) * w + x;
+        if (dist[j] > base) { dist[j] = base; qx[qe] = x; qy[qe] = y - 1; qe++; }
+      }
+      if (y + 1 < h) {
+        const j = (y + 1) * w + x;
+        if (dist[j] > base) { dist[j] = base; qx[qe] = x; qy[qe] = y + 1; qe++; }
+      }
+    }
+    const HIST = 4096;
+    const hist = new Uint32Array(HIST);
+    const keyOf = (i) => {
+      if (thr[i] !== 255) return thr[i];
+      const d = dist[i] > 3000 ? 3000 : dist[i];
+      return 1000 + d;
+    };
+    for (let i = 0; i < nPix; i++) hist[keyOf(i)]++;
+    const cursor = new Uint32Array(HIST);
+    let acc = 0;
+    for (let k = 0; k < HIST; k++) {
+      cursor[k] = acc;
+      acc += hist[k];
+    }
+    const last = nPix > 1 ? nPix - 1 : 1;
+    for (let i = 0; i < nPix; i++) {
+      const rank = cursor[keyOf(i)]++;
+      const f = rank / last;
+      let t;
+      if (f <= 0.95) {
+        t = Math.round((f / 0.95) * 233);
+        if (t < 1) t = 1;
+      } else {
+        t = 234 + Math.round(((f - 0.95) / 0.05) * 20);
+        if (t > 254) t = 254;
+      }
+      thr[i] = t;
+    }
+  }
 
   function inkField(w, h, seed) {
     const key = w + 'x' + h + ':' + seed;
@@ -803,6 +884,7 @@
         thr[i] = t;
       }
     }
+    inkClose(thr, w, h);
     inkFields.set(key, thr);
     return thr;
   }

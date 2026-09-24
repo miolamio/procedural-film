@@ -187,7 +187,7 @@ One closed silhouette becomes another, either inside a locked shot or as the mas
 - Plate: paper
 - Camera: locked at zoom 1, both shapes sharing one centre so the cut does not slide
 - Leans on: `morph`, `resample`, `geo`, `inkPath`, `hatch`. The cut is timeline `transitionIn` `{ kind: 'morph', dur, from, to }` with `from` and `to` as `FILM.GEO` ids; `core` calls `morph` on `geo`, the scene does not stroke that outline again
-- Mistake: morphing open polylines, or pairing points by hand. `morph` resamples two closed contours and aligns the start (`auto`, `top`, or `index`). A second outline drawn by the scene during the seam doubles the one `core` already masks with
+- Mistake: morphing open polylines, or pairing points by hand. `morph` resamples two closed contours and aligns the start (`auto`, `top`, or `index`). A second outline drawn by the scene during the seam doubles the one `core` already masks with. The mask ends on the `to` silhouette: the frame after `dur` is a match cut, not a full-frame wipe
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/07-fx-morph.js` (in the shot) and `skills/procedural-film/foundation/tools/fixtures/scenes/20-fx-morphcut.js` (the cut)
 
 ## 19. Multiplane pull-back
@@ -198,7 +198,7 @@ One zoom out through stacked planes — sky, hills, the subject, grass in front 
 - Plate: illustrated. The farthest plane paints the sky across a rect much larger than the frame
 - Camera: one `layers` camera, anchor held on the subject. Zoom goes from 3 to 1, with `lerp` across the shot. `z` 1 is the subject and matches `camera`; `z` above 1 is farther and takes less of the zoom; `z` below 1 is nearer
 - Leans on: `layers`, `lerp`, `inkPath`, `glowDot`
-- Mistake: a separate `camera` per plane, or a `blur` without `static: true` (the blur is skipped, and a blurred plane is cached only when it is static). Listing order does not matter: `layers` paints far to near
+- Mistake: a separate `camera` per plane, or a `blur` without `static: true` (the blur is skipped, and a blurred plane is cached only when it is static). The plate is keyed by `draw`'s identity, so hoist that function or pass `key`; an inline closure allocates a new plate every frame. Listing order does not matter: `layers` paints far to near
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/15-fx-parallax.js`
 
 ## 20. Mechanism turntable
@@ -286,7 +286,7 @@ The incoming plate bleeds in through a blot whose edge is fixed noise. The blot 
 - Plate: paper or blueprint, matching the shot it cuts into
 - Camera: whatever that shot uses. The blot is not a camera move
 - Leans on: `inkPath`, `stripes` for the plate. The seam is `transitionIn` `{ kind: 'inkwash', dur, color, seed }`. `color` is a `pal` name or a hex
-- Mistake: wiping with `wash`. That is a plate fill, and it does not grow as a mask. The first frame of an inkwash is the outgoing plate alone; the incoming plate is alone only once `dur` has elapsed
+- Mistake: wiping with `wash`. That is a plate fill, and it does not grow as a mask. The first frame of an inkwash is the outgoing plate alone; on the last frame inside `dur` the blot covers the frame, and the incoming plate is alone only once `dur` has elapsed
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/19-fx-inkwash.js`
 
 ## 28. Graded act

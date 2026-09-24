@@ -57,7 +57,7 @@ Done when: every element the storyboard will draw has a drawing rule and a palet
 
 Read `reference/shot-types.md` for the original sixteen shot types the example film proves and for every recipe after them, then fill `docs/storyboard.md` from the template: logline; numbers (pick a bpm, then beat = 60/bpm seconds and the duration lands in whole bars); summary table; acts mapped to bars; a shared-geometry table for every shape that survives a **match cut**, in frame pixels, naming the cuts it holds (a `profile` for a shape symmetric about a vertical axis, a densely sampled `outline` for any other silhouette, `points` for anchors); then one entry per shot — 1 to 3 seconds each, boundaries on the beat grid, plates alternating — with all eight subsections, the Sound cues timestamped on the grid.
 
-Done when: the shots tile [0, duration] exactly, with no gaps or overlaps, every shot has all eight subsections, every match cut is named in a shared-geometry table, and the doc survives a self-review with a critic's eye: every number in the prose matches the tables (beat arithmetic, act boundaries), and no must-read content sits outside the safe area (x 60–940, y 220–1540) — arithmetic included. Storyboard errors compound into every scene; this is the cheapest moment to catch them.
+Done when: the shots tile [0, duration] exactly, with no gaps or overlaps, every shot has all eight subsections, every match cut is named in a shared-geometry table, and the doc survives a self-review with a critic's eye: every number in the prose matches the tables (beat arithmetic, act boundaries), and no must-read content sits outside the safe area — on 1080×1920 that is x 60–940, y 220–1540; on any other frame it is the centred 90% (`FILM.safeArea`) — arithmetic included. Storyboard errors compound into every scene; this is the cheapest moment to catch them.
 
 ### 5. Timeline
 
@@ -98,7 +98,7 @@ Done when: every P1 and P2 fix is verified on fresh frames and the gate is green
 `node tools/render.cjs` writes the master (crf 16; a 30 s film renders in minutes). Then the transcodes:
 
 ```bash
-ffmpeg -i exports/<slug>.mp4 -vf scale=720:1280 -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k exports/<slug>-phone.mp4
+ffmpeg -i exports/<slug>.mp4 -vf "scale='if(gt(iw,ih),-2,720)':'if(gt(iw,ih),720,-2)'" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k exports/<slug>-phone.mp4
 ffmpeg -i exports/<slug>.mp4 -c:v libx264 -crf 23 -preset medium -c:a copy exports/<slug>-preview.mp4
 ```
 

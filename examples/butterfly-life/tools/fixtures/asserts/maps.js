@@ -134,4 +134,11 @@ FILM.assert('plot ticks sit on a 1, 2 or 5 × 10^k grid', () => {
     const step = messy.x[1] - messy.x[0];
     FILM.expect.near(messy.x[i] - messy.x[i - 1], step, Math.abs(step) * 1e-6 + 1e-9);
   }
+
+  const listed = FILM.lib.plot(null, { box: [40, 30, 200, 140], x: [0, 10], y: [0, 100], ticks: [0, 1, 3] });
+  FILM.expect.near(listed.x, [0, 1, 3], 1e-9);
+  FILM.expect.near(listed.y, [0, 1, 3], 1e-9);
+  const perAxis = FILM.lib.plot(null, { box: [40, 30, 200, 140], x: [0, 10], y: [0, 1], ticks: { x: [1, 4], y: [0, 1] } });
+  FILM.expect.near(perAxis.x, [1, 4], 1e-9);
+  FILM.expect.near(perAxis.y, [0, 1], 1e-9);
 });

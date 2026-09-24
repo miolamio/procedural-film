@@ -103,3 +103,15 @@ FILM.assert('advect(p0, T) does not depend on the order of T', () => {
   FILM.expect.near(fromArray.x, A[1].x, 0);
   FILM.expect.near(fromArray.y, A[1].y, 0);
 });
+
+FILM.assert('advect at T = 20 stays on a fine step', () => {
+  const p0 = { x: 540, y: 960 };
+  const opts = { seed: 3, scale: 2200, speed: 58, curl: true };
+  const coarse = FILM.lib.advect(p0, 20, opts);
+  const fine = FILM.lib.advect(p0, 20, opts, 4000);
+  const drifted = Math.hypot(coarse.x - fine.x, coarse.y - fine.y);
+  FILM.expect.true(drifted < 25, 'T=20 drifted ' + drifted.toFixed(1) + 'px from a 4000-step path');
+  const eight = FILM.lib.advect(p0, 20, opts, 8);
+  const eightOff = Math.hypot(eight.x - fine.x, eight.y - fine.y);
+  FILM.expect.true(eightOff > drifted + 50, 'a fixed count of 8 was not farther from the fine path than the default step');
+});

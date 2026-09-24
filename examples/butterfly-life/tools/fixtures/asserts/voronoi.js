@@ -103,6 +103,17 @@
     }
   });
 
+  FILM.assert('a duplicated site leaves its cell to the earlier index', () => {
+    const cells = L.voronoi([[10, 10], [10, 10], [50, 50]], [0, 0, 100, 100]);
+    FILM.expect.eq(cells.length, 3);
+    const areas = cells.map((c) => Math.abs(area(c.poly)));
+    FILM.expect.true(areas[0] > 1000, 'earlier duplicate lost its cell (' + areas[0] + ')');
+    FILM.expect.eq(areas[1], 0);
+    FILM.expect.true(contains(cells[0].poly, 10, 10, 1e-3), 'earlier site is outside its cell');
+    FILM.expect.true(areas[2] > 1000, 'the third site lost its cell');
+    FILM.expect.near(areas[0] + areas[1] + areas[2], 10000, 1);
+  });
+
   FILM.assert('voronoi is deterministic and cached', () => {
     const clip = [[10, 20], [310, 15], [320, 250], [20, 260]];
     const sites = [[40, 50], [200, 60], [80, 180], [250, 200], [160, 140]];

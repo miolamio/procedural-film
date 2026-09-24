@@ -14,7 +14,7 @@ The look and editing follow `docs/reference-analysis.md`.
 1. **No media.** The shipped HTML contains no images, video, audio files, fonts files, base64, `data:` URLs, `<img>`, `new Image`, `fetch`, `XMLHttpRequest`, or CSS `url(...)`. Every pixel and every sample is computed.
 2. **Deterministic.** `FILM.renderFrame(T)` draws the same pixels every time for the same `T`, in any order. No `Math.random`, no `Date`, no `performance.now` inside drawing or audio code. Randomness comes from `FILM.lib.rng(seed)`.
 3. **Stateless per frame.** A scene's `draw` may not depend on a previous frame having been drawn. Caches are allowed only if they are pure functions of their inputs (for example a pre-rendered paper texture keyed by size and seed).
-4. **Canvas** is 1080 wide by 1920 tall. Output is 24 fps.
+4. **Canvas** is 1080 wide by 1920 tall. This film does not set `FILM.TIMELINE.width` or `height`; the engine uses those when a film does, and otherwise this size. Output is 24 fps.
 5. **Plain browser JavaScript**, no build framework, no npm packages in the shipped file. Node is used only for tools.
 6. **File ownership.** A scene agent edits only its own `src/scenes/<file>.js`. Shared files (`src/core.js`, `src/lib.js`, `src/timeline.js`, `src/player.js`, `tools/*`) are edited only by the agent assigned to them. If a scene needs a helper that `lib` lacks, it defines the helper inside its own file.
 
@@ -57,7 +57,7 @@ A shot may declare `transitionIn: { dur, kind }` in the timeline; `core` handles
 
 ### Core
 
-- `FILM.W`, `FILM.H`, `FILM.FPS`, `FILM.DURATION` (from the timeline).
+- `FILM.W`, `FILM.H`, `FILM.FPS`, `FILM.DURATION` (from the timeline, 1080×1920 when width and height are absent). While `timeline.js` is evaluating, `FILM.W` and `FILM.H` are still that default, in the browser and in `loadTimeline`.
 - `FILM.renderFrame(T)` draws global time `T` to `FILM.canvas`.
 - `FILM.mount(canvas)` sets the target canvas.
 - `FILM.activeShot(T)` returns the timeline entry.

@@ -2932,7 +2932,10 @@
    *   curl: false returns the gradient of that field instead.
    *
    * advect(p0, T, opts, steps) : where p0 ({x,y} or [x,y]) lands after time T.
-   *   Fixed step count (default 8), one sample of flow at the middle of each step.
+   *   The default step is 1/24 s: ceil(|T| / dt) steps, the last one shorter so the
+   *   integral lands on T. A long T stays on the same path as a fine step. Pass steps
+   *   to divide [0, T] into that many equal steps instead.
+   *   One sample of flow at the middle of each step.
    *   A pure function of p0, T, opts and steps: the order of calls does not matter.
    *
    * instances(ctx, pts, fn) : fn(ctx, p, i, rnd) for each point. ctx is saved and
@@ -3232,19 +3235,33 @@
     return { x: g.dy * speed, y: -g.dx * speed };
   }
 
+  const ADVECT_DT = 1 / 24;
+
   function advect(p0, T, opts, steps) {
     const x0 = Array.isArray(p0) ? p0[0] : p0.x;
     const y0 = Array.isArray(p0) ? p0[1] : p0.y;
     const t1 = typeof T === 'number' ? T : 0;
-    const n = steps == null ? 8 : Math.round(steps);
-    if (!(t1 !== 0) || !(n > 0)) return { x: x0, y: y0 };
-    const dt = t1 / n;
+    if (!(t1 !== 0)) return { x: x0, y: y0 };
+    let n;
+    let dt;
+    if (steps == null) {
+      n = Math.ceil(Math.abs(t1) / ADVECT_DT - 1e-9);
+      if (n < 1) n = 1;
+      dt = t1 < 0 ? -ADVECT_DT : ADVECT_DT;
+    } else {
+      n = Math.round(steps);
+      if (!(n > 0)) return { x: x0, y: y0 };
+      dt = t1 / n;
+    }
     let x = x0;
     let y = y0;
+    let t = 0;
     for (let i = 0; i < n; i++) {
-      const v = flow(x, y, (i + 0.5) * dt, opts);
-      x += v.x * dt;
-      y += v.y * dt;
+      const step = i === n - 1 ? t1 - t : dt;
+      const v = flow(x, y, t + step * 0.5, opts);
+      x += v.x * step;
+      y += v.y * step;
+      t += step;
     }
     return { x: x, y: y };
   }
@@ -4025,8 +4042,12 @@
         const dx = s[0] - o[0];
         const dy = s[1] - o[1];
         if (dx * dx + dy * dy < 1e-16) {
-          poly = [];
-          break;
+          // The earlier site keeps the cell. Zeroing both leaves a hole in the clip.
+          if (j < i) {
+            poly = [];
+            break;
+          }
+          continue;
         }
         poly = clipHalf(poly, s[0], s[1], o[0], o[1]);
         if (poly.length < 3) {
@@ -4100,7 +4121,10 @@
    *   relax   0..3    Lloyd iterations. 0 leaves the sites where they are.
    * Returns [{ i, site, poly }], one per site, in order. poly is a CCW ring with no
    * repeated close, convex when the clip is convex, empty when the site owns nothing.
+   * A later site that repeats an earlier position is empty; the earlier site keeps the cell.
    * site is the position after relaxation (the point the cell contains).
+   * clip is one convex ring (a rect or one polygon). A list of polygons uses only the
+   * largest ring, so a concave clip is not a union.
    * Cached by the sites, the clip and relax.
    */
   function voronoi(sitesIn, clip, o) {
@@ -4322,22 +4346,30 @@
    *   dry          0        0 wet (soft, wide) .. 1 dry (tight, grainier)
    *   boil         false    true keeps 3 variants on the 12 fps clock
    *   bounds                required when clip is a function, a Path2D or null
+   *   key                   stable id for a function or Path2D clip. Without it a function is
+   *                         keyed by its source text plus bounds, and a Path2D by bounds alone,
+   *                         so two closures with the same text and different captured values
+   *                         share one plate. Pass key when the shape is not determined by the
+   *                         source and the bounds.
    */
-  function hashClip(clip, bounds) {
+  function hashClip(clip, bounds, key) {
+    let h;
     if (Array.isArray(clip) && clip.length) {
       const polys = toPolys(clip);
-      let h = hash('p', polys.length);
+      h = hash('p', polys.length);
       for (let p = 0; p < polys.length; p++) {
         const poly = polys[p];
         h = hash(h, poly.length);
         for (let i = 0; i < poly.length; i++) h = hash(h, poly[i][0], poly[i][1]);
       }
-      return h >>> 0;
+    } else {
+      const b = bounds || { x: 0, y: 0, w: 0, h: 0 };
+      if (typeof clip === 'function') h = hash('f', String(clip), b.x, b.y, b.w, b.h);
+      else if (typeof Path2D !== 'undefined' && clip instanceof Path2D) h = hash('d', b.x, b.y, b.w, b.h);
+      else h = hash('n', b.x, b.y, b.w, b.h);
     }
-    const b = bounds || { x: 0, y: 0, w: 0, h: 0 };
-    if (typeof clip === 'function') return hash('f', String(clip), b.x, b.y, b.w, b.h) >>> 0;
-    if (typeof Path2D !== 'undefined' && clip instanceof Path2D) return hash('d', b.x, b.y, b.w, b.h) >>> 0;
-    return hash('n', b.x, b.y, b.w, b.h) >>> 0;
+    if (key != null) h = hash(h, 'k', String(key));
+    return h >>> 0;
   }
 
   // Squared Euclidean distance to the nearest feature pixel (feature[i] nonzero). Separable Felzenszwalb.
@@ -4635,7 +4667,7 @@
     if (o.boil === true) variant = lib.boil(lib.T) % 3;
     else if (typeof o.boil === 'number') variant = Math.abs(o.boil | 0) % 3;
     const shape = shapeOf(clip, Object.assign({}, o, { pad: bleed + 4 }));
-    const key = ['wash', hashClip(clip, shape.bounds), S, color, alpha, seed, layers, bleed, edgeDarken, granulation, blooms, dry, variant].join('|');
+    const key = ['wash', hashClip(clip, shape.bounds, o.key), S, color, alpha, seed, layers, bleed, edgeDarken, granulation, blooms, dry, variant].join('|');
     const plate = cached(key, () => renderWash(clip, shape, S, color, alpha, seed, layers, bleed, edgeDarken, granulation, blooms, dry, variant));
     if (!plate || !(plate.w > 0) || !(plate.h > 0)) return;
     // A 1:1 blit stays exact (no filter fringe past the bleed). Scaled previews keep smoothing.
@@ -5371,8 +5403,10 @@
     };
   }
 
-  function cachedBlur(ctx, draw, blur) {
-    let id = layerIds.get(draw);
+  function cachedBlur(ctx, draw, blur, keyOpt) {
+    // An inline closure is a new function every frame. keyOpt keeps one plate;
+    // without it the cache key is the draw function's identity.
+    let id = keyOpt != null ? 'k:' + keyOpt : layerIds.get(draw);
     if (!id) layerIds.set(draw, (id = layerSeq++));
     const v = layerView(ctx);
     const offW = Math.max(1, Math.round(v.ww * v.sx));
@@ -5396,11 +5430,14 @@
 
   /**
    * layers(ctx, { x, y, zoom, rot }, planes) : one camera, several depths, painted far to near.
-   *   planes   [{ z, draw, blur, fog: { color, amount }, static }]
+   *   planes   [{ z, draw, blur, key, fog: { color, amount }, static }]
    *   z        1 is the focus plane (same pixels as camera). z > 1 is farther, z < 1 is nearer.
    *            Effective zoom is 1 + (zoom - 1) / z. The pan (x - W/2, y - H/2) is divided by z.
    *   blur     depth-of-field radius in px. Honoured only when static is true: the plane is drawn
    *            once into a cached canvas with ctx.filter. Otherwise the blur is skipped.
+   *            The plate is keyed by draw's identity, so the function must be a stable reference.
+   *            An inline closure allocates a new plate every frame. Pass key to share one plate
+   *            across those calls.
    *   fog      translucent fill over that plane, after it is drawn.
    */
   lib.layers = (ctx, cam, planes) => {
@@ -5412,7 +5449,7 @@
       const z = layerZ(plane);
       const blur = Number(plane.blur);
       if (plane.static && Number.isFinite(blur) && blur > 0) {
-        const pic = cachedBlur(ctx, plane.draw, blur);
+        const pic = cachedBlur(ctx, plane.draw, blur, plane.key);
         drawPlane(ctx, cam, z, (g) => g.drawImage(pic.canvas, pic.ox, pic.oy, pic.ww, pic.hh));
       } else {
         drawPlane(ctx, cam, z, plane.draw);
@@ -6206,8 +6243,7 @@
   }
 
   function tickSpec(ticks, axis) {
-    if (ticks == null || typeof ticks === 'number') return ticks == null ? 5 : ticks;
-    if (Array.isArray(ticks)) return 5;
+    if (ticks == null || typeof ticks === 'number' || Array.isArray(ticks)) return ticks == null ? 5 : ticks;
     const s = ticks[axis];
     return s == null ? 5 : s;
   }
@@ -6233,41 +6269,13 @@
     return String(Math.round(v * 1000) / 1000);
   }
 
-  // Fraction of the polyline by screen length. inkPath has no reveal option; the slice is done here.
-  function sliceReveal(px, reveal) {
-    if (reveal == null || reveal >= 1) return px;
-    if (!(reveal > 0) || px.length < 2) return [];
-    let total = 0;
-    const seg = new Array(px.length - 1);
-    for (let i = 1; i < px.length; i++) {
-      const d = Math.hypot(px[i][0] - px[i - 1][0], px[i][1] - px[i - 1][1]);
-      seg[i - 1] = d;
-      total += d;
-    }
-    if (!(total > 0)) return px.slice();
-    let remain = total * reveal;
-    const out = [[px[0][0], px[0][1]]];
-    for (let i = 1; i < px.length; i++) {
-      const d = seg[i - 1];
-      if (remain >= d - 1e-9) {
-        out.push(px[i]);
-        remain -= d;
-      } else {
-        const t = d > 0 ? remain / d : 0;
-        out.push([px[i - 1][0] + (px[i][0] - px[i - 1][0]) * t, px[i - 1][1] + (px[i][1] - px[i - 1][1]) * t]);
-        break;
-      }
-    }
-    return out;
-  }
-
   /**
    * plot(ctx, opts) : axes, nice ticks and one or more curves.
    *   box      [x, y, w, h]     data rectangle; y is the top edge
    *   x, y     [min, max]       data ranges
-   *   ticks    5                target division count, { x, y } counts, or explicit value arrays
+   *   ticks    5                target division count, { x, y } of counts or value arrays, or one value array for both axes
    *   series   [{ pts: [[x, y], ...], color, width, reveal, seed, alpha }]
-   *            reveal is 0..1 along the drawn curve. The series is sliced here.
+   *            reveal is 0..1 and is passed to inkPath, so taper and wobble stay on the full curve.
    *   labels   { x, y, title } or [xLabel, yLabel]
    *   color    pal.ink          axes, grid and tick labels
    *   width    1.8
@@ -6352,9 +6360,8 @@
           if (!p || !isFinite(p[0]) || !isFinite(p[1])) continue;
           px.push([X(p[0]), Y(p[1])]);
         }
-        const drawn = sliceReveal(px, ser.reveal);
-        if (drawn.length >= 2) {
-          inkPath(ctx, drawn, {
+        if (px.length >= 2 && ser.reveal !== 0) {
+          inkPath(ctx, px, {
             color: ser.color || color,
             width: ser.width != null ? ser.width : width + 0.6,
             alpha: ser.alpha,
@@ -6363,6 +6370,7 @@
             wobble: ser.wobble != null ? ser.wobble : 1.1,
             step: ser.step || 3.5,
             taper: ser.taper != null ? ser.taper : [10, 16],
+            reveal: ser.reveal,
           });
         }
       }

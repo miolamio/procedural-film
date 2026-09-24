@@ -92,6 +92,10 @@ FILM.assert('inkwash mask area is monotonic', () => {
       if (k === 0) first = area;
       FILM.expect.true(area >= prevArea, `inkwash area dipped at k=${k}: ${area} < ${prevArea}`);
       prevArea = area;
+      if (k === n - 1) {
+        const cover = area / (comp.length / 4);
+        FILM.expect.true(cover >= 0.95, `last interior frame covers ${(cover * 100).toFixed(1)}%`);
+      }
     }
     FILM.expect.true(prevArea > first, `inkwash mask did not grow (${first} -> ${prevArea})`);
   } finally {
