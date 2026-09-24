@@ -77,3 +77,20 @@ FILM.GEO = {
   sun: { kind: 'points', pts: { centre: [860, 360] }, shots: ['fx-meadow'] },
   stem: { kind: 'polyline', pts: [[180, 1480], [520, 1260], [930, 1110]], shots: ['fx-meadow'] },
 };
+
+// The grade plates draw `egg` at zoom 1 on both sides of a hard cut. This entry is that capsule
+// shrunk by 1/1.08 about (540, 960); the cut zooms it back onto the ink, so check 7 measures a
+// zoomed cut here and not only on a film. Derived from `egg` so the two tables cannot drift.
+(function () {
+  const egg = FILM.GEO.egg;
+  const zoom = 1.08;
+  const about = [egg.cx, 960];
+  FILM.GEO.eggZoom = {
+    kind: 'profile',
+    cx: about[0],
+    ys: egg.ys.map((y) => about[1] + (y - about[1]) / zoom),
+    hs: egg.hs.map((h) => h / zoom),
+    shots: ['fx-grade-plain', 'fx-grade-warm'],
+    cuts: [{ cut: 'fx-grade-plain>fx-grade-warm', zoom: zoom, about: about }],
+  };
+})();

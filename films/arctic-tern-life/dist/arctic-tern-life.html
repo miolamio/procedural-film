@@ -1630,8 +1630,10 @@
    *                     union, so a bird of wings, body, head and tail does not need a hand-traced silhouette.
    *                     Draw a single loop as it stands (inkPath(ctx, g.outline(), { closed: true, smooth: false })),
    *                     because smoothing control points rounds off every kink and tip the storyboard drew.
-   *   at(zoom, about) : the same shape with every point moved to about + zoom * (p - about). Check 7 uses it
-   *                     for a match cut that lands in the middle of a camera move.
+   *   at(zoom, about) : the same shape with every point moved to about + zoom * (p - about).
+   *                     Calling at() again replaces that zoom; it does not stack. On a profile, hw, x, y
+   *                     and side use the same map, and the station argument stays in table space.
+   *                     Check 7 uses it for a match cut that lands in the middle of a camera move.
    *   kind 'points'   : named anchors. pt(name) returns [x, y] and throws on a misspelt name.
    *   kind 'polyline' : an ordered point list, pts.
    * Every entry also carries its table fields (cx, ys, hs, pts, shots, cuts, ...) read-only.
@@ -1824,20 +1826,27 @@
     return loop.map((p) => [p[0], p[1]]);
   }
 
-  function shapedAt(base, zoom, about) {
+  function shapedAt(table, zoom, about) {
     const z = zoom == null || !(+zoom > 0) ? 1 : +zoom;
     const ax = about && isFinite(+about[0]) ? +about[0] : 0;
     const ay = about && isFinite(+about[1]) ? +about[1] : 0;
     const map = (p) => [ax + (p[0] - ax) * z, ay + (p[1] - ay) * z];
     const view = {
-      id: base.id,
-      kind: base.kind,
-      axis: base.axis || 'y',
-      outline(step) { return base.outline(step).map(map); },
-      at() { return view; },
+      id: table.id,
+      kind: table.kind,
+      axis: table.axis || 'y',
+      outline(step) { return table.outline(step).map(map); },
+      // Second call replaces from the table. Closing over the view would stack zooms.
+      at(nz, na) { return shapedAt(table, nz, na); },
     };
-    if (base.cx != null) view.cx = ax + (base.cx - ax) * z;
-    if (base.cy != null) view.cy = ay + (base.cy - ay) * z;
+    if (table.cx != null) view.cx = ax + (table.cx - ax) * z;
+    if (table.cy != null) view.cy = ay + (table.cy - ay) * z;
+    if (typeof table.hw === 'function' && typeof table.x === 'function' && typeof table.y === 'function' && typeof table.side === 'function') {
+      view.hw = (u) => table.hw(u) * z;
+      view.x = (u, s = 1) => ax + (table.x(u, s) - ax) * z;
+      view.y = (u, s = 1) => ay + (table.y(u, s) - ay) * z;
+      view.side = (sign, step) => table.side(sign, step).map(map);
+    }
     return view;
   }
 

@@ -50,6 +50,49 @@ FILM.assert('a horizontal profile is linear half-heights about cy', () => {
   FILM.expect.near(p[0], p[p.length - 1], 1e-6);
 });
 
+FILM.assert('a second at() replaces the zoom, and profile hw, x, y, side follow it', () => {
+  const g = FILM.lib.geo('egg');
+  const about = [500, 900];
+  const z = 1.25;
+  const v = g.at(z, about);
+  const map = (p) => [about[0] + (p[0] - about[0]) * z, about[1] + (p[1] - about[1]) * z];
+  const baseOutline = g.outline(6);
+  const viewOutline = v.outline(6);
+  FILM.expect.eq(viewOutline.length, baseOutline.length);
+  for (let i = 0; i < baseOutline.length; i++) FILM.expect.near(viewOutline[i], map(baseOutline[i]), 1e-6);
+  for (const u of [550, 680, 960, 1240, 1370]) {
+    FILM.expect.near(v.hw(u), g.hw(u) * z, 1e-6);
+    FILM.expect.near(v.x(u, 1), map([g.x(u, 1), g.y(u, 1)])[0], 1e-6);
+    FILM.expect.near(v.y(u, -1), map([g.x(u, -1), g.y(u, -1)])[1], 1e-6);
+    FILM.expect.near(Math.abs(v.x(u, 1) - v.cx), v.hw(u), 1e-6);
+  }
+  const side = v.side(-1, 6);
+  FILM.expect.near(side[0], viewOutline[0], 1e-6);
+  FILM.expect.near(side[side.length - 1], viewOutline[side.length - 1], 1e-6);
+  const moved = v.at(z, [540, 960]);
+  FILM.expect.true(Math.abs(moved.cx - v.cx) > 1, 'second at() ignored about');
+  const fresh = g.at(2, [540, 960]);
+  const replaced = v.at(2, [540, 960]);
+  FILM.expect.near(replaced.outline(8), fresh.outline(8), 1e-6);
+  FILM.expect.near(replaced.hw(960), g.hw(960) * 2, 1e-6);
+  FILM.expect.near(replaced.x(960, 1), fresh.x(960, 1), 1e-6);
+  FILM.expect.near(replaced.y(960, -1), fresh.y(960, -1), 1e-6);
+  FILM.expect.near(replaced.side(1, 4), fresh.side(1, 4), 1e-6);
+  FILM.expect.true(Math.abs(replaced.hw(960) - v.hw(960)) > 1, 'second at() kept the first zoom');
+  const sideH = FILM.lib.geo('eggSide');
+  const sh = sideH.at(1.5, [220, 300]);
+  const u = 260;
+  FILM.expect.near(sh.hw(u), sideH.hw(u) * 1.5, 1e-6);
+  FILM.expect.near(sh.y(u, 1), 300 + (sideH.y(u, 1) - 300) * 1.5, 1e-6);
+  FILM.expect.near(sh.x(u, -1), 220 + (sideH.x(u, -1) - 220) * 1.5, 1e-6);
+  FILM.expect.near(Math.abs(sh.y(u, -1) - sh.cy), sh.hw(u), 1e-6);
+  const sSide = sh.side(1, 4);
+  const sOut = sh.outline(4);
+  FILM.expect.near(sSide[0], sOut[sOut.length - 1], 1e-6);
+  const pair = FILM.lib.geo('pair');
+  FILM.expect.near(pair.at(3, [0, 0]).at(2, [620, 200]).outline(4), pair.at(2, [620, 200]).outline(4), 1e-6);
+});
+
 FILM.assert('outline parts trace the outer union, and at() scales about a point', () => {
   const g = FILM.lib.geo('pair');
   const loop = g.outline(4);

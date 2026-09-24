@@ -22,11 +22,31 @@
 //                   evidence of the three-scale review, next to the full frame and the contact sheet
 //   --geo a,b       stroke those FILM.GEO entries (src/geo.js) over every frame in magenta: silhouettes, polylines,
 //                   named points. Snap both sides of a match cut with the same --geo to compare them.
+//                   On a cut that declares zoom, that entry is drawn through lib.geo(id).at(zoom, about)
+//                   (the transform check 7 measures) and the label includes the zoom. Any other frame
+//                   is the unzoomed table, as before.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const C = require('./common.cjs');
+
+// The cut frame check 7 measures with a zoom, if T is closer to it than to the neighbouring frame.
+function geoZoomAt(frames, id, T) {
+  const limit = 0.5 / C.FPS;
+  let best = null;
+  let bestD = limit;
+  for (const f of frames) {
+    if (f.id !== id || !(f.zoom > 0) || !f.about) continue;
+    const d = Math.abs(f.T - T);
+    if (d < bestD) {
+      bestD = d;
+      best = f;
+    }
+  }
+  if (!best) return null;
+  return { zoom: best.zoom, about: [best.about[0], best.about[1]] };
+}
 
 async function main() {
   const args = C.parseArgs(process.argv.slice(2), ['sheet', 'only', 'fixtures']);
@@ -81,6 +101,14 @@ async function main() {
     : [];
   const geoIds = typeof args.geo === 'string' ? args.geo.split(',').map((x) => x.trim()).filter(Boolean) : [];
   if (args.geo && !geoIds.length) C.die('--geo needs entry ids, e.g. --geo G1');
+  let zoomFrames = [];
+  if (geoIds.length && src.geoFile) {
+    try {
+      zoomFrames = C.validateGeo(C.loadGeo(src.geoFile, TL), TL).frames;
+    } catch (e) {
+      C.die(`--geo: ${e.message}`);
+    }
+  }
 
   const browser = await C.launch();
   const t0 = Date.now();
@@ -104,15 +132,50 @@ async function main() {
     for (let i = 0; i < times.length; i++) {
       const T = times[i];
       const r = await pg.page.evaluate((T) => window.__h.render(T), T);
+      const geoViews = {};
+      for (const id of geoIds) {
+        const v = geoZoomAt(zoomFrames, id, T);
+        if (v) geoViews[id] = v;
+      }
       if (geoIds.length) {
-        const err = await pg.page.evaluate((ids) => {
+        const err = await pg.page.evaluate((arg) => {
           try {
-            window.__h.overlayGeo(ids);
+            const views = arg.views || {};
+            if (!arg.ids.some((id) => views[id])) {
+              window.__h.overlayGeo(arg.ids);
+              return null;
+            }
+            const ctx = FILM.ctx;
+            const S = FILM.canvas.width / FILM.W;
+            for (const id of arg.ids) {
+              const view = views[id];
+              if (!view) {
+                window.__h.overlayGeo([id]);
+                continue;
+              }
+              // Same stroke as overlayGeo, through the zoom check 7 passes to geoMeasure.
+              const g = FILM.lib.geo(id).at(view.zoom, view.about);
+              const P = g.outline(4);
+              ctx.save();
+              ctx.setTransform(S, 0, 0, S, 0, 0);
+              ctx.globalAlpha = 1;
+              ctx.globalCompositeOperation = 'source-over';
+              ctx.strokeStyle = '#ff2a6d';
+              ctx.fillStyle = '#ff2a6d';
+              ctx.lineWidth = 2;
+              ctx.font = '600 22px ui-monospace, Menlo, monospace';
+              ctx.beginPath();
+              P.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+              ctx.closePath();
+              ctx.stroke();
+              ctx.fillText(id + ' @' + view.zoom, P[0][0] + 8, P[0][1] - 8);
+              ctx.restore();
+            }
             return null;
           } catch (e) {
             return e.message;
           }
-        }, geoIds);
+        }, { ids: geoIds, views: geoViews });
         if (err) C.die(`--geo: ${err}`);
       }
       const png = Buffer.from(await pg.page.evaluate(() => window.__h.png()), 'base64');
@@ -127,7 +190,8 @@ async function main() {
       }
       const sh = TL.shots.find((s) => s.id === r.shot);
       const local = sh ? T - sh.start : 0;
-      console.log(`T=${C.fmtT(T)}  f${String(Math.floor(T * FPS + 1e-6)).padStart(4, '0')}  ${r.shot}  t=${local.toFixed(3)}  ${r.ms.toFixed(0)}ms  -> ${file}`);
+      const zoomNote = Object.keys(geoViews).map((id) => `${id} @${geoViews[id].zoom}`).join(', ');
+      console.log(`T=${C.fmtT(T)}  f${String(Math.floor(T * FPS + 1e-6)).padStart(4, '0')}  ${r.shot}  t=${local.toFixed(3)}  ${r.ms.toFixed(0)}ms  -> ${file}${zoomNote ? `  geo ${zoomNote}` : ''}`);
       for (const e of r.errors) {
         failed = true;
         console.log(`  [error] ${e.message}`);

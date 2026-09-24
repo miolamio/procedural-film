@@ -269,6 +269,7 @@ function unionLink(parts) {
  * frames lists every frame to measure: { id, T, label, cut? } per side of each declared cut and per 'at'.
  *   profile  : { kind: 'profile', cx, ys, hs, shots, cuts?, at? } or axis 'x' with cy, xs, hs.
  *             cuts entries are 'a>b' or { cut: 'a>b', zoom, about: [x, y] }.
+ *             about without zoom warns: the point is ignored and the cut is measured at zoom 1.
  *   outline  : { kind: 'outline', pts | parts, shots, cuts?, at? }
  *   points   : { kind: 'points', pts: { name: [x, y] }, shots }
  *   polyline : { kind: 'polyline', pts: [[x, y], ...], shots }
@@ -362,6 +363,8 @@ function validateGeo(geo, tl, opts) {
             problems.push(`${at}: cut '${spec.name}' needs zoom > 0 and about: [x, y]`);
             continue;
           }
+          // A problem drops every measured frame, so a missing zoom warns and the cut is still measured.
+          if (spec.zoom == null && spec.about != null) warnings.push(`${at}: cut '${spec.name}' has about but no zoom; about is ignored and the cut is measured at zoom 1`);
           const [a, b] = spec.name.split('>').map((x) => x && x.trim());
           const labelCut = spec.zoom != null ? `${spec.name} @${spec.zoom}` : spec.name;
           const A = byId.get(a), B = byId.get(b);
