@@ -384,6 +384,137 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Carrier: the medium the film plays on (a CRT; later tape or film stock). It is applied once
+  // per frame over the finished picture, after transitions and flashes, so it never slides with a
+  // whip or doubles in a fade. Stateless: a function of T and the frame size. Unlike the grain it
+  // stays on when a tool sets FILM.post = false, so the flash and canvas checks see it; only
+  // FILM.carrier === false (the geometry measure) turns it off.
+  // Timeline: carrier: { kind: 'crt', ... } for the whole film; a shot's own carrier (an object,
+  // or false) replaces it for that shot. During a transition the incoming shot's carrier applies.
+  // ---------------------------------------------------------------------------
+
+  const CARRIERS = {};
+  FILM.defineCarrier = function defineCarrier(kind, fn) {
+    CARRIERS[kind] = fn;
+  };
+  FILM.carrierKinds = () => Object.keys(CARRIERS);
+
+  function carrierFor(shot) {
+    const c = shot && shot.carrier !== undefined ? shot.carrier : FILM.TIMELINE && FILM.TIMELINE.carrier;
+    return c && typeof c === 'object' && CARRIERS[c.kind] ? c : null;
+  }
+
+  function applyCarrier(ctx, shot, T) {
+    if (FILM.carrier === false) return;
+    const c = carrierFor(shot);
+    if (!c) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
+    ctx.shadowBlur = 0;
+    CARRIERS[c.kind](ctx, T, c, ctx.canvas.width / FILM.W);
+    ctx.restore();
+  }
+  FILM.applyCarrier = applyCarrier;
+
+  function carrierNum(o, key, def, lo, hi) {
+    const n = o && o[key] != null ? Number(o[key]) : def;
+    if (!isFinite(n)) return def;
+    return n < lo ? lo : n > hi ? hi : n;
+  }
+
+  // crt: sinusoidal scanlines, a rounded screen with darkened edges (a fake curvature: no pixel
+  // reads), a slow hum bar rolling down and a faint flicker on the boil clock.
+  //   scanlines 0.08 (depth, 0..0.1)   period 6 (logical px, >= 6)
+  //   mask 1 (0 = no rounded screen)   radius 0.045 (corner, fraction of the short side)   edge 0.35
+  //   hum 0.03 (0..0.1)   humPeriod 5 (s)   flicker 0.012 (0..0.03)
+  // Scanlines fade out where a period is under 3 device px (a scaled preview), which would moire.
+  const crtCache = {};
+  function crtScanTile(P) {
+    const key = 'scan' + P;
+    if (crtCache[key]) return crtCache[key];
+    const c = makeCanvas(1, P);
+    const g = c.getContext('2d');
+    for (let y = 0; y < P; y++) {
+      g.fillStyle = 'rgba(0,0,0,' + (0.5 - 0.5 * Math.cos((Math.PI * 2 * (y + 0.5)) / P)).toFixed(4) + ')';
+      g.fillRect(0, y, 1, 1);
+    }
+    return (crtCache[key] = c);
+  }
+  function crtMask(w, h, radius, edge) {
+    const key = 'mask' + w + 'x' + h + ':' + radius + ':' + edge;
+    if (crtCache[key]) return crtCache[key];
+    const c = makeCanvas(w, h);
+    const g = c.getContext('2d');
+    // edge darkening: an elliptical falloff stretched to the frame
+    if (edge > 0) {
+      g.save();
+      g.translate(w / 2, h / 2);
+      g.scale(w / 2, h / 2);
+      const grad = g.createRadialGradient(0, 0, 0.55, 0, 0, 1.42);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,' + edge + ')');
+      g.fillStyle = grad;
+      g.fillRect(-1, -1, 2, 2);
+      g.restore();
+    }
+    if (radius > 0) {
+      const r = radius * Math.min(w, h);
+      g.beginPath();
+      g.rect(0, 0, w, h);
+      g.moveTo(r, 0);
+      g.arcTo(w, 0, w, h, r);
+      g.arcTo(w, h, 0, h, r);
+      g.arcTo(0, h, 0, 0, r);
+      g.arcTo(0, 0, w, 0, r);
+      g.closePath();
+      g.fillStyle = '#000000';
+      g.fill('evenodd');
+    }
+    return (crtCache[key] = c);
+  }
+  FILM.defineCarrier('crt', (ctx, T, o, S) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const depth = carrierNum(o, 'scanlines', 0.08, 0, 0.1);
+    const P = Math.round(carrierNum(o, 'period', 6, 6, 64) * S);
+    const fadeScan = clamp01((P - 2) / 1);
+    if (depth > 0 && fadeScan > 0) {
+      ctx.globalAlpha = depth * fadeScan;
+      ctx.fillStyle = ctx.createPattern(crtScanTile(P), 'repeat');
+      ctx.fillRect(0, 0, w, h);
+    }
+    const hum = carrierNum(o, 'hum', 0.03, 0, 0.1);
+    if (hum > 0) {
+      const period = carrierNum(o, 'humPeriod', 5, 1, 60);
+      const bh = h * 0.16;
+      const y = (((T / period) % 1) * (h + bh)) - bh;
+      const grad = ctx.createLinearGradient(0, y, 0, y + bh);
+      grad.addColorStop(0, 'rgba(255,255,255,0)');
+      grad.addColorStop(0.5, 'rgba(255,255,255,' + hum + ')');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, y, w, bh);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    const flicker = carrierNum(o, 'flicker', 0.012, 0, 0.03);
+    if (flicker > 0) {
+      ctx.globalAlpha = flicker * ihash(Math.floor(T * FILM.BOIL_FPS + EPS), 41, 9);
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, w, h);
+    }
+    const mask = carrierNum(o, 'mask', 1, 0, 1);
+    if (mask > 0) {
+      ctx.globalAlpha = mask;
+      ctx.drawImage(crtMask(w, h, carrierNum(o, 'radius', 0.045, 0, 0.2), carrierNum(o, 'edge', 0.35, 0, 1)), 0, 0);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // Shot grade: after the drawing, before the grain. difference / multiply / screen / overlay
   // and one radial gradient — never getImageData on the frame. A neutral grade
   // returns before touching the context, so an ungraded shot stays byte-identical.
@@ -436,13 +567,13 @@
   }
 
   // Same p the picture uses, so the grade tracks the dissolve.
-  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash and morph step by interior frame.
+  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash, morph and crtoff step by interior frame.
   function transitionMix(tr, inT) {
     const k = Math.max(0, inT * FILM.FPS);
     const n = tr.dur * FILM.FPS;
     if (!(n > 0)) return 1;
     if (tr.kind === 'flash') return clamp01(k / n);
-    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph') {
+    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff') {
       return clamp01(k / Math.max(1, interiorFrames(tr.dur)));
     }
     return easeInOutCubic(clamp01((k + 1) / (n + 1)));
@@ -1043,8 +1174,39 @@
     ctx.stroke(path);
   }
 
+  // crtoff: the outgoing picture collapses to a hot horizontal line, the line shrinks to a dot and
+  // fades, then the incoming picture opens out of a line. Black between (tr.color, a pal name).
+  function crtoffComposite(ctx, A, B, tr, p, w, h) {
+    ctx.fillStyle = palColor(tr.color) || '#000000';
+    ctx.fillRect(0, 0, w, h);
+    const S = w / FILM.W;
+    const line = Math.max(1, 3 * S);
+    const cy = h / 2;
+    if (p < 0.45) {
+      const q = p / 0.45;
+      const sh = Math.max(line, h * (1 - q * q));
+      ctx.drawImage(A, 0, cy - sh / 2, w, sh);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.8 * q;
+      ctx.drawImage(A, 0, cy - sh / 2, w, sh);
+    } else if (p < 0.6) {
+      const q = (p - 0.45) / 0.15;
+      const lw = Math.max(line, w * (1 - q) * (1 - q));
+      ctx.globalAlpha = 1 - 0.6 * q;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(w / 2 - lw / 2, cy - line / 2, lw, line);
+    } else {
+      const q = (p - 0.6) / 0.4;
+      const e = 1 - (1 - q) * (1 - q) * (1 - q);
+      const sh = Math.max(line, h * e);
+      ctx.drawImage(B, 0, cy - sh / 2, w, sh);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   // fade, iris and wipe: A is the outgoing shot, B the incoming one, p in (0, 1) exclusive.
-  // whip, inkwash and morph include p = 0 (outgoing alone). Their p stays below 1 inside the window.
+  // whip, inkwash, morph and crtoff include p = 0 (outgoing alone). Their p stays below 1 inside the window.
   function composite(ctx, A, B, tr, p) {
     resetCtx(ctx, true);
     const w = ctx.canvas.width;
@@ -1052,6 +1214,7 @@
     if (tr.kind === 'whip') whipComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'inkwash') inkwashComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'morph') morphComposite(ctx, A, B, tr, p, w, h);
+    else if (tr.kind === 'crtoff') crtoffComposite(ctx, A, B, tr, p, w, h);
     else {
       const e = easeInOutCubic(p);
       ctx.drawImage(A, 0, 0);
@@ -1089,11 +1252,18 @@
     resetCtx(ctx, false);
   }
 
-  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1 };
+  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1, crtoff: 1 };
   FILM.TRANSITION_KINDS = Object.keys(KINDS);
 
-  /** Draws global time T (seconds) to FILM.canvas. Returns the active shot entry. */
+  /** Draws global time T (seconds) to FILM.canvas, carrier included. Returns the active shot entry. */
   FILM.renderFrame = function renderFrame(T) {
+    T = Number(T) || 0;
+    const shot = renderPicture(T);
+    if (shot) applyCarrier(FILM.ctx, shot, T < 0 ? 0 : FILM.DURATION > 0 && T > FILM.DURATION ? FILM.DURATION : T);
+    return shot;
+  };
+
+  function renderPicture(T) {
     const P = prepare();
     if (!FILM.ctx) throw new Error('FILM.renderFrame: call FILM.mount(canvas) first');
     T = Number(T) || 0;
@@ -1142,9 +1312,9 @@
     }
     // fade, iris and wipe: frame 0 is already 1/(n+1) of the way in, the last transition frame
     // (n-1) is n/(n+1), so neither shot's own frame is repeated.
-    // whip, inkwash and morph: p = 0 on the first frame (outgoing shot alone). p stays below 1
+    // whip, inkwash, morph and crtoff: p = 0 on the first frame (outgoing shot alone). p stays below 1
     // until dur has elapsed, and that next frame is the incoming shot alone.
-    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph';
+    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff';
     const p = fresh
       ? clamp01(k / Math.max(1, interiorFrames(tr.dur)))
       : clamp01((k + 1) / (n + 1));
@@ -1158,7 +1328,7 @@
     drawShot(B.ctx, shot, T, false);
     composite(ctx, A.canvas, B.canvas, tr, p);
     return shot;
-  };
+  }
 })();
 
 </script>
@@ -3588,6 +3758,111 @@
     });
   }
   lib.glowFigure = glowFigure;
+
+  /**
+   * sprite(ctx, rows, x, y, cell, opts) : pixel art from strings, one string per row. A space or
+   * '.' is empty; any other character is a lit cell in opts.color, or opts.colors[char]. Runs of a
+   * row merge into one rect, and cells snap to whole device pixels so edges stay crisp.
+   *   color pal.lineWhite   colors {}   alpha 1   align 'left' | 'center' | 'right'
+   * Returns the drawn width in px.
+   */
+  function sprite(ctx, rows, x, y, cell, o = {}) {
+    const cols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+    const width = cols * cell;
+    const x0 = o.align === 'center' ? x - width / 2 : o.align === 'right' ? x - width : x;
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    const colors = o.colors || {};
+    const snap = (v) => Math.round(v);
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      let c = 0;
+      while (c < row.length) {
+        const ch = row[c];
+        if (ch === ' ' || ch === '.') {
+          c++;
+          continue;
+        }
+        let e = c + 1;
+        while (e < row.length && row[e] === ch) e++;
+        ctx.fillStyle = colors[ch] || o.color || pal.lineWhite;
+        const ax = snap(x0 + c * cell), ay = snap(y + r * cell);
+        ctx.fillRect(ax, ay, snap(x0 + e * cell) - ax, snap(y + (r + 1) * cell) - ay);
+        c = e;
+      }
+    }
+    ctx.restore();
+    return width;
+  }
+  lib.sprite = sprite;
+
+  // 5×7 pixel font: seven rows of five bits per glyph, bit 4 the leftmost column. Upper case only;
+  // lower case draws as upper case and an unknown character as '?'.
+  const FONT57 = {
+    A: [14, 17, 17, 31, 17, 17, 17], B: [30, 17, 17, 30, 17, 17, 30], C: [14, 17, 16, 16, 16, 17, 14],
+    D: [28, 18, 17, 17, 17, 18, 28], E: [31, 16, 16, 30, 16, 16, 31], F: [31, 16, 16, 30, 16, 16, 16],
+    G: [14, 17, 16, 23, 17, 17, 15], H: [17, 17, 17, 31, 17, 17, 17], I: [14, 4, 4, 4, 4, 4, 14],
+    J: [7, 2, 2, 2, 2, 18, 12], K: [17, 18, 20, 24, 20, 18, 17], L: [16, 16, 16, 16, 16, 16, 31],
+    M: [17, 27, 21, 21, 17, 17, 17], N: [17, 17, 25, 21, 19, 17, 17], O: [14, 17, 17, 17, 17, 17, 14],
+    P: [30, 17, 17, 30, 16, 16, 16], Q: [14, 17, 17, 17, 21, 18, 13], R: [30, 17, 17, 30, 20, 18, 17],
+    S: [15, 16, 16, 14, 1, 1, 30], T: [31, 4, 4, 4, 4, 4, 4], U: [17, 17, 17, 17, 17, 17, 14],
+    V: [17, 17, 17, 17, 17, 10, 4], W: [17, 17, 17, 21, 21, 21, 10], X: [17, 17, 10, 4, 10, 17, 17],
+    Y: [17, 17, 17, 10, 4, 4, 4], Z: [31, 1, 2, 4, 8, 16, 31],
+    0: [14, 17, 19, 21, 25, 17, 14], 1: [4, 12, 4, 4, 4, 4, 14], 2: [14, 17, 1, 2, 4, 8, 31],
+    3: [31, 2, 4, 2, 1, 17, 14], 4: [2, 6, 10, 18, 31, 2, 2], 5: [31, 16, 30, 1, 1, 17, 14],
+    6: [6, 8, 16, 30, 17, 17, 14], 7: [31, 1, 2, 4, 8, 8, 8], 8: [14, 17, 17, 14, 17, 17, 14],
+    9: [14, 17, 17, 15, 1, 2, 12],
+    ' ': [0, 0, 0, 0, 0, 0, 0], '.': [0, 0, 0, 0, 0, 12, 12], ',': [0, 0, 0, 0, 12, 4, 8],
+    ':': [0, 12, 12, 0, 12, 12, 0], ';': [0, 12, 12, 0, 12, 4, 8], '-': [0, 0, 0, 31, 0, 0, 0],
+    _: [0, 0, 0, 0, 0, 0, 31], '/': [0, 1, 2, 4, 8, 16, 0], '!': [4, 4, 4, 4, 4, 0, 4],
+    '?': [14, 17, 1, 2, 4, 0, 4], '>': [8, 4, 2, 1, 2, 4, 8], '<': [2, 4, 8, 16, 8, 4, 2],
+    '=': [0, 0, 31, 0, 31, 0, 0], '+': [0, 4, 4, 31, 4, 4, 0], '#': [10, 10, 31, 10, 31, 10, 10],
+    '%': [24, 25, 2, 4, 8, 19, 3], '(': [2, 4, 8, 8, 8, 4, 2], ')': [8, 4, 2, 2, 2, 4, 8],
+    '[': [14, 8, 8, 8, 8, 8, 14], ']': [14, 2, 2, 2, 2, 2, 14], "'": [4, 4, 8, 0, 0, 0, 0],
+    '"': [10, 10, 0, 0, 0, 0, 0], '*': [0, 4, 21, 14, 21, 4, 0], '█': [31, 31, 31, 31, 31, 31, 31],
+  };
+  lib.pixelFont5x7 = FONT57;
+
+  /**
+   * pixelText(ctx, str, x, y, cell, opts) : text in the built-in 5×7 pixel font, the same on every
+   * machine (the system monospace is not). A glyph is 5×7 cells on a 6-cell advance; a line is
+   * 9 cells tall; '\n' starts a new line. (x, y) is the top of the first line at its align point.
+   *   color pal.lineWhite   alpha 1   align 'left' | 'center' | 'right'
+   *   chars                 how many characters to show (a terminal typing out), default all
+   *   cursor false          a full block after the last shown character
+   * Returns { width, height } of the whole text in px.
+   */
+  function pixelText(ctx, str, x, y, cell, o = {}) {
+    const lines = String(str).toUpperCase().split('\n');
+    let left = o.chars != null ? Math.max(0, Math.floor(o.chars)) : Infinity;
+    let width = 0;
+    let cursor = !!o.cursor;
+    lines.forEach((line, li) => {
+      width = Math.max(width, line.length ? (line.length * 6 - 1) * cell : 0);
+      const shown = line.slice(0, Math.min(line.length, left));
+      const stops = left <= line.length || li === lines.length - 1; // typing ends on this line
+      left = Math.max(0, left - line.length - 1); // the newline counts as a character
+      let text = shown;
+      if (cursor && stops) {
+        text += '█';
+        cursor = false;
+      }
+      const w = (line.length * 6 - 1) * cell;
+      const x0 = o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x;
+      const rows = ['', '', '', '', '', '', ''];
+      for (const ch of text) {
+        const g = FONT57[ch] || FONT57['?'];
+        for (let r = 0; r < 7; r++) {
+          let bits = '';
+          for (let b = 4; b >= 0; b--) bits += (g[r] >> b) & 1 ? '#' : ' ';
+          rows[r] += bits + ' ';
+        }
+      }
+      sprite(ctx, rows, x0, y + li * 9 * cell, cell, { color: o.color, alpha: o.alpha });
+    });
+    return { width, height: (lines.length * 9 - 2) * cell };
+  }
+  lib.pixelText = pixelText;
 
   function ticksImpl(ctx, x, y, o) {
     const p = new Path2D();

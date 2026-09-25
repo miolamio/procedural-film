@@ -2374,6 +2374,111 @@
   }
   lib.glowFigure = glowFigure;
 
+  /**
+   * sprite(ctx, rows, x, y, cell, opts) : pixel art from strings, one string per row. A space or
+   * '.' is empty; any other character is a lit cell in opts.color, or opts.colors[char]. Runs of a
+   * row merge into one rect, and cells snap to whole device pixels so edges stay crisp.
+   *   color pal.lineWhite   colors {}   alpha 1   align 'left' | 'center' | 'right'
+   * Returns the drawn width in px.
+   */
+  function sprite(ctx, rows, x, y, cell, o = {}) {
+    const cols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+    const width = cols * cell;
+    const x0 = o.align === 'center' ? x - width / 2 : o.align === 'right' ? x - width : x;
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    const colors = o.colors || {};
+    const snap = (v) => Math.round(v);
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      let c = 0;
+      while (c < row.length) {
+        const ch = row[c];
+        if (ch === ' ' || ch === '.') {
+          c++;
+          continue;
+        }
+        let e = c + 1;
+        while (e < row.length && row[e] === ch) e++;
+        ctx.fillStyle = colors[ch] || o.color || pal.lineWhite;
+        const ax = snap(x0 + c * cell), ay = snap(y + r * cell);
+        ctx.fillRect(ax, ay, snap(x0 + e * cell) - ax, snap(y + (r + 1) * cell) - ay);
+        c = e;
+      }
+    }
+    ctx.restore();
+    return width;
+  }
+  lib.sprite = sprite;
+
+  // 5×7 pixel font: seven rows of five bits per glyph, bit 4 the leftmost column. Upper case only;
+  // lower case draws as upper case and an unknown character as '?'.
+  const FONT57 = {
+    A: [14, 17, 17, 31, 17, 17, 17], B: [30, 17, 17, 30, 17, 17, 30], C: [14, 17, 16, 16, 16, 17, 14],
+    D: [28, 18, 17, 17, 17, 18, 28], E: [31, 16, 16, 30, 16, 16, 31], F: [31, 16, 16, 30, 16, 16, 16],
+    G: [14, 17, 16, 23, 17, 17, 15], H: [17, 17, 17, 31, 17, 17, 17], I: [14, 4, 4, 4, 4, 4, 14],
+    J: [7, 2, 2, 2, 2, 18, 12], K: [17, 18, 20, 24, 20, 18, 17], L: [16, 16, 16, 16, 16, 16, 31],
+    M: [17, 27, 21, 21, 17, 17, 17], N: [17, 17, 25, 21, 19, 17, 17], O: [14, 17, 17, 17, 17, 17, 14],
+    P: [30, 17, 17, 30, 16, 16, 16], Q: [14, 17, 17, 17, 21, 18, 13], R: [30, 17, 17, 30, 20, 18, 17],
+    S: [15, 16, 16, 14, 1, 1, 30], T: [31, 4, 4, 4, 4, 4, 4], U: [17, 17, 17, 17, 17, 17, 14],
+    V: [17, 17, 17, 17, 17, 10, 4], W: [17, 17, 17, 21, 21, 21, 10], X: [17, 17, 10, 4, 10, 17, 17],
+    Y: [17, 17, 17, 10, 4, 4, 4], Z: [31, 1, 2, 4, 8, 16, 31],
+    0: [14, 17, 19, 21, 25, 17, 14], 1: [4, 12, 4, 4, 4, 4, 14], 2: [14, 17, 1, 2, 4, 8, 31],
+    3: [31, 2, 4, 2, 1, 17, 14], 4: [2, 6, 10, 18, 31, 2, 2], 5: [31, 16, 30, 1, 1, 17, 14],
+    6: [6, 8, 16, 30, 17, 17, 14], 7: [31, 1, 2, 4, 8, 8, 8], 8: [14, 17, 17, 14, 17, 17, 14],
+    9: [14, 17, 17, 15, 1, 2, 12],
+    ' ': [0, 0, 0, 0, 0, 0, 0], '.': [0, 0, 0, 0, 0, 12, 12], ',': [0, 0, 0, 0, 12, 4, 8],
+    ':': [0, 12, 12, 0, 12, 12, 0], ';': [0, 12, 12, 0, 12, 4, 8], '-': [0, 0, 0, 31, 0, 0, 0],
+    _: [0, 0, 0, 0, 0, 0, 31], '/': [0, 1, 2, 4, 8, 16, 0], '!': [4, 4, 4, 4, 4, 0, 4],
+    '?': [14, 17, 1, 2, 4, 0, 4], '>': [8, 4, 2, 1, 2, 4, 8], '<': [2, 4, 8, 16, 8, 4, 2],
+    '=': [0, 0, 31, 0, 31, 0, 0], '+': [0, 4, 4, 31, 4, 4, 0], '#': [10, 10, 31, 10, 31, 10, 10],
+    '%': [24, 25, 2, 4, 8, 19, 3], '(': [2, 4, 8, 8, 8, 4, 2], ')': [8, 4, 2, 2, 2, 4, 8],
+    '[': [14, 8, 8, 8, 8, 8, 14], ']': [14, 2, 2, 2, 2, 2, 14], "'": [4, 4, 8, 0, 0, 0, 0],
+    '"': [10, 10, 0, 0, 0, 0, 0], '*': [0, 4, 21, 14, 21, 4, 0], '█': [31, 31, 31, 31, 31, 31, 31],
+  };
+  lib.pixelFont5x7 = FONT57;
+
+  /**
+   * pixelText(ctx, str, x, y, cell, opts) : text in the built-in 5×7 pixel font, the same on every
+   * machine (the system monospace is not). A glyph is 5×7 cells on a 6-cell advance; a line is
+   * 9 cells tall; '\n' starts a new line. (x, y) is the top of the first line at its align point.
+   *   color pal.lineWhite   alpha 1   align 'left' | 'center' | 'right'
+   *   chars                 how many characters to show (a terminal typing out), default all
+   *   cursor false          a full block after the last shown character
+   * Returns { width, height } of the whole text in px.
+   */
+  function pixelText(ctx, str, x, y, cell, o = {}) {
+    const lines = String(str).toUpperCase().split('\n');
+    let left = o.chars != null ? Math.max(0, Math.floor(o.chars)) : Infinity;
+    let width = 0;
+    let cursor = !!o.cursor;
+    lines.forEach((line, li) => {
+      width = Math.max(width, line.length ? (line.length * 6 - 1) * cell : 0);
+      const shown = line.slice(0, Math.min(line.length, left));
+      const stops = left <= line.length || li === lines.length - 1; // typing ends on this line
+      left = Math.max(0, left - line.length - 1); // the newline counts as a character
+      let text = shown;
+      if (cursor && stops) {
+        text += '█';
+        cursor = false;
+      }
+      const w = (line.length * 6 - 1) * cell;
+      const x0 = o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x;
+      const rows = ['', '', '', '', '', '', ''];
+      for (const ch of text) {
+        const g = FONT57[ch] || FONT57['?'];
+        for (let r = 0; r < 7; r++) {
+          let bits = '';
+          for (let b = 4; b >= 0; b--) bits += (g[r] >> b) & 1 ? '#' : ' ';
+          rows[r] += bits + ' ';
+        }
+      }
+      sprite(ctx, rows, x0, y + li * 9 * cell, cell, { color: o.color, alpha: o.alpha });
+    });
+    return { width, height: (lines.length * 9 - 2) * cell };
+  }
+  lib.pixelText = pixelText;
+
   function ticksImpl(ctx, x, y, o) {
     const p = new Path2D();
     const pm = new Path2D();

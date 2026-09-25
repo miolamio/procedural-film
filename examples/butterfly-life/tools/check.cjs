@@ -811,6 +811,21 @@ async function main() {
     const GRADE_RANGE = { invert: [0, 1], warmth: [-1, 1], fade: [0, 1], vignette: [0, 1], paperAge: [0, 1], tintAmount: [0, 1] };
     const palNames = readPalNames();
     if (!palNames.size) tlProblems.push('could not read colour names from lib.pal');
+    // carrier kinds and their numeric fields; keep in step with FILM.defineCarrier in src/core.js
+    const CARRIER_FIELDS = { crt: ['scanlines', 'period', 'mask', 'radius', 'edge', 'hum', 'humPeriod', 'flicker'] };
+    const carrierProblems = (c, at) => {
+      if (c === undefined || c === null || c === false) return;
+      if (typeof c !== 'object' || !CARRIER_FIELDS[c.kind]) {
+        tlProblems.push(`${at} must be false or { kind: ${Object.keys(CARRIER_FIELDS).map((k) => `'${k}'`).join(' | ')}, ... }`);
+        return;
+      }
+      for (const [k, v] of Object.entries(c)) {
+        if (k === 'kind') continue;
+        if (!CARRIER_FIELDS[c.kind].includes(k)) tlProblems.push(`${at}.${k} is not a ${c.kind} field`);
+        else if (typeof v !== 'number' || !isFinite(v)) tlProblems.push(`${at}.${k} must be a number`);
+      }
+    };
+    carrierProblems(TL.raw.carrier, 'timeline carrier');
     shots.forEach((s, i) => {
       if (typeof s.id !== 'string' || !s.id) tlProblems.push(`shot #${i} has no id`);
       else if (ids.has(s.id)) tlProblems.push(`duplicate shot id '${s.id}'`);
@@ -827,7 +842,7 @@ async function main() {
       if (offGrid(s.start)) tlWarnings.push(`shot '${s.id}' starts at ${s.start}s, off the 16th-note grid at ${TL.bpm} bpm`);
       const tr = s.transitionIn;
       if (tr) {
-        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph'];
+        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph', 'crtoff'];
         if (!kinds.includes(tr.kind)) tlProblems.push(`shot '${s.id}' transitionIn kind '${tr.kind}' is not one of ${kinds.join(', ')}`);
         if (!(tr.dur >= 0) || tr.dur > s.dur) tlProblems.push(`shot '${s.id}' transitionIn dur ${tr.dur} must be between 0 and the shot length ${s.dur}`);
         if (tr.kind === 'whip' && !['left', 'right', 'up', 'down'].includes(tr.dir)) {
@@ -835,6 +850,7 @@ async function main() {
         }
         if (i === 0 && tr.kind !== 'cut') tlWarnings.push(`shot '${s.id}' is first; its transitionIn is ignored`);
       }
+      carrierProblems(s.carrier, `shot '${s.id}' carrier`);
       const m = String(s.mode || '').toLowerCase();
       if (!/illus|schem|blue|none|raw/.test(m)) tlWarnings.push(`shot '${s.id}' mode '${s.mode}' is neither illustrated nor schematic (treated as illustrated)`);
       if (s.grade != null) {

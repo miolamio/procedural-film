@@ -373,6 +373,137 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Carrier: the medium the film plays on (a CRT; later tape or film stock). It is applied once
+  // per frame over the finished picture, after transitions and flashes, so it never slides with a
+  // whip or doubles in a fade. Stateless: a function of T and the frame size. Unlike the grain it
+  // stays on when a tool sets FILM.post = false, so the flash and canvas checks see it; only
+  // FILM.carrier === false (the geometry measure) turns it off.
+  // Timeline: carrier: { kind: 'crt', ... } for the whole film; a shot's own carrier (an object,
+  // or false) replaces it for that shot. During a transition the incoming shot's carrier applies.
+  // ---------------------------------------------------------------------------
+
+  const CARRIERS = {};
+  FILM.defineCarrier = function defineCarrier(kind, fn) {
+    CARRIERS[kind] = fn;
+  };
+  FILM.carrierKinds = () => Object.keys(CARRIERS);
+
+  function carrierFor(shot) {
+    const c = shot && shot.carrier !== undefined ? shot.carrier : FILM.TIMELINE && FILM.TIMELINE.carrier;
+    return c && typeof c === 'object' && CARRIERS[c.kind] ? c : null;
+  }
+
+  function applyCarrier(ctx, shot, T) {
+    if (FILM.carrier === false) return;
+    const c = carrierFor(shot);
+    if (!c) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
+    ctx.shadowBlur = 0;
+    CARRIERS[c.kind](ctx, T, c, ctx.canvas.width / FILM.W);
+    ctx.restore();
+  }
+  FILM.applyCarrier = applyCarrier;
+
+  function carrierNum(o, key, def, lo, hi) {
+    const n = o && o[key] != null ? Number(o[key]) : def;
+    if (!isFinite(n)) return def;
+    return n < lo ? lo : n > hi ? hi : n;
+  }
+
+  // crt: sinusoidal scanlines, a rounded screen with darkened edges (a fake curvature: no pixel
+  // reads), a slow hum bar rolling down and a faint flicker on the boil clock.
+  //   scanlines 0.08 (depth, 0..0.1)   period 6 (logical px, >= 6)
+  //   mask 1 (0 = no rounded screen)   radius 0.045 (corner, fraction of the short side)   edge 0.35
+  //   hum 0.03 (0..0.1)   humPeriod 5 (s)   flicker 0.012 (0..0.03)
+  // Scanlines fade out where a period is under 3 device px (a scaled preview), which would moire.
+  const crtCache = {};
+  function crtScanTile(P) {
+    const key = 'scan' + P;
+    if (crtCache[key]) return crtCache[key];
+    const c = makeCanvas(1, P);
+    const g = c.getContext('2d');
+    for (let y = 0; y < P; y++) {
+      g.fillStyle = 'rgba(0,0,0,' + (0.5 - 0.5 * Math.cos((Math.PI * 2 * (y + 0.5)) / P)).toFixed(4) + ')';
+      g.fillRect(0, y, 1, 1);
+    }
+    return (crtCache[key] = c);
+  }
+  function crtMask(w, h, radius, edge) {
+    const key = 'mask' + w + 'x' + h + ':' + radius + ':' + edge;
+    if (crtCache[key]) return crtCache[key];
+    const c = makeCanvas(w, h);
+    const g = c.getContext('2d');
+    // edge darkening: an elliptical falloff stretched to the frame
+    if (edge > 0) {
+      g.save();
+      g.translate(w / 2, h / 2);
+      g.scale(w / 2, h / 2);
+      const grad = g.createRadialGradient(0, 0, 0.55, 0, 0, 1.42);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,' + edge + ')');
+      g.fillStyle = grad;
+      g.fillRect(-1, -1, 2, 2);
+      g.restore();
+    }
+    if (radius > 0) {
+      const r = radius * Math.min(w, h);
+      g.beginPath();
+      g.rect(0, 0, w, h);
+      g.moveTo(r, 0);
+      g.arcTo(w, 0, w, h, r);
+      g.arcTo(w, h, 0, h, r);
+      g.arcTo(0, h, 0, 0, r);
+      g.arcTo(0, 0, w, 0, r);
+      g.closePath();
+      g.fillStyle = '#000000';
+      g.fill('evenodd');
+    }
+    return (crtCache[key] = c);
+  }
+  FILM.defineCarrier('crt', (ctx, T, o, S) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const depth = carrierNum(o, 'scanlines', 0.08, 0, 0.1);
+    const P = Math.round(carrierNum(o, 'period', 6, 6, 64) * S);
+    const fadeScan = clamp01((P - 2) / 1);
+    if (depth > 0 && fadeScan > 0) {
+      ctx.globalAlpha = depth * fadeScan;
+      ctx.fillStyle = ctx.createPattern(crtScanTile(P), 'repeat');
+      ctx.fillRect(0, 0, w, h);
+    }
+    const hum = carrierNum(o, 'hum', 0.03, 0, 0.1);
+    if (hum > 0) {
+      const period = carrierNum(o, 'humPeriod', 5, 1, 60);
+      const bh = h * 0.16;
+      const y = (((T / period) % 1) * (h + bh)) - bh;
+      const grad = ctx.createLinearGradient(0, y, 0, y + bh);
+      grad.addColorStop(0, 'rgba(255,255,255,0)');
+      grad.addColorStop(0.5, 'rgba(255,255,255,' + hum + ')');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, y, w, bh);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    const flicker = carrierNum(o, 'flicker', 0.012, 0, 0.03);
+    if (flicker > 0) {
+      ctx.globalAlpha = flicker * ihash(Math.floor(T * FILM.BOIL_FPS + EPS), 41, 9);
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, w, h);
+    }
+    const mask = carrierNum(o, 'mask', 1, 0, 1);
+    if (mask > 0) {
+      ctx.globalAlpha = mask;
+      ctx.drawImage(crtMask(w, h, carrierNum(o, 'radius', 0.045, 0, 0.2), carrierNum(o, 'edge', 0.35, 0, 1)), 0, 0);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // Shot grade: after the drawing, before the grain. difference / multiply / screen / overlay
   // and one radial gradient — never getImageData on the frame. A neutral grade
   // returns before touching the context, so an ungraded shot stays byte-identical.
@@ -425,13 +556,13 @@
   }
 
   // Same p the picture uses, so the grade tracks the dissolve.
-  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash and morph step by interior frame.
+  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash, morph and crtoff step by interior frame.
   function transitionMix(tr, inT) {
     const k = Math.max(0, inT * FILM.FPS);
     const n = tr.dur * FILM.FPS;
     if (!(n > 0)) return 1;
     if (tr.kind === 'flash') return clamp01(k / n);
-    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph') {
+    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff') {
       return clamp01(k / Math.max(1, interiorFrames(tr.dur)));
     }
     return easeInOutCubic(clamp01((k + 1) / (n + 1)));
@@ -1032,8 +1163,39 @@
     ctx.stroke(path);
   }
 
+  // crtoff: the outgoing picture collapses to a hot horizontal line, the line shrinks to a dot and
+  // fades, then the incoming picture opens out of a line. Black between (tr.color, a pal name).
+  function crtoffComposite(ctx, A, B, tr, p, w, h) {
+    ctx.fillStyle = palColor(tr.color) || '#000000';
+    ctx.fillRect(0, 0, w, h);
+    const S = w / FILM.W;
+    const line = Math.max(1, 3 * S);
+    const cy = h / 2;
+    if (p < 0.45) {
+      const q = p / 0.45;
+      const sh = Math.max(line, h * (1 - q * q));
+      ctx.drawImage(A, 0, cy - sh / 2, w, sh);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.8 * q;
+      ctx.drawImage(A, 0, cy - sh / 2, w, sh);
+    } else if (p < 0.6) {
+      const q = (p - 0.45) / 0.15;
+      const lw = Math.max(line, w * (1 - q) * (1 - q));
+      ctx.globalAlpha = 1 - 0.6 * q;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(w / 2 - lw / 2, cy - line / 2, lw, line);
+    } else {
+      const q = (p - 0.6) / 0.4;
+      const e = 1 - (1 - q) * (1 - q) * (1 - q);
+      const sh = Math.max(line, h * e);
+      ctx.drawImage(B, 0, cy - sh / 2, w, sh);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   // fade, iris and wipe: A is the outgoing shot, B the incoming one, p in (0, 1) exclusive.
-  // whip, inkwash and morph include p = 0 (outgoing alone). Their p stays below 1 inside the window.
+  // whip, inkwash, morph and crtoff include p = 0 (outgoing alone). Their p stays below 1 inside the window.
   function composite(ctx, A, B, tr, p) {
     resetCtx(ctx, true);
     const w = ctx.canvas.width;
@@ -1041,6 +1203,7 @@
     if (tr.kind === 'whip') whipComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'inkwash') inkwashComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'morph') morphComposite(ctx, A, B, tr, p, w, h);
+    else if (tr.kind === 'crtoff') crtoffComposite(ctx, A, B, tr, p, w, h);
     else {
       const e = easeInOutCubic(p);
       ctx.drawImage(A, 0, 0);
@@ -1078,11 +1241,18 @@
     resetCtx(ctx, false);
   }
 
-  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1 };
+  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1, crtoff: 1 };
   FILM.TRANSITION_KINDS = Object.keys(KINDS);
 
-  /** Draws global time T (seconds) to FILM.canvas. Returns the active shot entry. */
+  /** Draws global time T (seconds) to FILM.canvas, carrier included. Returns the active shot entry. */
   FILM.renderFrame = function renderFrame(T) {
+    T = Number(T) || 0;
+    const shot = renderPicture(T);
+    if (shot) applyCarrier(FILM.ctx, shot, T < 0 ? 0 : FILM.DURATION > 0 && T > FILM.DURATION ? FILM.DURATION : T);
+    return shot;
+  };
+
+  function renderPicture(T) {
     const P = prepare();
     if (!FILM.ctx) throw new Error('FILM.renderFrame: call FILM.mount(canvas) first');
     T = Number(T) || 0;
@@ -1131,9 +1301,9 @@
     }
     // fade, iris and wipe: frame 0 is already 1/(n+1) of the way in, the last transition frame
     // (n-1) is n/(n+1), so neither shot's own frame is repeated.
-    // whip, inkwash and morph: p = 0 on the first frame (outgoing shot alone). p stays below 1
+    // whip, inkwash, morph and crtoff: p = 0 on the first frame (outgoing shot alone). p stays below 1
     // until dur has elapsed, and that next frame is the incoming shot alone.
-    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph';
+    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff';
     const p = fresh
       ? clamp01(k / Math.max(1, interiorFrames(tr.dur)))
       : clamp01((k + 1) / (n + 1));
@@ -1147,5 +1317,5 @@
     drawShot(B.ctx, shot, T, false);
     composite(ctx, A.canvas, B.canvas, tr, p);
     return shot;
-  };
+  }
 })();

@@ -750,8 +750,10 @@ window.__h = {
     if (view && view.zoom) g = g.at(view.zoom, view.about);
     FILM.errors = [];
     FILM.post = false;
+    FILM.carrier = false; // scanlines and the screen mask are not the drawing
     FILM.renderFrame(T);
     FILM.post = true;
+    FILM.carrier = true;
     const c = FILM.canvas, W = c.width, H = c.height, S = W / FILM.W;
     const d = FILM.ctx.getImageData(0, 0, W, H).data;
     const lum = (x, y) => { const k = (y * W + x) * 4; return 0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2]; };
