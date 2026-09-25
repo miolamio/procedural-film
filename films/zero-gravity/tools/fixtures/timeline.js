@@ -2,7 +2,7 @@
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 46,
+  duration: 48,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -32,6 +32,8 @@ FILM.TIMELINE = {
     { id: 'fx-negative-inv', file: '22-fx-negative.js', start: 43, end: 44, mode: 'schematic', grade: { invert: 1 }, brief: 'The same plate inverted: plate B of the negative theme.' },
     { id: 'fx-phosphor', file: '23-fx-phosphor.js', start: 44, end: 45, mode: 'schematic', carrier: { kind: 'crt' }, brief: 'Phosphor theme: a terminal typing in the pixel font, a sprite, an oscilloscope, on the crt carrier.' },
     { id: 'fx-phosphor-on', file: '23-fx-phosphor.js', start: 45, end: 46, mode: 'schematic', carrier: { kind: 'crt' }, transitionIn: { kind: 'crtoff', dur: 0.5 }, brief: 'The tube switches off to a line and a dot, and the next picture opens out of a line.' },
+    { id: 'fx-shards', file: '24-fx-shards.js', start: 46, end: 47, mode: 'schematic', brief: 'Shards theme: a Voronoi field of flat shards parting on the beat, a lit box among them.' },
+    { id: 'fx-polygon', file: '24-fx-shards.js', start: 47, end: 48, mode: 'schematic', transitionIn: { kind: 'shatter', dur: 0.75, x: 540, y: 910, seed: 3 }, brief: 'The field shatters from the box into a flight down a polygon tunnel.' },
   ],
   cues: [
     { t: 0, kind: 'open' },

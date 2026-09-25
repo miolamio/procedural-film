@@ -567,13 +567,13 @@
   }
 
   // Same p the picture uses, so the grade tracks the dissolve.
-  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash, morph and crtoff step by interior frame.
+  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash, morph, crtoff and shatter step by interior frame.
   function transitionMix(tr, inT) {
     const k = Math.max(0, inT * FILM.FPS);
     const n = tr.dur * FILM.FPS;
     if (!(n > 0)) return 1;
     if (tr.kind === 'flash') return clamp01(k / n);
-    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff') {
+    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff' || tr.kind === 'shatter') {
       return clamp01(k / Math.max(1, interiorFrames(tr.dur)));
     }
     return easeInOutCubic(clamp01((k + 1) / (n + 1)));
@@ -1205,8 +1205,91 @@
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  // shatter: the outgoing picture cracks from an impact point into Voronoi pieces (lib.voronoi)
+  // that fly out, turn, fall and fade, uncovering the incoming picture beneath. Pieces nearer
+  // the impact leave first. Each piece redraws only its own box of the outgoing frame.
+  //   { kind: 'shatter', dur, x, y (impact, frame px; default the centre), pieces 28, seed 1, color }
+  // color is the crack and edge colour, a pal name (default white).
+  function shatterComposite(ctx, A, B, tr, p, w, h) {
+    const lib = FILM.lib;
+    if (!lib || typeof lib.voronoi !== 'function') {
+      FILM.errors.push({ T: frameT, message: 'shatter transition: lib.voronoi is not available' });
+      ctx.drawImage(B, 0, 0);
+      return;
+    }
+    const W = FILM.W, H = FILM.H;
+    const Sx = w / W, Sy = h / H;
+    const ix = tr.x != null ? +tr.x : W / 2;
+    const iy = tr.y != null ? +tr.y : H / 2;
+    const n = Math.max(6, Math.min(80, (tr.pieces | 0) || 28));
+    const seed = (tr.seed | 0) || 1;
+    const maxD = Math.hypot(Math.max(ix, W - ix), Math.max(iy, H - iy)) || 1;
+    const sites = [];
+    for (let k = 0; k < n; k++) {
+      const r = maxD * Math.pow(ihash(k, 1, seed), 1.5);
+      const a = ihash(k, 2, seed) * Math.PI * 2;
+      sites.push([Math.min(W - 1, Math.max(1, ix + Math.cos(a) * r)), Math.min(H - 1, Math.max(1, iy + Math.sin(a) * r))]);
+    }
+    const cells = lib.voronoi(sites, [0, 0, W, H]);
+    const edge = palColor(tr.color) || '#ffffff';
+    ctx.drawImage(B, 0, 0);
+    for (let k = 0; k < cells.length; k++) {
+      const poly = cells[k].poly;
+      if (!poly || poly.length < 3) continue;
+      let cx = 0, cy = 0;
+      for (const q of poly) {
+        cx += q[0];
+        cy += q[1];
+      }
+      cx /= poly.length;
+      cy /= poly.length;
+      const dx = cx - ix, dy = cy - iy;
+      const d = Math.hypot(dx, dy);
+      const ux = d > 1 ? dx / d : Math.cos(ihash(k, 5, seed) * Math.PI * 2);
+      const uy = d > 1 ? dy / d : Math.sin(ihash(k, 5, seed) * Math.PI * 2);
+      const delay = 0.35 * (d / maxD);
+      const q = clamp01((p - delay) / (1 - delay));
+      const fly = q * (140 + 460 * ihash(k, 3, seed));
+      const fall = q * q * 900;
+      const turn = (ihash(k, 4, seed) - 0.5) * 3.2 * q;
+      const sc = 1 - 0.3 * q;
+      ctx.save();
+      ctx.globalAlpha = q < 0.7 ? 1 : 1 - (q - 0.7) / 0.3;
+      ctx.translate((cx + ux * fly) * Sx, (cy + uy * fly + fall) * Sy);
+      ctx.rotate(turn);
+      ctx.scale(sc, sc);
+      ctx.translate(-cx * Sx, -cy * Sy);
+      ctx.beginPath();
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < poly.length; i++) {
+        const px = poly[i][0] * Sx, py = poly[i][1] * Sy;
+        if (i) ctx.lineTo(px, py);
+        else ctx.moveTo(px, py);
+        if (px < x0) x0 = px;
+        if (px > x1) x1 = px;
+        if (py < y0) y0 = py;
+        if (py > y1) y1 = py;
+      }
+      ctx.closePath();
+      ctx.save();
+      ctx.clip();
+      x0 = Math.max(0, Math.floor(x0) - 1);
+      y0 = Math.max(0, Math.floor(y0) - 1);
+      x1 = Math.min(w, Math.ceil(x1) + 1);
+      y1 = Math.min(h, Math.ceil(y1) + 1);
+      if (x1 > x0 && y1 > y0) ctx.drawImage(A, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+      ctx.restore();
+      ctx.globalAlpha *= Math.min(1, p * 10) * 0.85;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = Math.max(1, 1.5 * Sx);
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   // fade, iris and wipe: A is the outgoing shot, B the incoming one, p in (0, 1) exclusive.
-  // whip, inkwash, morph and crtoff include p = 0 (outgoing alone). Their p stays below 1 inside the window.
+  // whip, inkwash, morph, crtoff and shatter include p = 0 (outgoing alone). Their p stays below 1 inside the window.
   function composite(ctx, A, B, tr, p) {
     resetCtx(ctx, true);
     const w = ctx.canvas.width;
@@ -1215,6 +1298,7 @@
     else if (tr.kind === 'inkwash') inkwashComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'morph') morphComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'crtoff') crtoffComposite(ctx, A, B, tr, p, w, h);
+    else if (tr.kind === 'shatter') shatterComposite(ctx, A, B, tr, p, w, h);
     else {
       const e = easeInOutCubic(p);
       ctx.drawImage(A, 0, 0);
@@ -1252,7 +1336,7 @@
     resetCtx(ctx, false);
   }
 
-  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1, crtoff: 1 };
+  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1, crtoff: 1, shatter: 1 };
   FILM.TRANSITION_KINDS = Object.keys(KINDS);
 
   /** Draws global time T (seconds) to FILM.canvas, carrier included. Returns the active shot entry. */
@@ -1312,9 +1396,9 @@
     }
     // fade, iris and wipe: frame 0 is already 1/(n+1) of the way in, the last transition frame
     // (n-1) is n/(n+1), so neither shot's own frame is repeated.
-    // whip, inkwash, morph and crtoff: p = 0 on the first frame (outgoing shot alone). p stays below 1
+    // whip, inkwash, morph, crtoff and shatter: p = 0 on the first frame (outgoing shot alone). p stays below 1
     // until dur has elapsed, and that next frame is the incoming shot alone.
-    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff';
+    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff' || tr.kind === 'shatter';
     const p = fresh
       ? clamp01(k / Math.max(1, interiorFrames(tr.dur)))
       : clamp01((k + 1) / (n + 1));
@@ -7390,11 +7474,14 @@
       ay: at[1],
       scale: o && o.scale != null ? +o.scale : 1,
       persp,
+      sx: o && o.shift ? +o.shift[0] || 0 : 0,
+      sy: o && o.shift ? +o.shift[1] || 0 : 0,
+      sz: o && o.shift ? +o.shift[2] || 0 : 0,
     };
   }
 
   function projectView(p, v) {
-    const r = rotateYUp(+p[0] || 0, +p[1] || 0, +p[2] || 0, v.rx, v.ry, v.rz);
+    const r = rotateYUp((+p[0] || 0) + v.sx, (+p[1] || 0) + v.sy, (+p[2] || 0) + v.sz, v.rx, v.ry, v.rz);
     let m = 1;
     if (v.persp) {
       const d = v.persp - r[2];
@@ -7410,14 +7497,15 @@
    *   at [W/2, H/2], scale 1 (px per mesh unit), rot [rx, ry, rz] radians,
    *   persp 0 (orthographic) or a focal length in mesh units. The camera sits
    *   at z = persp looking toward −Z, so a nearer point (larger z) draws larger.
+   *   shift [0, 0, 0] moves the mesh before it turns (a camera flying down a tunnel shifts +z).
    */
   function project3d(p, o) {
     return projectView(p || [0, 0, 0], viewOf(o));
   }
   lib.project3d = project3d;
 
-  function mesh(verts, edges) {
-    return { verts, edges };
+  function mesh(verts, edges, faces) {
+    return faces ? { verts, edges, faces } : { verts, edges };
   }
 
   /** box(w=2, h=2, d=2) : cuboid centred on the origin. box() is the cube (±1, ±1, ±1). */
@@ -7432,7 +7520,8 @@
       [4, 5], [5, 6], [6, 7], [7, 4],
       [0, 4], [1, 5], [2, 6], [3, 7],
     ];
-    return mesh(verts, edges);
+    const faces = [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]];
+    return mesh(verts, edges, faces);
   }
 
   /** sphere(lat=8, lon=12, radius=1) : latitude stacks and longitude slices, poles shared. */
@@ -7473,6 +7562,7 @@
     seg = Math.max(3, seg | 0);
     const verts = [];
     const edges = [];
+    const faces = [];
     const hy = height / 2;
     for (let j = 0; j < seg; j++) {
       const a = (j / seg) * TAU;
@@ -7485,8 +7575,9 @@
       const top = j * 2;
       const bot = top + 1;
       edges.push([top, j2 * 2], [bot, j2 * 2 + 1], [top, bot]);
+      faces.push([top, j2 * 2, j2 * 2 + 1, bot]);
     }
-    return mesh(verts, edges);
+    return mesh(verts, edges, faces);
   }
 
   /** torus(major=16, minor=8, R=1, r=0.35) : tube of radius r around a circle of radius R in the XZ plane. */
@@ -7578,7 +7669,40 @@
     return mesh(verts, out);
   }
 
-  const mesh3d = { box, sphere, cylinder, torus, helix, fromPoints };
+  /**
+   * tunnel(seg=8, rings=12, radius=1, length=12) : a polygonal tube from z = 0 down to z = -length,
+   * flat side at the bottom, with faces. mesh.ringStep is the distance between rings: shift the
+   * mesh by (travel % ringStep) along +z and the flight loops without a seam.
+   */
+  function tunnel(seg = 8, rings = 12, radius = 1, length = 12) {
+    seg = Math.max(3, seg | 0);
+    rings = Math.max(2, rings | 0);
+    const step = length / (rings - 1);
+    const verts = [];
+    const edges = [];
+    const faces = [];
+    const id = (k, j) => k * seg + (j % seg);
+    for (let k = 0; k < rings; k++) {
+      for (let j = 0; j < seg; j++) {
+        const a = ((j + 0.5) / seg) * TAU + Math.PI / 2;
+        verts.push([Math.cos(a) * radius, Math.sin(a) * radius, -k * step]);
+      }
+    }
+    for (let k = 0; k < rings; k++) {
+      for (let j = 0; j < seg; j++) {
+        edges.push([id(k, j), id(k, j + 1)]);
+        if (k < rings - 1) {
+          edges.push([id(k, j), id(k + 1, j)]);
+          faces.push([id(k, j), id(k, j + 1), id(k + 1, j + 1), id(k + 1, j)]);
+        }
+      }
+    }
+    const m = mesh(verts, edges, faces);
+    m.ringStep = step;
+    return m;
+  }
+
+  const mesh3d = { box, sphere, cylinder, torus, helix, fromPoints, tunnel };
   for (const key of Object.keys(mesh3d)) Object.freeze(mesh3d[key]);
   lib.mesh3d = Object.freeze(mesh3d);
 
@@ -7665,6 +7789,103 @@
     return strokes;
   }
   lib.wire3d = wire3d;
+
+  /**
+   * faces3d(ctx, mesh, opts) : fill the faces of a mesh that has them (box, cylinder, tunnel),
+   * far to near, each a flat tone from one light and a depth fog. Same view options as wire3d,
+   * plus shift. Returns the number of faces drawn.
+   *   color   pal.navyLight   a colour, or fill(i) returning one per face
+   *   dark    '#000000'       the unlit tone
+   *   light   [-0.4, 0.6, 1]  toward the light, in view space; faces are lit on both sides
+   *   ambient 0.35
+   *   fog 0 (0..1)   fogColor pal.navyDeep   far faces fade toward fogColor
+   *   stroke null    edge colour; width 1   strokeAlpha 1
+   *   near 0.1       with persp, faces closer to the camera than this are dropped (mesh units)
+   */
+  function faces3d(ctx, meshIn, o) {
+    o = o || {};
+    const verts = (meshIn && meshIn.verts) || [];
+    const faces = (meshIn && meshIn.faces) || [];
+    if (!verts.length || !faces.length) return 0;
+    const v = viewOf(o);
+    const rot = new Array(verts.length);
+    const proj = new Array(verts.length);
+    for (let i = 0; i < verts.length; i++) {
+      const p = verts[i];
+      rot[i] = rotateYUp((+p[0] || 0) + v.sx, (+p[1] || 0) + v.sy, (+p[2] || 0) + v.sz, v.rx, v.ry, v.rz);
+      proj[i] = projectView(p, v);
+    }
+    const near = o.near != null ? +o.near : 0.1;
+    const L0 = o.light || [-0.4, 0.6, 1];
+    const Ll = Math.hypot(L0[0], L0[1], L0[2]) || 1;
+    const L = [L0[0] / Ll, L0[1] / Ll, L0[2] / Ll];
+    const ambient = o.ambient != null ? o.ambient : 0.35;
+    const fog = o.fog > 0 ? Math.min(1, o.fog) : 0;
+    const dark = parseColor(o.dark || '#000000');
+    const fogC = parseColor(o.fogColor || pal.navyDeep);
+    const list = [];
+    let zMin = Infinity, zMax = -Infinity;
+    for (let i = 0; i < faces.length; i++) {
+      const f = faces[i];
+      if (!f || f.length < 3) continue;
+      let z = 0;
+      let cut = false;
+      for (let k = 0; k < f.length; k++) {
+        const r = rot[f[k]];
+        if (!r) {
+          cut = true;
+          break;
+        }
+        if (v.persp && v.persp - r[2] < near) cut = true;
+        z += r[2];
+      }
+      if (cut) continue;
+      z /= f.length;
+      if (z < zMin) zMin = z;
+      if (z > zMax) zMax = z;
+      list.push({ i, z });
+    }
+    list.sort((a, b) => (a.z - b.z) || (a.i - b.i));
+    const zSpan = zMax - zMin;
+    ctx.save();
+    const width = o.width != null ? o.width : 1;
+    for (let n = 0; n < list.length; n++) {
+      const { i, z } = list[n];
+      const f = faces[i];
+      const a = rot[f[0]], b = rot[f[1]], c = rot[f[2]];
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      const lit = ambient + (1 - ambient) * Math.abs((nx * L[0] + ny * L[1] + nz * L[2]) / nl);
+      const base = parseColor(typeof o.color === 'function' ? o.color(i) : o.color || pal.navyLight);
+      const far = fog * (zSpan > 0 ? (zMax - z) / zSpan : 0);
+      const ch = (k) => {
+        const s = dark[k] + (base[k] - dark[k]) * lit;
+        return Math.round(s + (fogC[k] - s) * far);
+      };
+      ctx.beginPath();
+      for (let k = 0; k < f.length; k++) {
+        const q = proj[f[k]];
+        if (k) ctx.lineTo(q[0], q[1]);
+        else ctx.moveTo(q[0], q[1]);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgb(' + ch(0) + ',' + ch(1) + ',' + ch(2) + ')';
+      ctx.fill();
+      if (o.stroke) {
+        ctx.globalAlpha = (o.strokeAlpha != null ? o.strokeAlpha : 1) * (1 - far);
+        ctx.strokeStyle = o.stroke;
+        ctx.lineWidth = width;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+    ctx.restore();
+    return list.length;
+  }
+  lib.faces3d = faces3d;
 
   // ===========================================================================
   // Maps and plots

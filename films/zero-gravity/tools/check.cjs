@@ -842,7 +842,7 @@ async function main() {
       if (offGrid(s.start)) tlWarnings.push(`shot '${s.id}' starts at ${s.start}s, off the 16th-note grid at ${TL.bpm} bpm`);
       const tr = s.transitionIn;
       if (tr) {
-        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph', 'crtoff'];
+        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph', 'crtoff', 'shatter'];
         if (!kinds.includes(tr.kind)) tlProblems.push(`shot '${s.id}' transitionIn kind '${tr.kind}' is not one of ${kinds.join(', ')}`);
         if (!(tr.dur >= 0) || tr.dur > s.dur) tlProblems.push(`shot '${s.id}' transitionIn dur ${tr.dur} must be between 0 and the shot length ${s.dur}`);
         if (tr.kind === 'whip' && !['left', 'right', 'up', 'down'].includes(tr.dir)) {

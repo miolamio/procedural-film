@@ -6028,14 +6028,11 @@
       ay: at[1],
       scale: o && o.scale != null ? +o.scale : 1,
       persp,
-      sx: o && o.shift ? +o.shift[0] || 0 : 0,
-      sy: o && o.shift ? +o.shift[1] || 0 : 0,
-      sz: o && o.shift ? +o.shift[2] || 0 : 0,
     };
   }
 
   function projectView(p, v) {
-    const r = rotateYUp((+p[0] || 0) + v.sx, (+p[1] || 0) + v.sy, (+p[2] || 0) + v.sz, v.rx, v.ry, v.rz);
+    const r = rotateYUp(+p[0] || 0, +p[1] || 0, +p[2] || 0, v.rx, v.ry, v.rz);
     let m = 1;
     if (v.persp) {
       const d = v.persp - r[2];
@@ -6051,15 +6048,14 @@
    *   at [W/2, H/2], scale 1 (px per mesh unit), rot [rx, ry, rz] radians,
    *   persp 0 (orthographic) or a focal length in mesh units. The camera sits
    *   at z = persp looking toward −Z, so a nearer point (larger z) draws larger.
-   *   shift [0, 0, 0] moves the mesh before it turns (a camera flying down a tunnel shifts +z).
    */
   function project3d(p, o) {
     return projectView(p || [0, 0, 0], viewOf(o));
   }
   lib.project3d = project3d;
 
-  function mesh(verts, edges, faces) {
-    return faces ? { verts, edges, faces } : { verts, edges };
+  function mesh(verts, edges) {
+    return { verts, edges };
   }
 
   /** box(w=2, h=2, d=2) : cuboid centred on the origin. box() is the cube (±1, ±1, ±1). */
@@ -6074,8 +6070,7 @@
       [4, 5], [5, 6], [6, 7], [7, 4],
       [0, 4], [1, 5], [2, 6], [3, 7],
     ];
-    const faces = [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]];
-    return mesh(verts, edges, faces);
+    return mesh(verts, edges);
   }
 
   /** sphere(lat=8, lon=12, radius=1) : latitude stacks and longitude slices, poles shared. */
@@ -6116,7 +6111,6 @@
     seg = Math.max(3, seg | 0);
     const verts = [];
     const edges = [];
-    const faces = [];
     const hy = height / 2;
     for (let j = 0; j < seg; j++) {
       const a = (j / seg) * TAU;
@@ -6129,9 +6123,8 @@
       const top = j * 2;
       const bot = top + 1;
       edges.push([top, j2 * 2], [bot, j2 * 2 + 1], [top, bot]);
-      faces.push([top, j2 * 2, j2 * 2 + 1, bot]);
     }
-    return mesh(verts, edges, faces);
+    return mesh(verts, edges);
   }
 
   /** torus(major=16, minor=8, R=1, r=0.35) : tube of radius r around a circle of radius R in the XZ plane. */
@@ -6223,40 +6216,7 @@
     return mesh(verts, out);
   }
 
-  /**
-   * tunnel(seg=8, rings=12, radius=1, length=12) : a polygonal tube from z = 0 down to z = -length,
-   * flat side at the bottom, with faces. mesh.ringStep is the distance between rings: shift the
-   * mesh by (travel % ringStep) along +z and the flight loops without a seam.
-   */
-  function tunnel(seg = 8, rings = 12, radius = 1, length = 12) {
-    seg = Math.max(3, seg | 0);
-    rings = Math.max(2, rings | 0);
-    const step = length / (rings - 1);
-    const verts = [];
-    const edges = [];
-    const faces = [];
-    const id = (k, j) => k * seg + (j % seg);
-    for (let k = 0; k < rings; k++) {
-      for (let j = 0; j < seg; j++) {
-        const a = ((j + 0.5) / seg) * TAU + Math.PI / 2;
-        verts.push([Math.cos(a) * radius, Math.sin(a) * radius, -k * step]);
-      }
-    }
-    for (let k = 0; k < rings; k++) {
-      for (let j = 0; j < seg; j++) {
-        edges.push([id(k, j), id(k, j + 1)]);
-        if (k < rings - 1) {
-          edges.push([id(k, j), id(k + 1, j)]);
-          faces.push([id(k, j), id(k, j + 1), id(k + 1, j + 1), id(k + 1, j)]);
-        }
-      }
-    }
-    const m = mesh(verts, edges, faces);
-    m.ringStep = step;
-    return m;
-  }
-
-  const mesh3d = { box, sphere, cylinder, torus, helix, fromPoints, tunnel };
+  const mesh3d = { box, sphere, cylinder, torus, helix, fromPoints };
   for (const key of Object.keys(mesh3d)) Object.freeze(mesh3d[key]);
   lib.mesh3d = Object.freeze(mesh3d);
 
@@ -6343,103 +6303,6 @@
     return strokes;
   }
   lib.wire3d = wire3d;
-
-  /**
-   * faces3d(ctx, mesh, opts) : fill the faces of a mesh that has them (box, cylinder, tunnel),
-   * far to near, each a flat tone from one light and a depth fog. Same view options as wire3d,
-   * plus shift. Returns the number of faces drawn.
-   *   color   pal.navyLight   a colour, or fill(i) returning one per face
-   *   dark    '#000000'       the unlit tone
-   *   light   [-0.4, 0.6, 1]  toward the light, in view space; faces are lit on both sides
-   *   ambient 0.35
-   *   fog 0 (0..1)   fogColor pal.navyDeep   far faces fade toward fogColor
-   *   stroke null    edge colour; width 1   strokeAlpha 1
-   *   near 0.1       with persp, faces closer to the camera than this are dropped (mesh units)
-   */
-  function faces3d(ctx, meshIn, o) {
-    o = o || {};
-    const verts = (meshIn && meshIn.verts) || [];
-    const faces = (meshIn && meshIn.faces) || [];
-    if (!verts.length || !faces.length) return 0;
-    const v = viewOf(o);
-    const rot = new Array(verts.length);
-    const proj = new Array(verts.length);
-    for (let i = 0; i < verts.length; i++) {
-      const p = verts[i];
-      rot[i] = rotateYUp((+p[0] || 0) + v.sx, (+p[1] || 0) + v.sy, (+p[2] || 0) + v.sz, v.rx, v.ry, v.rz);
-      proj[i] = projectView(p, v);
-    }
-    const near = o.near != null ? +o.near : 0.1;
-    const L0 = o.light || [-0.4, 0.6, 1];
-    const Ll = Math.hypot(L0[0], L0[1], L0[2]) || 1;
-    const L = [L0[0] / Ll, L0[1] / Ll, L0[2] / Ll];
-    const ambient = o.ambient != null ? o.ambient : 0.35;
-    const fog = o.fog > 0 ? Math.min(1, o.fog) : 0;
-    const dark = parseColor(o.dark || '#000000');
-    const fogC = parseColor(o.fogColor || pal.navyDeep);
-    const list = [];
-    let zMin = Infinity, zMax = -Infinity;
-    for (let i = 0; i < faces.length; i++) {
-      const f = faces[i];
-      if (!f || f.length < 3) continue;
-      let z = 0;
-      let cut = false;
-      for (let k = 0; k < f.length; k++) {
-        const r = rot[f[k]];
-        if (!r) {
-          cut = true;
-          break;
-        }
-        if (v.persp && v.persp - r[2] < near) cut = true;
-        z += r[2];
-      }
-      if (cut) continue;
-      z /= f.length;
-      if (z < zMin) zMin = z;
-      if (z > zMax) zMax = z;
-      list.push({ i, z });
-    }
-    list.sort((a, b) => (a.z - b.z) || (a.i - b.i));
-    const zSpan = zMax - zMin;
-    ctx.save();
-    const width = o.width != null ? o.width : 1;
-    for (let n = 0; n < list.length; n++) {
-      const { i, z } = list[n];
-      const f = faces[i];
-      const a = rot[f[0]], b = rot[f[1]], c = rot[f[2]];
-      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-      const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-      const nl = Math.hypot(nx, ny, nz) || 1;
-      const lit = ambient + (1 - ambient) * Math.abs((nx * L[0] + ny * L[1] + nz * L[2]) / nl);
-      const base = parseColor(typeof o.color === 'function' ? o.color(i) : o.color || pal.navyLight);
-      const far = fog * (zSpan > 0 ? (zMax - z) / zSpan : 0);
-      const ch = (k) => {
-        const s = dark[k] + (base[k] - dark[k]) * lit;
-        return Math.round(s + (fogC[k] - s) * far);
-      };
-      ctx.beginPath();
-      for (let k = 0; k < f.length; k++) {
-        const q = proj[f[k]];
-        if (k) ctx.lineTo(q[0], q[1]);
-        else ctx.moveTo(q[0], q[1]);
-      }
-      ctx.closePath();
-      ctx.fillStyle = 'rgb(' + ch(0) + ',' + ch(1) + ',' + ch(2) + ')';
-      ctx.fill();
-      if (o.stroke) {
-        ctx.globalAlpha = (o.strokeAlpha != null ? o.strokeAlpha : 1) * (1 - far);
-        ctx.strokeStyle = o.stroke;
-        ctx.lineWidth = width;
-        ctx.lineJoin = 'round';
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
-    }
-    ctx.restore();
-    return list.length;
-  }
-  lib.faces3d = faces3d;
 
   // ===========================================================================
   // Maps and plots

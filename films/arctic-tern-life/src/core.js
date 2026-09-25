@@ -556,13 +556,13 @@
   }
 
   // Same p the picture uses, so the grade tracks the dissolve.
-  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash, morph and crtoff step by interior frame.
+  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash, morph, crtoff and shatter step by interior frame.
   function transitionMix(tr, inT) {
     const k = Math.max(0, inT * FILM.FPS);
     const n = tr.dur * FILM.FPS;
     if (!(n > 0)) return 1;
     if (tr.kind === 'flash') return clamp01(k / n);
-    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff') {
+    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff' || tr.kind === 'shatter') {
       return clamp01(k / Math.max(1, interiorFrames(tr.dur)));
     }
     return easeInOutCubic(clamp01((k + 1) / (n + 1)));
@@ -1194,8 +1194,91 @@
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  // shatter: the outgoing picture cracks from an impact point into Voronoi pieces (lib.voronoi)
+  // that fly out, turn, fall and fade, uncovering the incoming picture beneath. Pieces nearer
+  // the impact leave first. Each piece redraws only its own box of the outgoing frame.
+  //   { kind: 'shatter', dur, x, y (impact, frame px; default the centre), pieces 28, seed 1, color }
+  // color is the crack and edge colour, a pal name (default white).
+  function shatterComposite(ctx, A, B, tr, p, w, h) {
+    const lib = FILM.lib;
+    if (!lib || typeof lib.voronoi !== 'function') {
+      FILM.errors.push({ T: frameT, message: 'shatter transition: lib.voronoi is not available' });
+      ctx.drawImage(B, 0, 0);
+      return;
+    }
+    const W = FILM.W, H = FILM.H;
+    const Sx = w / W, Sy = h / H;
+    const ix = tr.x != null ? +tr.x : W / 2;
+    const iy = tr.y != null ? +tr.y : H / 2;
+    const n = Math.max(6, Math.min(80, (tr.pieces | 0) || 28));
+    const seed = (tr.seed | 0) || 1;
+    const maxD = Math.hypot(Math.max(ix, W - ix), Math.max(iy, H - iy)) || 1;
+    const sites = [];
+    for (let k = 0; k < n; k++) {
+      const r = maxD * Math.pow(ihash(k, 1, seed), 1.5);
+      const a = ihash(k, 2, seed) * Math.PI * 2;
+      sites.push([Math.min(W - 1, Math.max(1, ix + Math.cos(a) * r)), Math.min(H - 1, Math.max(1, iy + Math.sin(a) * r))]);
+    }
+    const cells = lib.voronoi(sites, [0, 0, W, H]);
+    const edge = palColor(tr.color) || '#ffffff';
+    ctx.drawImage(B, 0, 0);
+    for (let k = 0; k < cells.length; k++) {
+      const poly = cells[k].poly;
+      if (!poly || poly.length < 3) continue;
+      let cx = 0, cy = 0;
+      for (const q of poly) {
+        cx += q[0];
+        cy += q[1];
+      }
+      cx /= poly.length;
+      cy /= poly.length;
+      const dx = cx - ix, dy = cy - iy;
+      const d = Math.hypot(dx, dy);
+      const ux = d > 1 ? dx / d : Math.cos(ihash(k, 5, seed) * Math.PI * 2);
+      const uy = d > 1 ? dy / d : Math.sin(ihash(k, 5, seed) * Math.PI * 2);
+      const delay = 0.35 * (d / maxD);
+      const q = clamp01((p - delay) / (1 - delay));
+      const fly = q * (140 + 460 * ihash(k, 3, seed));
+      const fall = q * q * 900;
+      const turn = (ihash(k, 4, seed) - 0.5) * 3.2 * q;
+      const sc = 1 - 0.3 * q;
+      ctx.save();
+      ctx.globalAlpha = q < 0.7 ? 1 : 1 - (q - 0.7) / 0.3;
+      ctx.translate((cx + ux * fly) * Sx, (cy + uy * fly + fall) * Sy);
+      ctx.rotate(turn);
+      ctx.scale(sc, sc);
+      ctx.translate(-cx * Sx, -cy * Sy);
+      ctx.beginPath();
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < poly.length; i++) {
+        const px = poly[i][0] * Sx, py = poly[i][1] * Sy;
+        if (i) ctx.lineTo(px, py);
+        else ctx.moveTo(px, py);
+        if (px < x0) x0 = px;
+        if (px > x1) x1 = px;
+        if (py < y0) y0 = py;
+        if (py > y1) y1 = py;
+      }
+      ctx.closePath();
+      ctx.save();
+      ctx.clip();
+      x0 = Math.max(0, Math.floor(x0) - 1);
+      y0 = Math.max(0, Math.floor(y0) - 1);
+      x1 = Math.min(w, Math.ceil(x1) + 1);
+      y1 = Math.min(h, Math.ceil(y1) + 1);
+      if (x1 > x0 && y1 > y0) ctx.drawImage(A, x0, y0, x1 - x0, y1 - y0, x0, y0, x1 - x0, y1 - y0);
+      ctx.restore();
+      ctx.globalAlpha *= Math.min(1, p * 10) * 0.85;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = Math.max(1, 1.5 * Sx);
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   // fade, iris and wipe: A is the outgoing shot, B the incoming one, p in (0, 1) exclusive.
-  // whip, inkwash, morph and crtoff include p = 0 (outgoing alone). Their p stays below 1 inside the window.
+  // whip, inkwash, morph, crtoff and shatter include p = 0 (outgoing alone). Their p stays below 1 inside the window.
   function composite(ctx, A, B, tr, p) {
     resetCtx(ctx, true);
     const w = ctx.canvas.width;
@@ -1204,6 +1287,7 @@
     else if (tr.kind === 'inkwash') inkwashComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'morph') morphComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'crtoff') crtoffComposite(ctx, A, B, tr, p, w, h);
+    else if (tr.kind === 'shatter') shatterComposite(ctx, A, B, tr, p, w, h);
     else {
       const e = easeInOutCubic(p);
       ctx.drawImage(A, 0, 0);
@@ -1241,7 +1325,7 @@
     resetCtx(ctx, false);
   }
 
-  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1, crtoff: 1 };
+  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1, crtoff: 1, shatter: 1 };
   FILM.TRANSITION_KINDS = Object.keys(KINDS);
 
   /** Draws global time T (seconds) to FILM.canvas, carrier included. Returns the active shot entry. */
@@ -1301,9 +1385,9 @@
     }
     // fade, iris and wipe: frame 0 is already 1/(n+1) of the way in, the last transition frame
     // (n-1) is n/(n+1), so neither shot's own frame is repeated.
-    // whip, inkwash, morph and crtoff: p = 0 on the first frame (outgoing shot alone). p stays below 1
+    // whip, inkwash, morph, crtoff and shatter: p = 0 on the first frame (outgoing shot alone). p stays below 1
     // until dur has elapsed, and that next frame is the incoming shot alone.
-    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff';
+    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff' || tr.kind === 'shatter';
     const p = fresh
       ? clamp01(k / Math.max(1, interiorFrames(tr.dur)))
       : clamp01((k + 1) / (n + 1));
