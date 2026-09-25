@@ -113,12 +113,15 @@ function rms(w, a, b) {
 
   if (args.bars) {
     console.log('\nper-bar RMS (dBFS) and per-beat-pair RMS:');
-    for (let b = 0; b < 16; b++) {
-      const a = b * 2;
-      const r = rms(w, a, a + 2);
-      const h1 = rms(w, a, a + 1), h2 = rms(w, a + 1, a + 2);
+    // bars at the film's own bpm, as many as the film has
+    const BAR = 240 / (tl.bpm > 0 ? tl.bpm : 120);
+    const nBars = Math.max(1, Math.ceil((tl.duration > 0 ? tl.duration : w.n / w.sr) / BAR - 1e-6));
+    for (let b = 0; b < nBars; b++) {
+      const a = b * BAR, e = a + BAR, m = a + BAR / 2;
+      const r = rms(w, a, e);
+      const h1 = rms(w, a, m), h2 = rms(w, m, e);
       const bar = '#'.repeat(Math.max(0, Math.round((r + 40) * 1.2)));
-      console.log(`bar ${String(b + 1).padStart(2)} ${String(a).padStart(2)}-${String(a + 2).padStart(2)} s  ${r.toFixed(1).padStart(6)}  [${h1.toFixed(1).padStart(6)} ${h2.toFixed(1).padStart(6)}]  ${bar}`);
+      console.log(`bar ${String(b + 1).padStart(2)} ${a.toFixed(2).padStart(5)}-${e.toFixed(2).padStart(5)} s  ${r.toFixed(1).padStart(6)}  [${h1.toFixed(1).padStart(6)} ${h2.toFixed(1).padStart(6)}]  ${bar}`);
     }
   }
 
