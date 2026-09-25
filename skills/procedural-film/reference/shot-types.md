@@ -296,7 +296,7 @@ One drawing, and a look that belongs to the act: warmer, faded, aged, vignetted,
 - Duration: the grade holds for whole bars and changes on an act boundary. The fixture steps once per beat (0.5 s) only so each knob is visible
 - Plate: paper or blueprint, whichever the act is
 - Camera: the shots' own cameras. The grade is not a transform
-- Leans on: `paper`, `inkPath`, `blueprint`. The field is `grade` with `warmth` (−1..1), `fade`, `vignette`, `paperAge`, `tintAmount` (0..1) and `tint` (a `pal` name). No lib call applies it
+- Leans on: `paper`, `inkPath`, `blueprint`. The field is `grade` with `invert`, `warmth` (−1..1), `fade`, `vignette`, `paperAge`, `tintAmount` (0..1) and `tint` (a `pal` name). No lib call applies it. `invert` 1 is the exact negative of the frame (plate B of the `negative` theme); a cut into or out of it is one full-frame flash for check 9
 - Mistake: baking the warmth into the scene fills. `core` grades again, and across `transitionIn` it already interpolates from the outgoing grade to the incoming one
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/21-fx-grade.js`
 
@@ -332,3 +332,25 @@ A locked field of cells — scales in shifted rows, or cracked ground — comple
 - Leans on: `voronoi`, `cells`, `paper`, `rng`, `hash`
 - Mistake: rebuilding the sites from time, or from `Math.random`. `voronoi` is cached by the sites, the clip and `relax` (0..3). `cells` draws them (`inset`, `round`, `fill`, `stroke`)
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/11-fx-cells.js`
+
+## 32. Constellation
+
+A figure made of stars: seeded nodes that hold their places, thin lit edges drawing on node to node, and a glowing contour figure standing among them. The `negative` theme's signature plate; a cut to the same frame under `grade: { invert: 1 }` is its plate B.
+
+- Duration: 2.0 to 4.0 s. One edge every 8th to 16th; the figure is there from frame 0
+- Plate: a dark plate (`void` on the negative theme, `navyDeep` in the fixture)
+- Camera: locked at zoom 1
+- Leans on: `glow`, `glowFigure`, `glowDot` (`rays: 0`), `rng`, `hash`
+- Mistake: `shadowBlur` or `ctx.filter` for the halo — both blow the frame budget (check 6); `glow` strokes the halo instead. Moving a node once it is lit. Edges timed from the shot's `t` when the constellation continues across a cut: time them from `info.T` so both sides agree. A figure with no knock-out, so edges run through its body (`glowFigure` fills a closed part with the plate first)
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/22-fx-negative.js`
+
+## 33. Blinking line icon
+
+A creature drawn as a flat line icon — constant-width round-cap lines, knock-out fills, lens pupils — that holds perfectly still and blinks. The blink is the whole performance.
+
+- Duration: any; the longer the hold, the more the blinks read. A 2-bar hold shows 3 to 5 blinks
+- Plate: dark, flat
+- Camera: locked
+- Leans on: `lineIcon` (parts `circle`, `arc`, `eye`, `line`, `teeth`, `path`), `blinkAt`, `hash`
+- Mistake: an in-between drawing or an eased eyelid — a blink is exactly 2 frames, eyes open or shut. Blinks on a regular period; `blinkAt(info.frame, seed)` spaces them 7 to 38 frames apart with pairs. Boil or glow on the icon: it is flat line. Copying a known character: build the creature's own parts
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/22-fx-negative.js`

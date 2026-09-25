@@ -68,18 +68,18 @@ Figures, shells and trails wobble on the 12 fps boil (`lib.boil(T)`), 0.6–1.2 
 ## 4. Tone
 
 - No hatching, no stipple fills, no gradients on forms. Tone comes from nested contours and from how many lines meet.
-- Glow is allowed on the accent, on constellation nodes and on point sources only: a halo stroke or `lib.glowDot` in `lighter` blend, never `shadowBlur` or `ctx.filter` on a full frame (check 6).
+- Glow is allowed on the accent, on constellation nodes, on glowing figures and on point sources only: `lib.glow` (a lit path), `lib.glowFigure` (a lit contour figure) or `lib.glowDot` (`rays: 0` for a star), all in `lighter` blend, never `shadowBlur` or `ctx.filter` on a full frame (check 6).
 - The plate: `void` base, a radial lift to `voidLift` around the subject, `voidEdge` in the corners. The engine's schematic noise sits on top at 55%: every shot is `mode: 'schematic', post: 0.55`.
 - Dust: about 140 motes, seeded, drifting at most 6 px/s, twinkling on the boil clock, keyed by global T so the field is the same in every shot.
 - A figure's contour is knocked out with `void` at 88% so paths, rings and trails pass behind it, not through it.
 
 ## 5. Void plate language
 
-- **Constellation.** A figure is a set of star nodes joined by thin edges. Edges draw on node to node (`outExpo`, 6 frames each) and may unlink; a node never moves off its place in the figure. A constellation needs 7 to 30 nodes to read, and one edge in five may be missing.
+- **Constellation** (shot-types recipe 32). A figure is a set of star nodes joined by thin edges. Edges draw on node to node (`outExpo`, 6 frames each) and may unlink; a node never moves off its place in the figure. A constellation needs 7 to 30 nodes to read, and one edge in five may be missing.
 - **Instrument.** Relationships are shown as an instrument: a centre glyph (ring r 6 px, cross ±16 px, dotted ring r 40 px), a dashed ellipse with ticks, faint guide ellipses and two long diagonals. As the relation weakens, the instrument dims, breaks and disappears.
 - Measurement is brackets and rules, never numbers. No text in any shot except the optional wordmark (section 9).
 - Depth is an ellipse seen at an angle (aspect about 0.56): what is on the near half is drawn 10% larger and brighter.
-- **Plan B — the negative.** The second plate is the same frame inverted: void turns to paper-white, light lines to black. It needs `grade: { invert: true }` (engine slice 2); until then a film on this theme runs on the void plate alone. An inverted plate lasts at least a beat, and a film switches between plates at most once per second (check 9 counts every switch as a full-frame flash).
+- **Plan B — the negative.** The second plate is the same frame inverted: void turns to paper-white, light lines to black. It is the timeline field `grade: { invert: 1 }` on the shot; the scene draws the void plate as usual. An inverted plate lasts at least a beat, and a film switches between plates at most once per second (check 9 counts every switch as a full-frame flash).
 
 ## 6. Overlays
 
@@ -90,7 +90,7 @@ At most one overlay per shot besides the permanent instrument: a heartbeat ring,
 ### 7.1 Weightless
 
 Positions move at a full 24 fps and glide: no on-twos stepping. Only contours boil, on the 12 fps clock.
-Characters hold still and blink: a blink is exactly 2 frames with no in-between, on an uneven schedule seeded from `lib.hash` (gaps of 7 to 38 frames, never a regular period).
+Characters hold still and blink: a blink is exactly 2 frames with no in-between, on an uneven schedule (gaps of 7 to 38 frames, never a regular period): `lib.blinkAt(info.frame, lib.hash(<name>))`. A line-icon character (`lib.lineIcon`, recipe 33) is flat line and does not boil; a glowing figure (`lib.glowFigure`) boils.
 
 ### 7.2 Timing
 

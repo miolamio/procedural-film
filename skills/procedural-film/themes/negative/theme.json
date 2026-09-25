@@ -1,18 +1,37 @@
 {
   "id": "negative",
   "name": "Negative / Constellation",
-  "status": "draft",
-  "needs": ["glow(path)", "grade.invert (plate B)", "lineIcon", "glowFigure", "recipe: constellation"],
-  "frame": { "width": 1920, "height": 1080 },
+  "status": "ready",
+  "frame": {
+    "width": 1920,
+    "height": 1080
+  },
   "plates": {
-    "A": { "name": "void", "mode": "schematic", "post": 0.55, "base": "void", "line": "line", "text": "lineSoft" },
-    "B": null
+    "A": {
+      "name": "void",
+      "mode": "schematic",
+      "post": 0.55,
+      "base": "void",
+      "line": "line",
+      "text": "lineSoft"
+    },
+    "B": {
+      "name": "negative",
+      "mode": "schematic",
+      "post": 0.55,
+      "grade": {
+        "invert": 1
+      },
+      "base": "void",
+      "line": "line",
+      "text": "lineSoft"
+    }
   },
   "axes": {
     "base": "near-black void with a soft radial lift and dark corners, dust motes",
     "line": "light contours, nested toward the core, 12 fps boil; exact curves for forces",
     "tone": "no hatching or fills; tone from nested contours; glow on accent and nodes only",
-    "planB": "the negative: the same frame inverted (needs grade.invert)",
+    "planB": "the negative: the same frame under grade { invert: 1 }",
     "motion": "weightless 24 fps glide, loops per shot, 2-frame blinks on an uneven schedule",
     "carrier": "fine schematic noise at 55% (core post)",
     "accent": "one warm accent on one thing only",
@@ -20,6 +39,18 @@
     "match": "figures persist across cuts; void-to-negative match cuts keep every pixel",
     "overlays": "one instrument overlay per shot: rings, ticks, brackets, rules"
   },
-  "recipes": [2, 7, 9, 11, 23, 25, 29, 30],
+  "recipes": [
+    2,
+    7,
+    9,
+    11,
+    23,
+    25,
+    28,
+    29,
+    30,
+    32,
+    33
+  ],
   "palette": "palette.js"
 }
