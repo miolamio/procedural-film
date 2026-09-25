@@ -1,0 +1,25 @@
+{
+  "id": "phosphor",
+  "name": "Phosphor / Terminal",
+  "status": "ready",
+  "frame": { "width": 1920, "height": 1080 },
+  "carrier": { "kind": "crt" },
+  "plates": {
+    "A": { "name": "terminal", "mode": "schematic", "post": 0.3, "base": "screen", "line": "phos", "text": "phosSoft" },
+    "B": { "name": "vector", "mode": "schematic", "post": 0.3, "base": "screen", "line": "phos", "text": "phosSoft" }
+  },
+  "axes": {
+    "base": "near-black green screen with a soft lift at the centre",
+    "line": "constant-width glowing vector strokes; pixel-grid sprites and text",
+    "tone": "no fills or hatching; brightness is the only tone: dim, lit, hot",
+    "planB": "the vector plate: oscilloscope traces and wireframes on the same screen",
+    "motion": "text types on the frame; traces sweep at 24 fps; sprites step on twos",
+    "carrier": "crt: scanlines, a rounded screen, a slow hum bar, faint flicker",
+    "accent": "amber, for one alert per act",
+    "font": "the built-in 5x7 pixel font only",
+    "match": "a trace or a sprite keeps its place across a cut; acts end on crtoff",
+    "overlays": "scales, graticules and readouts in the pixel font"
+  },
+  "recipes": [20, 25, 29, 30, 33, 34],
+  "palette": "palette.js"
+}

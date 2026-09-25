@@ -1,0 +1,11 @@
+    // Theme phosphor, art bible 2.1 (screen palette). Paste before the subject rows.
+    screen: '#020A04',
+    screenLift: '#06140A',
+    screenEdge: '#000200',
+    phos: '#7CFF9A',
+    phosHot: '#D8FFE0',
+    phosSoft: '#3FBF62',
+    phosDim: '#1C6B35',
+    phosFaint: '#0E3A1C',
+    amber: '#FFB347',
+    amberHot: '#FFE0A8',

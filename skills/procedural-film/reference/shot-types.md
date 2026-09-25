@@ -354,3 +354,15 @@ A creature drawn as a flat line icon — constant-width round-cap lines, knock-o
 - Leans on: `lineIcon` (parts `circle`, `arc`, `eye`, `line`, `teeth`, `path`), `blinkAt`, `hash`
 - Mistake: an in-between drawing or an eased eyelid — a blink is exactly 2 frames, eyes open or shut. Blinks on a regular period; `blinkAt(info.frame, seed)` spaces them 7 to 38 frames apart with pairs. Boil or glow on the icon: it is flat line. Copying a known character: build the creature's own parts
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/22-fx-negative.js`
+
+## 34. Terminal
+
+A locked screen that types: a log or a title appearing character by character in the pixel font, a block cursor blinking, a sprite or a trace beside it, the whole picture on the `crt` carrier. An act ends by switching the tube off (`crtoff`) into the next picture.
+
+- Duration: 2.0 to 4.0 s. Typing at 20 to 40 characters a second; a line ends on a beat
+- Plate: a dark screen (`screen` on the phosphor theme, `navyDeep` in the fixture)
+- Camera: locked
+- Leans on: `pixelText` (`chars`, `cursor`), `sprite`, `glow`, `boil(T, 3)` for the cursor; timeline `carrier: { kind: 'crt' }` and `transitionIn: { kind: 'crtoff', dur: 0.5 }`
+- Mistake: `lib.text` or a system monospace for terminal text — it renders differently on every machine. Drawing scanlines or a screen mask in the scene: the carrier draws them once, over transitions too. Typing from the shot's `t` when the text continues across a cut. A sprite copied from a known game: draw the film's own
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/23-fx-phosphor.js`
+

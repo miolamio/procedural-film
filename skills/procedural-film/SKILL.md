@@ -53,7 +53,7 @@ Pick a theme from `themes/INDEX.md`: `house` (paper and blueprint) unless the us
 - paste `themes/<id>/art-bible-1-9.md` into `docs/art-bible.md` as sections 1–9, verbatim — they are already decided;
 - copy `themes/<id>/theme.json` to `docs/theme.json` (the stub pass colours its stubs from it);
 - paste `themes/<id>/palette.js` between `// BEGIN 2.2` and `// END 2.2` in `src/lib.js`; the subject rows follow it inside the same markers;
-- take the theme's `frame` as the timeline's `width` and `height` in step 5 unless the brief says otherwise.
+- take the theme's `frame` as the timeline's `width` and `height` in step 5 unless the brief says otherwise, and its `carrier`, if it has one, as the timeline's `carrier`.
 
 Only the marked subject sections change: 2.2 (the subject palette, every colour a named hex, mirrored between the 2.2 markers in `src/lib.js`) and 10 (the subject reference built from the captured sources — one subsection per drawable element with sizes, ratios, counts, poses, sequences and the few ratios a critic measures — ending in Mistakes to avoid, each mistake paired with the correct drawing).
 
