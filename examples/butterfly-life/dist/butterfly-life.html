@@ -45253,8 +45253,8 @@
     function step(n) {
       if (playing) pause();
       const f = Math.round(quant(T) * FPS) + n;
-      const f0 = Math.round(rangeStart * FPS);
-      const f1 = Math.round(rangeEnd * FPS) - 1;
+      const f0 = Math.ceil(rangeStart * FPS - 1e-6);
+      const f1 = Math.ceil(rangeEnd * FPS - 1e-6) - 1;
       T = Math.min(f1, Math.max(f0, f)) / FPS;
       draw(true);
     }

@@ -62,7 +62,7 @@ async function main() {
   const shot = shotId ? TL.shots.find((s) => s.id === shotId) : null;
   if (shotId && !shot) C.die(`no shot '${shotId}'. Ids: ${TL.shots.map((s) => s.id).join(', ')}`);
 
-  const lastFrameT = (a, b) => Math.max(a, (Math.round(b * FPS) - 1) / FPS);
+  const lastFrameT = (a, b) => Math.max(a, (Math.ceil(b * FPS - 1e-6) - 1) / FPS);
   let times = [];
   if (args.times) {
     times = String(args.times).split(',').map((x) => Number(x.trim())).filter((x) => isFinite(x));
@@ -77,7 +77,7 @@ async function main() {
     const n = Math.max(1, Math.floor(Number(args.samples)));
     const a = shot ? shot.start : 0;
     const b = lastFrameT(a, shot ? shot.end : TL.duration);
-    const fa = Math.round(a * FPS), fb = Math.round(b * FPS);
+    const fa = Math.ceil(a * FPS - 1e-6), fb = Math.round(b * FPS);
     for (let i = 0; i < n; i++) times.push((n === 1 ? Math.round((fa + fb) / 2) : Math.round(fa + ((fb - fa) * i) / (n - 1))) / FPS);
   } else if (shot) {
     times = [Math.round(((shot.start + lastFrameT(shot.start, shot.end)) / 2) * FPS) / FPS];

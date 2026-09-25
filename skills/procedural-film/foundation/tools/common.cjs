@@ -288,7 +288,7 @@ function validateGeo(geo, tl, opts) {
   const num = (v) => typeof v === 'number' && isFinite(v);
   const inFrame = (x, y) => x >= -W && x <= 2 * W && y >= -H && y <= 2 * H; // generous: shapes may run off-frame
   const firstT = (s) => s.start;
-  const lastT = (s) => Math.max(s.start, (Math.round(s.end * FPS) - 1) / FPS);
+  const lastT = (s) => Math.max(s.start, (Math.ceil(s.end * FPS - 1e-6) - 1) / FPS);
   for (const [id, g] of Object.entries(geo)) {
     const at = `GEO.${id}`;
     if (!g || typeof g !== 'object') {

@@ -1018,8 +1018,8 @@ async function main() {
       const firstTouch = [];
       let drawn = 0;
       for (const shot of SHOTS) {
-        const f0 = Math.round(shot.start * FPS);
-        const f1 = Math.round(shot.end * FPS) - 1;
+        const f0 = Math.ceil(shot.start * FPS - 1e-6);
+        const f1 = Math.ceil(shot.end * FPS - 1e-6) - 1;
         if (f1 < f0) continue;
         const fm = Math.floor((f0 + f1) / 2);
         for (const [label, f] of [['first', f0], ['middle', fm], ['last', f1]]) {
@@ -1042,8 +1042,8 @@ async function main() {
 
       // ---------------------------------------------------------------- 6 cost
       const total = Math.round(TL.duration * FPS);
-      const sweepFrom = shotId ? Math.round(SHOTS[0].start * FPS) : 0;
-      const sweepTo = shotId ? Math.round(SHOTS[0].end * FPS) : total; // exclusive
+      const sweepFrom = shotId ? Math.ceil(SHOTS[0].start * FPS - 1e-6) : 0;
+      const sweepTo = shotId ? Math.ceil(SHOTS[0].end * FPS - 1e-6) : total; // exclusive
       const sweep = [];
       for (let f = sweepFrom; f < sweepTo; f += sweepStep) sweep.push(f);
       if (sweep[sweep.length - 1] !== sweepTo - 1) sweep.push(sweepTo - 1);
@@ -1206,8 +1206,8 @@ async function main() {
           let framesN = 0;
           const details = [];
           for (const shot of SHOTS) {
-            const f0 = Math.round(shot.start * FPS);
-            const f1 = Math.round(shot.end * FPS) - 1;
+            const f0 = Math.ceil(shot.start * FPS - 1e-6);
+            const f1 = Math.ceil(shot.end * FPS - 1e-6) - 1;
             if (f1 < f0) continue;
             const fm = Math.floor((f0 + f1) / 2);
             let worst = null;
@@ -1250,8 +1250,8 @@ async function main() {
       } else {
         const tC = Date.now();
         try {
-          const from = shotId ? Math.round(SHOTS[0].start * FPS) : 0;
-          const to = shotId ? Math.max(from, Math.round(SHOTS[0].end * FPS)) : Math.max(0, Math.round(TL.duration * FPS));
+          const from = shotId ? Math.ceil(SHOTS[0].start * FPS - 1e-6) : 0;
+          const to = shotId ? Math.max(from, Math.ceil(SHOTS[0].end * FPS - 1e-6)) : Math.max(0, Math.round(TL.duration * FPS));
           const audit = await gatherCanvasAudit(loadable, {
             from,
             to,
@@ -1292,8 +1292,8 @@ async function main() {
       const candidates = [];
       let transitions = 0;
       for (const s of SHOTS) {
-        const f0 = Math.round(s.start * FPS);
-        const f1 = Math.round(s.end * FPS) - 1;
+        const f0 = Math.ceil(s.start * FPS - 1e-6);
+        const f1 = Math.ceil(s.end * FPS - 1e-6) - 1;
         if (f1 < f0) continue;
         candidates.push(f0, Math.floor((f0 + f1) / 2), f1);
         if (s.index > 0 && s.transitionIn && s.transitionIn.kind !== 'cut' && s.transitionIn.dur > 0) {
@@ -1407,8 +1407,8 @@ async function main() {
   } else {
     const tFlash = Date.now();
     try {
-      const from = shotId ? Math.round(SHOTS[0].start * FPS) : 0;
-      const to = shotId ? Math.max(from, Math.round(SHOTS[0].end * FPS)) : Math.max(0, Math.round(TL.duration * FPS));
+      const from = shotId ? Math.ceil(SHOTS[0].start * FPS - 1e-6) : 0;
+      const to = shotId ? Math.max(from, Math.ceil(SHOTS[0].end * FPS - 1e-6)) : Math.max(0, Math.round(TL.duration * FPS));
       const buf = await gatherFlashSamples(loadable, { from, to, shotId, fps: FPS, cols: 8, rows: 14, pagesOpened, frameWidth: TL.width, frameHeight: TL.height });
       const stats = analyzeFlashBlocks(buf, { from, cols: 8, rows: 14, fps: FPS });
       const sec = ((Date.now() - tFlash) / 1000).toFixed(1);
