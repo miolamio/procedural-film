@@ -373,7 +373,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Shot grade: after the drawing, before the grain. multiply / screen / overlay
+  // Shot grade: after the drawing, before the grain. difference / multiply / screen / overlay
   // and one radial gradient — never getImageData on the frame. A neutral grade
   // returns before touching the context, so an ungraded shot stays byte-identical.
   // ---------------------------------------------------------------------------
@@ -387,8 +387,8 @@
 
   function gradeActive(g) {
     if (!g || typeof g !== 'object') return false;
-    if (g._mixed) return !!(g.warmth || g.fade || g.vignette || g.paperAge || (g.tints && g.tints.length));
-    return !!(g.warmth || g.fade || g.vignette || g.paperAge || (g.tint && g.tintAmount));
+    if (g._mixed) return !!(g.invert || g.warmth || g.fade || g.vignette || g.paperAge || (g.tints && g.tints.length));
+    return !!(g.invert || g.warmth || g.fade || g.vignette || g.paperAge || (g.tint && g.tintAmount));
   }
 
   function tintEntries(g) {
@@ -410,6 +410,7 @@
   function lerpGrade(a, b, p) {
     if (!gradeActive(a) && !gradeActive(b)) return null;
     const q = 1 - p;
+    const invert = gradeNum(a, 'invert', 0, 1) * q + gradeNum(b, 'invert', 0, 1) * p;
     const warmth = gradeNum(a, 'warmth', -1, 1) * q + gradeNum(b, 'warmth', -1, 1) * p;
     const fade = gradeNum(a, 'fade', 0, 1) * q + gradeNum(b, 'fade', 0, 1) * p;
     const vignette = gradeNum(a, 'vignette', 0, 1) * q + gradeNum(b, 'vignette', 0, 1) * p;
@@ -419,8 +420,8 @@
     for (const t of tintEntries(b)) byName.set(t.name, (byName.get(t.name) || 0) + t.amount * p);
     const tints = [];
     for (const [name, amount] of byName) if (amount > 0) tints.push({ name, amount });
-    if (!warmth && !fade && !vignette && !paperAge && !tints.length) return null;
-    return { _mixed: true, warmth, fade, vignette, paperAge, tints };
+    if (!invert && !warmth && !fade && !vignette && !paperAge && !tints.length) return null;
+    return { _mixed: true, invert, warmth, fade, vignette, paperAge, tints };
   }
 
   // Same p the picture uses, so the grade tracks the dissolve.
@@ -557,12 +558,13 @@
   function applyGrade(ctx, grade) {
     if (!gradeActive(grade)) return;
     const mixed = grade._mixed ? grade : null;
+    const invert = mixed ? grade.invert : gradeNum(grade, 'invert', 0, 1);
     const warmth = mixed ? grade.warmth : gradeNum(grade, 'warmth', -1, 1);
     const fade = mixed ? grade.fade : gradeNum(grade, 'fade', 0, 1);
     const vignette = mixed ? grade.vignette : gradeNum(grade, 'vignette', 0, 1);
     const paperAge = mixed ? grade.paperAge : gradeNum(grade, 'paperAge', 0, 1);
     const tints = tintEntries(grade);
-    if (!warmth && !fade && !vignette && !paperAge && !tints.length) return;
+    if (!invert && !warmth && !fade && !vignette && !paperAge && !tints.length) return;
     const c = ctx.canvas;
     const w = c.width;
     const h = c.height;
@@ -574,6 +576,9 @@
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
     ctx.shadowColor = 'rgba(0,0,0,0)';
+    // The negative first, so the wash and the vignette grade the inverted plate.
+    // White difference at alpha a is lerp(c, 1 - c, a): 1 is the exact negative.
+    if (invert > 0) gradeFill(ctx, w, h, 'difference', '#ffffff', invert);
     if (wash) gradeFill(ctx, w, h, wash.op, wash.color, wash.alpha);
     if (vignette > 0) {
       ctx.globalCompositeOperation = 'multiply';

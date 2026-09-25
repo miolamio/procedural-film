@@ -2,7 +2,7 @@
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 42,
+  duration: 44,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -28,6 +28,8 @@ FILM.TIMELINE = {
     { id: 'fx-grade-warm', file: '21-fx-grade.js', start: 40.5, end: 41, mode: 'illustrated', grade: { warmth: 0.8, tint: 'sun', tintAmount: 0.35 }, brief: 'Warm grade.' },
     { id: 'fx-grade-fade', file: '21-fx-grade.js', start: 41, end: 41.5, mode: 'illustrated', grade: { fade: 0.55, paperAge: 0.4 }, brief: 'Faded grade.' },
     { id: 'fx-grade-vignette', file: '21-fx-grade.js', start: 41.5, end: 42, mode: 'illustrated', grade: { vignette: 1 }, brief: 'Vignette.' },
+    { id: 'fx-negative', file: '22-fx-negative.js', start: 42, end: 43, mode: 'schematic', brief: 'Negative theme: a constellation drawing on, a glowing figure, a blinking line icon.' },
+    { id: 'fx-negative-inv', file: '22-fx-negative.js', start: 43, end: 44, mode: 'schematic', grade: { invert: 1 }, brief: 'The same plate inverted: plate B of the negative theme.' },
   ],
   cues: [
     { t: 0, kind: 'open' },

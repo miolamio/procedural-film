@@ -2200,6 +2200,217 @@
   }
   lib.glowDot = glowDot;
 
+  /**
+   * glow(ctx, pts, opts) : a light line with a soft halo (a glowing vector, a lit contour).
+   * Widening halo strokes, then the core, in 'lighter' blending. No shadowBlur, no filter.
+   *   color    pal.lineWhite  core colour
+   *   halo     color          halo colour
+   *   width    2              core width
+   *   radius   12             halo reach beyond the core, px each side
+   *   layers   3              halo strokes
+   *   strength 0.22           alpha of the innermost halo stroke
+   *   closed   false
+   *   additive true           'lighter' blending (use false on paper)
+   *   alpha    1
+   */
+  function glow(ctx, pts, o = {}) {
+    if (!pts || pts.length < 2) return;
+    const color = o.color || pal.lineWhite;
+    const width = o.width != null ? o.width : 2;
+    const radius = o.radius != null ? o.radius : 12;
+    const layers = Math.max(0, o.layers != null ? o.layers | 0 : 3);
+    const strength = o.strength != null ? o.strength : 0.22;
+    ctx.save();
+    const base = ctx.globalAlpha * (o.alpha != null ? o.alpha : 1);
+    if (o.additive !== false) ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    lib.tracePath(ctx, pts, !!o.closed);
+    ctx.strokeStyle = o.halo || color;
+    for (let i = layers; i >= 1; i--) {
+      const k = i / layers; // 1 is the widest, faintest stroke
+      ctx.globalAlpha = base * strength * (1.25 - k);
+      ctx.lineWidth = width + 2 * radius * k;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = base;
+    ctx.lineWidth = width;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.restore();
+  }
+  lib.glow = glow;
+
+  /**
+   * blinkAt(f, seed, opts) : true while a character's eyes are shut on frame f (a global frame).
+   * A blink is exactly `frames` frames with no in-between drawing; the gaps are uneven and one in
+   * three is short, so blinks often come in pairs. The schedule repeats every `loop` frames and
+   * depends on the seed alone.
+   *   frames 2     gapMin 7     gapMax 38     loop 192 (8 s at 24 fps)
+   */
+  const blinkCache = new Map();
+  function blinkAt(f, seed, o = {}) {
+    const len = Math.max(1, o.frames || 2);
+    const g0 = o.gapMin || 7;
+    const g1 = Math.max(g0, o.gapMax || 38);
+    const loop = Math.max(len + g1, o.loop || 192);
+    const s = seedInt(seed === undefined ? 1 : seed);
+    const key = s + ':' + len + ':' + g0 + ':' + g1 + ':' + loop;
+    let starts = blinkCache.get(key);
+    if (!starts) {
+      starts = [];
+      let at = Math.floor(h3(s, 5, 1) * g1);
+      for (let i = 0; at + len <= loop; i++) {
+        starts.push(at);
+        const short = h3(s, i, 2) < 1 / 3;
+        const lo = short ? g0 : Math.min(g1, g0 + 6);
+        const hi = short ? Math.min(g1, g0 + 5) : g1;
+        at += len + lo + Math.floor(h3(s, i, 3) * (hi - lo + 1));
+      }
+      blinkCache.set(key, starts);
+    }
+    const k = ((Math.round(f) % loop) + loop) % loop;
+    for (let i = 0; i < starts.length; i++) if (k >= starts[i] && k < starts[i] + len) return true;
+    return false;
+  }
+  lib.blinkAt = blinkAt;
+
+  /**
+   * lineIcon(ctx, parts, x, y, size, opts) : a flat line-icon creature. Constant-width round-cap
+   * lines, flat colour, no glow; a part with fill knocks out whatever was drawn before it.
+   * Parts sit in a unit box centred on (x, y) (-0.5..0.5 each way, y down), drawn in order:
+   *   { circle: [cx, cy, r], fill }
+   *   { arc: [cx, cy, r, a0, a1] }            radians, clockwise on screen from +x
+   *   { eye: [cx, cy, r], pupil }             pupil 'lens' (vertical, 0.17 of the eye wide) or 'dot';
+   *                                           shut, the pupil becomes a bar across the eye
+   *   { line: [x0, y0, x1, y1] }
+   *   { teeth: [x0, y0, x1, y1, n, depth] }   n points hanging depth below the line
+   *   { path: [[x, y], ...], closed, fill }
+   *   color  pal.lineWhite
+   *   bg     pal.navyDeep   knock-out colour: the plate
+   *   width  0.035          line width as a fraction of size
+   *   shut   false          eyes closed (lib.blinkAt)
+   *   alpha  1
+   */
+  function lineIcon(ctx, parts, x, y, size, o = {}) {
+    const color = o.color || pal.lineWhite;
+    const bg = o.bg || pal.navyDeep;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(size, size);
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    ctx.lineWidth = o.width != null ? o.width : 0.035;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = color;
+    const knock = () => {
+      ctx.fillStyle = bg;
+      ctx.fill();
+    };
+    for (const p of parts || []) {
+      ctx.beginPath();
+      if (p.circle) {
+        const [cx, cy, r] = p.circle;
+        ctx.arc(cx, cy, r, 0, TAU);
+        if (p.fill) knock();
+        ctx.stroke();
+      } else if (p.arc) {
+        const [cx, cy, r, a0, a1] = p.arc;
+        ctx.arc(cx, cy, r, a0, a1);
+        ctx.stroke();
+      } else if (p.eye) {
+        const [cx, cy, r] = p.eye;
+        ctx.arc(cx, cy, r, 0, TAU);
+        knock();
+        ctx.stroke();
+        ctx.beginPath();
+        if (o.shut) {
+          ctx.moveTo(cx - r, cy);
+          ctx.lineTo(cx + r, cy);
+          ctx.stroke();
+        } else if (p.pupil === 'dot') {
+          ctx.arc(cx, cy, r * 0.22, 0, TAU);
+          ctx.fillStyle = color;
+          ctx.fill();
+        } else {
+          // two arcs through (cx, cy -+ r) and (cx +- w, cy)
+          const w = r * 0.17;
+          const R = (r * r + w * w) / (2 * w);
+          const a = Math.asin(r / R);
+          ctx.arc(cx + w - R, cy, R, -a, a);
+          ctx.arc(cx - w + R, cy, R, Math.PI - a, Math.PI + a);
+          ctx.closePath();
+          knock();
+          ctx.stroke();
+        }
+      } else if (p.line) {
+        const [x0, y0, x1, y1] = p.line;
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+      } else if (p.teeth) {
+        const [x0, y0, x1, y1, n, depth] = p.teeth;
+        const m = Math.max(1, n | 0) * 2;
+        for (let i = 0; i <= m; i++) {
+          const u = i / m;
+          const px = x0 + (x1 - x0) * u;
+          const py = y0 + (y1 - y0) * u + (i % 2 ? depth : 0);
+          if (i) ctx.lineTo(px, py);
+          else ctx.moveTo(px, py);
+        }
+        ctx.stroke();
+      } else if (p.path) {
+        lib.tracePath(ctx, p.path, !!p.closed);
+        if (p.fill) knock();
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+  lib.lineIcon = lineIcon;
+
+  /**
+   * glowFigure(ctx, parts, opts) : a figure drawn in light: each part a glowing contour whose
+   * vertices wobble on the boil clock, a closed part knocking out the plate behind it first,
+   * so paths and stars pass behind the figure.
+   *   parts   [pts, ...] or [{ pts, closed, fill }, ...]   (a bare pts array is a closed, filled part)
+   *   color   pal.lineWhite     halo  color     width 3     radius 10
+   *   bg      pal.navyDeep      knock-out colour
+   *   knock   0.88              knock-out opacity
+   *   wobble  1                 px of boil
+   *   seed    31
+   *   plus the glow() options (layers, strength, additive, alpha)
+   */
+  function glowFigure(ctx, parts, o = {}) {
+    const seed = seedInt(o.seed === undefined ? 31 : o.seed);
+    const bi = boilIndex(o);
+    const wob = o.wobble != null ? o.wobble : 1;
+    const opts = Object.assign({ width: 3, radius: 10 }, o);
+    (parts || []).forEach((part, j) => {
+      const q = Array.isArray(part) ? { pts: part, closed: true, fill: true } : part;
+      if (!q || !q.pts || q.pts.length < 2) return;
+      const pts = wob
+        ? q.pts.map((p, i) => {
+            const P = XY(p);
+            return [P[0] + wob * noise1(i * 0.23 + bi * 3.7, seed + j * 2), P[1] + wob * noise1(i * 0.23 + bi * 3.7, seed + j * 2 + 1)];
+          })
+        : q.pts;
+      if (q.fill && q.closed !== false) {
+        ctx.save();
+        ctx.globalAlpha *= o.knock != null ? o.knock : 0.88;
+        ctx.fillStyle = o.bg || pal.navyDeep;
+        ctx.beginPath();
+        lib.tracePath(ctx, pts, true);
+        ctx.fill();
+        ctx.restore();
+      }
+      opts.closed = q.closed !== false;
+      glow(ctx, pts, opts);
+    });
+  }
+  lib.glowFigure = glowFigure;
+
   function ticksImpl(ctx, x, y, o) {
     const p = new Path2D();
     const pm = new Path2D();
