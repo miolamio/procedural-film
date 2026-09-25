@@ -3,3 +3,10 @@ node_modules/
 .frames/
 .tmp/
 .env*
+
+# BMAD: install and local planning output (npx bmad-method install)
+_bmad/
+_bmad-output/
+.agents/
+.claude/skills/bmad-*
+docs/planning/bmad/
