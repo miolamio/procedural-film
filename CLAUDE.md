@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An agent skill, not an app. `skills/procedural-film/SKILL.md` is the pipeline an agent follows to turn a subject into a ~30 s vertical film (1080×1920, 24 fps) drawn on canvas and scored in Web Audio, with zero media assets. `examples/butterfly-life/` is a finished film the skill produced, and it doubles as the regression target for the engine and tools.
 
+`skills/procedural-film/themes/` holds the swappable looks (art bible sections 1–9, a `palette.js` pasted between the `// BEGIN 2.2` / `// END 2.2` markers of `lib.js`, a `theme.json` a film copies to `docs/theme.json`); `themes/INDEX.md` lists them and step 3 of SKILL.md picks one. `house` is the default.
+
 `docs/CONTRACT.md` (template at `skills/procedural-film/templates/CONTRACT.md`) is the source of truth for the runtime architecture: load order, the `FILM.scene` / `FILM.lib` / `FILM.audio` APIs, file ownership and the hard rules (no media, deterministic, stateless per frame). Read it before touching `src/`.
 
 ## Two copies of the engine
@@ -13,7 +15,7 @@ An agent skill, not an app. `skills/procedural-film/SKILL.md` is the pipeline an
 `skills/procedural-film/foundation/` is copied verbatim into every new film, so `examples/butterfly-life/` carries its own copy, and so does each film under `films/` (keep their `tools/` in sync too).
 
 - `tools/`, `src/core.js` and `src/player.js` are byte-identical in both places. A fix to any of them goes into both in the same commit (`diff -r skills/procedural-film/foundation/tools examples/butterfly-life/tools` must stay empty).
-- `src/lib.js` differs only in the 2.2 subject-palette block; `src/music.js` in the example is the composed score, while the foundation holds a demo score. Engine changes to either still apply to both.
+- `src/lib.js` differs only in the palette between the `// BEGIN 2.2` / `// END 2.2` markers (and a film's 2.3 identity tints); `src/music.js` in the example is the composed score, while the foundation holds a demo score. Engine changes to either still apply to both.
 - `src/geo.js` is per film (the storyboard's Shared geometry as data); the foundation has none, and its fixtures carry `tools/fixtures/geo.js`.
 - `examples/butterfly-life/dist/butterfly-life.html` is committed. Rebuild it with `build.cjs` whenever the example's `src/` changes.
 - Doc changes often span three places: `SKILL.md`, `templates/`, and the example's filled `docs/`.

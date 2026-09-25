@@ -34,7 +34,7 @@ The look and editing follow `docs/art-bible.md`.
 | `tools/build.cjs` | foundation | Inlines everything into `dist/<slug>.html`. |
 | `tools/render.cjs` | foundation | Renders the MP4 with audio into `exports/`. |
 | `tools/check.cjs` | foundation | Automated checks: no media, determinism, full timeline coverage, every scene draws without throwing, frame cost, shared geometry measured on the match cuts, and (fixtures only) lib asserts. |
-| `docs/storyboard.md`, `docs/art-bible.md` | storyboard | The human-readable plan and the visual rules for this film. |
+| `docs/storyboard.md`, `docs/art-bible.md`, `docs/theme.json` | storyboard | The human-readable plan, the visual rules for this film and the theme they came from. |
 
 Load order everywhere: `core.js`, `lib.js`, `timeline.js`, `geo.js` (when present), scene files sorted by filename, `music.js`, `player.js`.
 

@@ -1,0 +1,13 @@
+    // Theme negative, art bible 2.1 (void palette). Paste before the subject rows.
+    void: '#05060A',
+    voidLift: '#0C1019',
+    voidEdge: '#010102',
+    dust: '#8C96AA',
+    line: '#E4E9F2',
+    lineSoft: '#A7B1C4',
+    lineFaint: '#5B6579',
+    lineDim: '#262D3B',
+    star: '#F4F6FF',
+    accent: '#FF9442',
+    accentHot: '#FFD8A8',
+    accentGlow: '#B8501A',

@@ -287,6 +287,7 @@
     sunset: '#E79D8F',
     dusk: '#5A4878',
     red: '#BF3F2C',
+    // BEGIN 2.2
     // 2.2 Arctic tern extension, warm
     plumeWhite: '#F8F5EE',
     plumeShade: '#D9DCDA',
@@ -325,6 +326,7 @@
     polarSky: '#D9E4E4',
     mapLand: '#E3D5B3',
     mapSea: '#C7D6D1',
+    // END 2.2
     // 2.3 cool schematic palette (blueprint plate)
     navy: '#0B1230',
     navyDeep: '#060A1C',

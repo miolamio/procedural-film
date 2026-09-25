@@ -287,6 +287,7 @@
     sunset: '#E79D8F',
     dusk: '#5A4878',
     red: '#BF3F2C',
+    // BEGIN 2.2
     // 2.2 subject palette, warm — filled per film from docs/art-bible.md section 2.2.
     void: '#05060A',
     voidLift: '#0C1019',
@@ -302,6 +303,7 @@
     thread: '#FF9442',
     threadHot: '#FFD8A8',
     threadGlow: '#B8501A',
+    // END 2.2
     // 2.3 cool schematic palette (blueprint plate)
     navy: '#0B1230',
     navyDeep: '#060A1C',

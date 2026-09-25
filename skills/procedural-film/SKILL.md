@@ -5,12 +5,13 @@ description: Procedural film — turn a subject into a short vertical animated f
 
 # Procedural film
 
-Turn a topic into a **film**: roughly 30 seconds at 24 fps, 1080×1920 vertical unless the timeline sets `width` and `height` (also 1920×1080 and 1080×1080), hand-inked **paper plate** shots cut against navy **blueprint plate** shots, every event on a **beat grid** (bpm → beats → frames), every pixel and every audio sample computed in plain browser JavaScript. The deliverable is `dist/<slug>.html` (a self-contained player) plus `exports/<slug>.mp4` and its phone and preview transcodes.
+Turn a topic into a **film**: roughly 30 seconds at 24 fps, 1080×1920 vertical unless the timeline sets `width` and `height` (also 1920×1080 and 1080×1080), drawn in one of the skill's **themes** (by default the house style: hand-inked **paper plate** shots cut against navy **blueprint plate** shots), every event on a **beat grid** (bpm → beats → frames), every pixel and every audio sample computed in plain browser JavaScript. The deliverable is `dist/<slug>.html` (a self-contained player) plus `exports/<slug>.mp4` and its phone and preview transcodes.
 
-This skill packages a proven pipeline. It ships three things:
+This skill packages a proven pipeline. It ships four things:
 
 - `foundation/` — the engine and tools, copied into the new project: `src/core.js`, `src/lib.js`, `src/player.js`, `src/music.js` (engine plus a demo score), and `tools/` (build, check, snap, render, stubgen, audio analysis, fixtures). Everything is driven by `src/timeline.js`, so no tool code changes per film.
 - `templates/` — the four planning documents every film starts from.
+- `themes/` — finished looks (art bible sections 1–9, a palette, a `theme.json`), indexed in `themes/INDEX.md`; step 3 picks one.
 - `reference/` — read when a step below points at one; the three example images first.
 
 Look first: `reference/example-contact-sheet.jpg` (the whole example film, 24 labelled frames), `reference/example-paper-frame.jpg` and `reference/example-blueprint-frame.jpg` (one full frame of each plate). That density and that finish are the bar.
@@ -47,11 +48,18 @@ Done when: every phase of the story traces to a captured source listed in `SUMMA
 
 ### 3. Art bible
 
-Fill `docs/art-bible.md` from the template. Sections 1–9 are the house style — already decided. Only the two marked subject sections change: 2.2 (the subject palette, every colour a named hex, mirrored into the marked block in `src/lib.js`) and 10 (the subject reference built from the captured sources — one subsection per drawable element with sizes, ratios, counts, poses, sequences and the few ratios a critic measures — ending in Mistakes to avoid, each mistake paired with the correct drawing).
+Pick a theme from `themes/INDEX.md`: `house` (paper and blueprint) unless the user names another look or the subject calls for one. Say which and why in one line; a `draft` theme only within what its `needs` allow. Then:
 
-If the user wants a different look than the house style, run a reference analysis first — `templates/reference-analysis.md` shows the method (step through one reference video, written notes only, end with numbered style rules) — then update art-bible sections 1–9 to match before continuing.
+- paste `themes/<id>/art-bible-1-9.md` into `docs/art-bible.md` as sections 1–9, verbatim — they are already decided;
+- copy `themes/<id>/theme.json` to `docs/theme.json` (the stub pass colours its stubs from it);
+- paste `themes/<id>/palette.js` between `// BEGIN 2.2` and `// END 2.2` in `src/lib.js`; the subject rows follow it inside the same markers;
+- take the theme's `frame` as the timeline's `width` and `height` in step 5 unless the brief says otherwise.
 
-Done when: every element the storyboard will draw has a drawing rule and a palette name, `src/lib.js` holds the same values as section 2.2, the mistakes list exists, and `node tools/snap.cjs --fixtures --shot palette --samples 5 --sheet` has been looked at: every swatch named, each colour judged against its neighbours on both plates. Every scene agent copies this palette, so a wrong hue costs every scene file.
+Only the marked subject sections change: 2.2 (the subject palette, every colour a named hex, mirrored between the 2.2 markers in `src/lib.js`) and 10 (the subject reference built from the captured sources — one subsection per drawable element with sizes, ratios, counts, poses, sequences and the few ratios a critic measures — ending in Mistakes to avoid, each mistake paired with the correct drawing).
+
+If no theme fits the look the user wants, run a reference analysis first — `templates/reference-analysis.md` shows the method (step through one reference video, written notes only, end with numbered style rules) — then write art-bible sections 1–9 to match before continuing.
+
+Done when: every element the storyboard will draw has a drawing rule and a palette name, `src/lib.js` holds the same values as section 2.2, the mistakes list exists, and `node tools/snap.cjs --fixtures --shot palette --samples 5 --sheet` has been looked at: every swatch named, each colour judged against its neighbours on every plate the theme uses. Every scene agent copies this palette, so a wrong hue costs every scene file.
 
 ### 4. Storyboard
 
@@ -91,7 +99,7 @@ Then review every shot on rendered frames at three scales, each of which hides w
 
 Beside those three scales, the art checklist:
 
-- Compare with a reference at native size (`reference/example-paper-frame.jpg`, `reference/example-blueprint-frame.jpg`, or the agreed reference for this film). The contact sheet hides stroke texture and line weight.
+- Compare with a reference at native size (`reference/example-paper-frame.jpg` and `reference/example-blueprint-frame.jpg` on the house theme, or the agreed reference for this film). The contact sheet hides stroke texture and line weight.
 - On the thumbnail, check hierarchy and quiet: what reads first, and whether there is empty space around the subject.
 - A green gate is not an art verdict. Write a separate art verdict.
 - Every note names one element and the scale it was seen at (thumbnail, native frame, or native crop). No "looks better" with no subject.

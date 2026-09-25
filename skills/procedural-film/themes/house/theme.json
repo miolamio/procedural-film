@@ -1,0 +1,24 @@
+{
+  "id": "house",
+  "name": "Paper and blueprint",
+  "status": "ready",
+  "frame": { "width": 1080, "height": 1920 },
+  "plates": {
+    "A": { "name": "paper", "mode": "illustrated", "base": "paper", "line": "ink", "text": "inkSoft" },
+    "B": { "name": "blueprint", "mode": "schematic", "base": "navy", "line": "lavender", "text": "lavender" }
+  },
+  "axes": {
+    "base": "warm paper under 30-degree stripes; navy blueprint with a 60 px grid",
+    "line": "hand-inked lib.inkPath, pressure ±25%, 12 fps boil; double lavender outlines on blueprint",
+    "tone": "hatching and stipple on paper, never gradients; glow halos only on blueprint",
+    "planB": "the blueprint plate explains the inside of what the paper plate shows",
+    "motion": "characters on twos, camera and overlays at 24 fps, snappy pops on the beat",
+    "carrier": "paper grain on A, fine noise on B (core post)",
+    "accent": "magenta for moments of change, at most 12 frames",
+    "font": "thin system sans-serif wordmark only",
+    "match": "silhouette match cuts between paper and blueprint on shared geometry",
+    "overlays": "rings, trajectories, rulers and brackets in four overlay colours"
+  },
+  "recipes": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+  "palette": "palette.js"
+}

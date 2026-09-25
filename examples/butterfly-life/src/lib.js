@@ -287,6 +287,7 @@
     sunset: '#E79D8F',
     dusk: '#5A4878',
     red: '#BF3F2C',
+    // BEGIN 2.2
     // 2.2 monarch extension, warm
     monarch: '#D9772B',
     monarchDeep: '#B55A1C',
@@ -337,6 +338,7 @@
     skyNightA: '#53478B',
     skyNightB: '#D6D2DE',
     skyDawnB: '#FFF1E2',
+    // END 2.2
     // 2.3 cool schematic palette (blueprint plate)
     navy: '#0B1230',
     navyDeep: '#060A1C',
