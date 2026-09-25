@@ -13,8 +13,9 @@ Each theme folder holds:
 | [`house`](house/) | 1080×1920 | Hand-inked paper plates cut against navy blueprint plates | ready — the default |
 | [`negative`](negative/) | 1920×1080 | Light lines on a near-black void; figures as constellations; one warm accent; plate B is the inverted frame | ready |
 | [`phosphor`](phosphor/) | 1920×1080 | Green vector strokes and a typing pixel-font terminal on a CRT carrier; plate B is an oscilloscope; acts end on `crtoff` | ready |
+| [`shards`](shards/) | 1920×1080 | Flat Voronoi facets in four blue steps that part on the beat; plate B is low-poly space and tunnels; cuts shatter | ready |
 
-Planned, first wave: `shards` (polygon fragments, shatter transitions), `blob` (liquid ink blob built on isolines).
+Planned, first wave: `blob` (liquid ink blob built on isolines).
 
 ## Picking a theme
 

@@ -1,0 +1,10 @@
+    // Theme shards, art bible 2.1 (shard palette). Paste before the subject rows.
+    ground: '#0B0E1A',
+    groundLift: '#141A2E',
+    shardDeep: '#1E2A4A',
+    shardMid: '#34507E',
+    shardLight: '#6F93C4',
+    shardPale: '#B9CFEA',
+    edge: '#EEF4FF',
+    flare: '#FF4F3A',
+    flareHot: '#FFC2A8',

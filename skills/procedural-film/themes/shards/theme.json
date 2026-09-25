@@ -1,0 +1,24 @@
+{
+  "id": "shards",
+  "name": "Shards / Polygon",
+  "status": "ready",
+  "frame": { "width": 1920, "height": 1080 },
+  "plates": {
+    "A": { "name": "shard field", "mode": "schematic", "post": 0.4, "base": "ground", "line": "edge", "text": "shardPale" },
+    "B": { "name": "polygon space", "mode": "schematic", "post": 0.4, "base": "ground", "line": "shardLight", "text": "shardPale" }
+  },
+  "axes": {
+    "base": "near-black blue ground, a soft lift behind the subject",
+    "line": "thin exact edges on every facet; no hand wobble",
+    "tone": "flat facets in four blue steps, lit by one light, fogged with distance",
+    "planB": "polygon space: low-poly solids and tunnels with filled faces (faces3d)",
+    "motion": "facets part, turn and reassemble on the beat; the camera flies at 24 fps",
+    "carrier": "fine schematic noise at 40% (core post)",
+    "accent": "flare red on one facet or one solid",
+    "font": "none",
+    "match": "a shape made of shards becomes a solid of the same outline; cuts shatter",
+    "overlays": "none: the facets are the picture"
+  },
+  "recipes": [16, 20, 26, 29, 35, 36],
+  "palette": "palette.js"
+}

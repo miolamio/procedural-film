@@ -366,3 +366,25 @@ A locked screen that types: a log or a title appearing character by character in
 - Mistake: `lib.text` or a system monospace for terminal text — it renders differently on every machine. Drawing scanlines or a screen mask in the scene: the carrier draws them once, over transitions too. Typing from the shot's `t` when the text continues across a cut. A sprite copied from a known game: draw the film's own
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/23-fx-phosphor.js`
 
+## 35. Shard field
+
+A picture made of flat facets: Voronoi cells, each one step of a few tones, thin edges between them, parting from a centre on the beat and closing again. A lit low-poly solid may sit among them.
+
+- Duration: 2.0 to 4.0 s. Part on a beat, hold, close on a later beat
+- Plate: a dark ground (`ground` on the shards theme, `navyDeep` in the fixture)
+- Camera: locked
+- Leans on: `voronoi` (`relax` 1 for even pieces), `rng`, `hash`, `beat`, `faces3d` with `mesh3d.box` for a solid
+- Mistake: new sites every frame — the diagram flickers and the cache misses; build them from a seeded `rng` once. Moving anything inside a facet. A tone picked per frame instead of per cell index
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/24-fx-shards.js`
+
+## 36. Polygon tunnel
+
+A flight down a low-poly tunnel: filled faces in alternating steps, fogged toward the far end, thin edges, the view rolling slowly. The shards theme's plan B, usually entered through a `shatter` cut.
+
+- Duration: 2.0 to 4.0 s; the flight loops, so any length holds
+- Plate: the tunnel fills the frame; the far end is the fog colour
+- Camera: `faces3d` with `persp` 1.4 to 2, `shift: [0, 0, travel % mesh.ringStep]`, a slow roll in `rot[2]`
+- Leans on: `mesh3d.tunnel`, `faces3d` (`color(i)`, `fog`, `fogColor`, `stroke`), timeline `transitionIn: { kind: 'shatter', dur, x, y, pieces, seed }`
+- Mistake: shifting by the whole travel instead of `travel % ringStep` — the tunnel runs out. Building the mesh inside `draw` every frame: build it once and keep it. `near` too small, so a face through the camera smears across the frame
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/24-fx-shards.js`
+
