@@ -412,7 +412,7 @@ test('lookbook embeds every theme and the brief line builder', { skip }, () => {
   assert.match(html, /<title>Style lookbook<\/title>/);
   assert.match(html, /node tools\/theme\.cjs apply/);
   assert.doesNotMatch(html, /\/\*CARRIERS\*\//);
-  assert.match(html, /const CARRIERS=\["none","crt","vhs","film"\]/);
+  assert.match(html, /const CARRIERS=\["none","crt","vhs","film","xerox"\]/);
 });
 
 test('lookbook only emits accent/grain flags that differ from the theme\'s own value', { skip }, () => {

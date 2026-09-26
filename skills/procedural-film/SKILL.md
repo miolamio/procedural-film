@@ -51,7 +51,7 @@ Done when: every phase of the story traces to a captured source listed in `SUMMA
 Apply the brief's `Style:` line: its theme id and one flag per axis it names (`accent #3AA0FF` becomes `--accent '#3AA0FF'`). A `draft` theme only within what its `needs` allow.
 
 ```bash
-node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt|vhs|film] [--accent '#RRGGBB'] [--grain 0..1]
+node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt|vhs|film|xerox] [--accent '#RRGGBB'] [--grain 0..1]
 ```
 
 Outside the skill's repo, add `--themes <skill>/themes` (or set `PF_THEMES` once) so the tool finds the themes. It pastes the theme's sections 1–9 into `docs/art-bible.md` (headed by a Film overrides note when an axis changes), the theme's palette rows inside the 2.2 markers of `src/lib.js` (the accent rows recoloured) and the resolved `docs/theme.json`, and prints the timeline's `width`, `height` and `carrier` and each plate's `mode`, `post` and `grade`, which step 5 takes as they are. Rerun it to switch theme: sections 1–9 and the theme rows are swapped, the subject rows stay. `node tools/theme.cjs show` prints the applied style again. Line, tone and motion are not overrides: for another line, pick another theme or run a reference analysis.
