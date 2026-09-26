@@ -14,7 +14,7 @@ This skill packages a proven pipeline. It ships four things:
 - `themes/` — finished looks (art bible sections 1–9, a palette, a `theme.json`), indexed in `themes/INDEX.md`; step 3 picks one.
 - `reference/` — read when a step below points at one; the three example images first.
 
-Look first: `reference/example-contact-sheet.jpg` (the whole example film, 24 labelled frames), `reference/example-paper-frame.jpg` and `reference/example-blueprint-frame.jpg` (one full frame of each plate). That density and that finish are the bar.
+Look first: `reference/example-contact-sheet.jpg` (the whole example film, 24 labelled frames), `reference/example-paper-frame.jpg` and `reference/example-blueprint-frame.jpg` (one full frame of each plate). That density and that finish are the bar. A theme with its own `example-*.jpg` (see `themes/INDEX.md`) sets its own bar the same way.
 
 ## The gate
 
@@ -99,7 +99,7 @@ Then review every shot on rendered frames at three scales, each of which hides w
 
 Beside those three scales, the art checklist:
 
-- Compare with a reference at native size (`reference/example-paper-frame.jpg` and `reference/example-blueprint-frame.jpg` on the house theme, or the agreed reference for this film). The contact sheet hides stroke texture and line weight.
+- Compare with a reference at native size (`reference/example-paper-frame.jpg` and `reference/example-blueprint-frame.jpg` on the house theme, `themes/<id>/example-*.jpg` on a theme that has them, or the agreed reference for this film). The contact sheet hides stroke texture and line weight.
 - On the thumbnail, check hierarchy and quiet: what reads first, and whether there is empty space around the subject.
 - A green gate is not an art verdict. Write a separate art verdict.
 - Every note names one element and the scale it was seen at (thumbnail, native frame, or native crop). No "looks better" with no subject.

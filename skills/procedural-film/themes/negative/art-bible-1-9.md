@@ -79,7 +79,7 @@ Figures, shells and trails wobble on the 12 fps boil (`lib.boil(T)`), 0.6–1.2 
 - **Instrument.** Relationships are shown as an instrument: a centre glyph (ring r 6 px, cross ±16 px, dotted ring r 40 px), a dashed ellipse with ticks, faint guide ellipses and two long diagonals. As the relation weakens, the instrument dims, breaks and disappears.
 - Measurement is brackets and rules, never numbers. No text in any shot except the optional wordmark (section 9).
 - Depth is an ellipse seen at an angle (aspect about 0.56): what is on the near half is drawn 10% larger and brighter.
-- **Plan B — the negative.** The second plate is the same frame inverted: void turns to paper-white, light lines to black. It is the timeline field `grade: { invert: 1 }` on the shot; the scene draws the void plate as usual. An inverted plate lasts at least a beat, and a film switches between plates at most once per second (check 9 counts every switch as a full-frame flash).
+- **Plan B — the negative.** The second plate is the same frame inverted: void turns to paper-white, light lines to black. It is the timeline field `grade: { invert: 1 }` on the shot; the scene draws the void plate as usual. Every colour inverts with it, the accent included: orange reads as its complement, a clear blue, on plate B. That is the look, not a bug; do not pre-invert the accent to keep it warm. An inverted plate lasts at least a beat, and a film switches between plates at most once per second (check 9 counts every switch as a full-frame flash).
 
 ## 6. Overlays
 

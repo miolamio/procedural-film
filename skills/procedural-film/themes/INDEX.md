@@ -6,12 +6,13 @@ Each theme folder holds:
 
 - `art-bible-1-9.md` — sections 1 to 9, copied verbatim into `docs/art-bible.md`;
 - `palette.js` — the theme's colours as `lib.pal` rows, pasted between `// BEGIN 2.2` and `// END 2.2` in `src/lib.js`, before the subject rows;
+- `example-*.jpg`, when present — the theme's bar: a contact sheet of a finished film in the theme and one full frame per plate, as `reference/example-*.jpg` is for `house`;
 - `theme.json` — the machine-readable summary, copied to `docs/theme.json`: `frame` (the default canvas; the timeline's `width` and `height` may override it), `plates` (plate A and plate B mapped to a shot `mode`, a default `post`, a `grade` when the plate is one, and the `lib.pal` names of the base, line and text colours, which `tools/stubgen.cjs` draws the stubs with), an optional `carrier` the timeline takes as its `carrier`, the ten `axes` in words, and the `recipes` of `reference/shot-types.md` the theme leans on.
 
 | Theme | Frame | Look | Status |
 |---|---|---|---|
 | [`house`](house/) | 1080×1920 | Hand-inked paper plates cut against navy blueprint plates | ready — the default |
-| [`negative`](negative/) | 1920×1080 | Light lines on a near-black void; figures as constellations; one warm accent; plate B is the inverted frame | ready |
+| [`negative`](negative/) | 1920×1080 | Light lines on a near-black void; figures as constellations; one warm accent; plate B is the inverted frame | ready — examples from `films/indigo-bunting-stars` |
 | [`phosphor`](phosphor/) | 1920×1080 | Green vector strokes and a typing pixel-font terminal on a CRT carrier; plate B is an oscilloscope; acts end on `crtoff` | ready |
 | [`shards`](shards/) | 1920×1080 | Flat Voronoi facets in four blue steps that part on the beat; plate B is low-poly space and tunnels; cuts shatter | ready |
 | [`blob`](blob/) | 1920×1080 | White metaball bodies with tar rims and marble contours on a flat blue pool; they merge, drip and melt; plate B is a relief map of the same field | ready |
