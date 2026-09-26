@@ -38,6 +38,7 @@ FILM.TIMELINE = {
     { id: 'fx-ramp', file: '26-fx-ramp.js', start: 50, end: 52, mode: 'schematic', brief: 'Ramps: every named colour scale as a strip, a crater as a heat map, a terrain relief with a rising sea.' },
     { id: 'fx-stick', file: '27-fx-stick.js', start: 52, end: 54, mode: 'illustrated', brief: 'Stick figures: a jointed walker with a red balloon, a spring figure reaching and jumping, a row of head styles, poses on twos.' },
     { id: 'fx-noise-plate', file: '28-fx-noise-plate.js', start: 54, end: 56, mode: 'illustrated', brief: 'Noise plates: snow overexposure and stipple over bare trees with one red drop; xerox toner dropouts and drum streaks on a stencil.' },
+    { id: 'fx-dry-brush', file: '29-fx-dry-brush.js', start: 56, end: 58, mode: 'illustrated', brief: 'Dry brush theme: a forest in three planes of dry-brush silhouettes on grey paper in a black mount, branches and ground strokes, the camera tracking right.' },
     { id: 'fx-stroke-font', file: '30-fx-stroke-font.js', start: 58, end: 60, mode: 'illustrated', brief: 'Stroke font: a hand-scratched wordmark writing on, the glyph set by hand, then a stencil wordmark and set with bridges.' },
     { id: 'fx-duotone-plain', file: '31-fx-duotone.js', start: 60, end: 60.5, mode: 'illustrated', brief: 'Ungraded tonal plate.' },
     { id: 'fx-duotone', file: '31-fx-duotone.js', start: 60.5, end: 61.5, mode: 'illustrated', grade: { duotone: ['ink', 'paleBlue'] }, brief: 'Cut into ink on pale blue.' },
