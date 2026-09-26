@@ -291,14 +291,14 @@ The incoming plate bleeds in through a blot whose edge is fixed noise. The blot 
 
 ## 28. Graded act
 
-One drawing, and a look that belongs to the act: warmer, faded, aged, vignetted, or tinted. The grade is a field on the timeline shots, applied after the scene draws and before the grain. The scene stays a neutral plate. Omit the field and the frame is unchanged.
+One drawing, and a look that belongs to the act: warmer, faded, aged, vignetted, tinted, or in two inks. The grade is a field on the timeline shots, applied after the scene draws and before the grain. The scene stays a neutral plate. Omit the field and the frame is unchanged.
 
 - Duration: the grade holds for whole bars and changes on an act boundary. The fixture steps once per beat (0.5 s) only so each knob is visible
 - Plate: paper or blueprint, whichever the act is
 - Camera: the shots' own cameras. The grade is not a transform
-- Leans on: `paper`, `inkPath`, `blueprint`. The field is `grade` with `invert`, `warmth` (−1..1), `fade`, `vignette`, `paperAge`, `tintAmount` (0..1) and `tint` (a `pal` name). No lib call applies it. `invert` 1 is the exact negative of the frame (plate B of the `negative` theme); a cut into or out of it is one full-frame flash for check 9
+- Leans on: `paper`, `inkPath`, `blueprint`. The field is `grade` with `invert`, `warmth` (−1..1), `fade`, `vignette`, `paperAge`, `tintAmount` (0..1) and `tint` (a `pal` name), `duotone` (`[dark, light]`, two `pal` names, e.g. `['ink', 'paleBlue']` for ink on cyan) with `duotoneAmount` (0..1, default 1). No lib call applies it. `invert` 1 is the exact negative of the frame (plate B of the `negative` theme); a cut into or out of it is one full-frame flash for check 9. `duotone` maps the frame's luminosity from `dark` to `light`, so the plate's values carry the picture, not its hues: two fills that differ only in hue at the same lightness merge
 - Mistake: baking the warmth into the scene fills. `core` grades again, and across `transitionIn` it already interpolates from the outgoing grade to the incoming one
-- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/21-fx-grade.js`
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/21-fx-grade.js`; `31-fx-duotone.js` (a cut into ink on pale blue, a fade to night on sun at 0.7)
 
 ## 29. Beat pulse
 
