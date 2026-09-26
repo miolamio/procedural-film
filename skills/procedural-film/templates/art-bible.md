@@ -4,11 +4,11 @@ The visual rules every scene follows.
 Where this file and a scene brief disagree on a colour, weight or rule, this file wins.
 Where this file and `docs/storyboard.md` disagree on a position or a time, the storyboard wins.
 
-Theme: <theme id> (`themes/<id>/` in the skill; its `theme.json` is copied to `docs/theme.json`).
+Theme: <theme id> (`themes/<id>/` in the skill); `node tools/theme.cjs apply <id>` writes the resolved `docs/theme.json` and pastes sections 1 to 9 below.
 
-Sections 1 to 9 are the theme, copied verbatim from `themes/<id>/art-bible-1-9.md` — change them only after a fresh reference analysis (the skill's `templates/reference-analysis.md` shows the method). Section 2.2, the identity tints the theme asks for, and 10 are rewritten per film from the captured research.
+Sections 1 to 9 are the theme, pasted below by `tools/theme.cjs apply` from `themes/<id>/art-bible-1-9.md` — change them only after a fresh reference analysis (the skill's `templates/reference-analysis.md` shows the method). Section 2.2, the identity tints the theme asks for, and 10 are rewritten per film from the captured research.
 
-<!-- PASTE themes/<id>/art-bible-1-9.md HERE (sections 1 to 9) -->
+<!-- PASTE themes/<id>/art-bible-1-9.md HERE (sections 1 to 9): node tools/theme.cjs apply does it -->
 
 ## 10. Subject reference
 

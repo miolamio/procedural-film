@@ -30,7 +30,7 @@ if (THEME && THEME.id !== 'house') {
   const libText = fs.readFileSync(path.join(C.SRC, 'lib.js'), 'utf8');
   for (const pl of PLATES) for (const k of ['base', 'line', 'text']) {
     if (!/^[A-Za-z_]\w*$/.test(pl[k] || '')) C.die(`docs/theme.json: plate '${pl.name}' needs a lib.pal name for '${k}'`);
-    if (!new RegExp(`\\n\\s*${pl[k]}\\s*:`).test(libText)) C.die(`lib.pal has no '${pl[k]}' (theme '${THEME.id}', plate '${pl.name}'): paste themes/${THEME.id}/palette.js between the 2.2 markers in src/lib.js`);
+    if (!new RegExp(`\\n\\s*${pl[k]}\\s*:`).test(libText)) C.die(`lib.pal has no '${pl[k]}' (theme '${THEME.id}', plate '${pl.name}'): run node tools/theme.cjs apply ${THEME.id}`);
   }
 }
 const plateOf = (mode) => PLATES.find((pl) => (/schem|blue/.test(mode) ? 'schematic' : 'illustrated') === pl.mode) || PLATES[0];
