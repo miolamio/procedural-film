@@ -388,3 +388,14 @@ A flight down a low-poly tunnel: filled faces in alternating steps, fogged towar
 - Mistake: shifting by the whole travel instead of `travel % ringStep` — the tunnel runs out. Building the mesh inside `draw` every frame: build it once and keep it. `near` too small, so a face through the camera smears across the frame
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/24-fx-shards.js`
 
+## 37. Liquid body
+
+A body made of metaballs that merges, splits, drips and melts: a flat fill, a heavy rim, marble contours inside, a face on a tar disc. The same field drawn as isolines at many levels is a relief map of it.
+
+- Duration: 2.0 to 4.0 s. One merge, split or melt per beat or slower
+- Plate: flat (`pool` on the blob theme, `annBlue` in the fixture)
+- Camera: locked
+- Leans on: `blob` (`marble`, `warp`, `phase`), `blobField`, `isolines` (levels as an array for a relief), `lineIcon`, `blinkAt`
+- Mistake: animating the outline instead of the balls — the balls are the character, the rim follows. A `phase` that stands still, so the body freezes between moves. Too fine a `cell` on a large body: 8 to 12 px is smooth enough and keeps the frame in budget. A drip drawn as a separate shape: give it a ball and it joins and leaves the body by itself
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/25-fx-blob.js`
+

@@ -1,0 +1,24 @@
+{
+  "id": "blob",
+  "name": "Liquid blob",
+  "status": "ready",
+  "frame": { "width": 1920, "height": 1080 },
+  "plates": {
+    "A": { "name": "pool", "mode": "illustrated", "post": 0.5, "base": "pool", "line": "tar", "text": "body" },
+    "B": { "name": "relief", "mode": "illustrated", "post": 0.5, "base": "poolDeep", "line": "poolPale", "text": "body" }
+  },
+  "axes": {
+    "base": "one flat blue, no texture but the grain",
+    "line": "one heavy tar outline on every body; thin marble contours inside",
+    "tone": "flat white bodies; tone is marble lines, never shading",
+    "planB": "relief: the same field drawn as a contour map (isolines at many levels)",
+    "motion": "everything flows: merges, splits, drips and melts at 24 fps; the rim boils",
+    "carrier": "paper grain at 50% (core post)",
+    "accent": "yolk yellow on one small thing",
+    "font": "none",
+    "match": "a body's rim becomes the outer contour of the relief; morph cuts between shapes",
+    "overlays": "none"
+  },
+  "recipes": [6, 18, 24, 27, 33, 37],
+  "palette": "palette.js"
+}
