@@ -2,7 +2,7 @@
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 70,
+  duration: 72,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -51,6 +51,9 @@ FILM.TIMELINE = {
     { id: 'fx-film', file: '34-fx-film.js', start: 66, end: 68, mode: 'illustrated', post: 0.4, carrier: { kind: 'film' }, brief: 'Film carrier: a windmill at dusk on a print, perforations down both edges, scratches, dust, weave and a faint exposure flicker.' },
     { id: 'fx-scallop', file: '35-fx-scallop.js', start: 68, end: 69, mode: 'illustrated', post: 0, brief: 'Scallop theme: three rows of scarlet scallop waves, a fir row, a striped lagoon boat with an oarsman, on threes.' },
     { id: 'fx-scallop-b', file: '35-fx-scallop.js', start: 69, end: 70, mode: 'schematic', post: 0, brief: 'Scallop plate B: the same frame as a sheet-wire schematic on scarlet, cut on the boat silhouette.' },
+    { id: 'fx-heightfield-mesh', file: '36-fx-heightfield.js', start: 70, end: 71, mode: 'schematic', brief: 'Heightfield: a false-colour island as a perspective contour mesh on black, turning, the summit pinned.' },
+    { id: 'fx-heightfield', file: '36-fx-heightfield.js', start: 71, end: 71.5, mode: 'schematic', brief: 'Cut to the same island as a hillshaded false-colour map from above.' },
+    { id: 'fx-heightfield-contour', file: '36-fx-heightfield.js', start: 71.5, end: 72, mode: 'schematic', brief: 'Cut to the same island as a contour map, levels coloured by height.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
