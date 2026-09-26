@@ -2,7 +2,7 @@
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 68,
+  duration: 70,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -41,6 +41,8 @@ FILM.TIMELINE = {
     { id: 'fx-vhs', file: '33-fx-vhs.js', start: 64, end: 65, mode: 'illustrated', carrier: { kind: 'vhs' }, brief: 'VHS carrier: colour bars and a sunset kite on tape, a tracking band rolling down, head noise and the counter.' },
     { id: 'fx-vhs-tracking', file: '33-fx-vhs.js', start: 65, end: 66, mode: 'illustrated', carrier: { kind: 'vhs', tracking: 0.8, clock: 3725 }, transitionIn: { kind: 'tracking', dur: 0.5 }, brief: 'Tracking is lost on the cut: the sunset rolls up and out, the night plate rolls in and locks.' },
     { id: 'fx-film', file: '34-fx-film.js', start: 66, end: 68, mode: 'illustrated', post: 0.4, carrier: { kind: 'film' }, brief: 'Film carrier: a windmill at dusk on a print, perforations down both edges, scratches, dust, weave and a faint exposure flicker.' },
+    { id: 'fx-scallop', file: '35-fx-scallop.js', start: 68, end: 69, mode: 'illustrated', post: 0, brief: 'Scallop theme: three rows of scarlet scallop waves, a fir row, a striped lagoon boat with an oarsman, on threes.' },
+    { id: 'fx-scallop-b', file: '35-fx-scallop.js', start: 69, end: 70, mode: 'schematic', post: 0, brief: 'Scallop plate B: the same frame as a sheet-wire schematic on scarlet, cut on the boat silhouette.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
