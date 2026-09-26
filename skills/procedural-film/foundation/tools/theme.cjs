@@ -43,9 +43,26 @@ function loadTheme(dir, id) {
   const theme = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (theme.id !== id) throw new Error(`theme.json at ${dir}/${id} has id '${theme.id}', not '${id}': the folder name and the id must match`);
   for (const [k, v] of Object.entries(theme.accent || {})) {
+    if (k === 'budget') continue;
     if (!ROW_NAME.test(v)) throw new Error(`theme '${id}' has an invalid accent.${k} row name '${v}' in theme.json`);
   }
+  const budgetErr = accentBudgetProblem(theme.accent);
+  if (budgetErr) throw new Error(`theme '${id}' has an invalid accent.budget in theme.json: ${budgetErr}`);
   return theme;
+}
+
+/** accent.budget (check 12): { frames, share, area, row }. Returns what is wrong with it, or null. */
+function accentBudgetProblem(accent) {
+  if (!accent || accent.budget === undefined) return null;
+  const b = accent.budget;
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return 'it must be an object: { frames, share, area, row }';
+  for (const k of Object.keys(b)) if (!['frames', 'share', 'area', 'row'].includes(k)) return `'${k}' is not a budget field (frames, share, area, row)`;
+  if (b.frames === undefined && b.share === undefined && b.area === undefined) return 'name at least one of frames, share, area';
+  if (b.frames !== undefined && !(Number.isInteger(b.frames) && b.frames >= 1)) return 'frames must be a whole number of frames, at least 1';
+  for (const k of ['share', 'area']) if (b[k] !== undefined && !(typeof b[k] === 'number' && b[k] > 0 && b[k] <= 1)) return `${k} must be a number above 0, at most 1`;
+  if (b.row !== undefined && !(typeof b.row === 'string' && ROW_NAME.test(b.row))) return `row '${b.row}' is not a lib.pal row name`;
+  if (b.row === undefined && !accent.base) return 'a theme with no accent.base names the measured lib.pal row in budget.row';
+  return null;
 }
 
 function listThemes(dir) {
@@ -395,5 +412,5 @@ render();
 </script>
 `;
 
-module.exports = { findThemes, listThemes, parseOverrides, mixHex, apply, summary, lookbook };
+module.exports = { findThemes, listThemes, parseOverrides, mixHex, apply, summary, lookbook, accentBudgetProblem };
 if (require.main === module) main();

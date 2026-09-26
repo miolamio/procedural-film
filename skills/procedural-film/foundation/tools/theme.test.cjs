@@ -335,6 +335,48 @@ test('listTable shows "missing" instead of crashing when an accent row is absent
   assert.match(r.stdout, /missing/);
 });
 
+test('apply carries accent.budget into docs/theme.json, and --accent keeps it', { skip }, () => {
+  const dir = film();
+  const house = T.apply(dir, THEMES, 'house', {});
+  assert.deepStrictEqual(house.accent.budget, { row: 'magenta', frames: 12 });
+  assert.deepStrictEqual(JSON.parse(read(dir, 'docs/theme.json')).accent.budget, { row: 'magenta', frames: 12 });
+  const neg = T.apply(dir, THEMES, 'negative', T.parseOverrides({ accent: '#3AA0FF' }));
+  assert.strictEqual(neg.accent.base, 'accent');
+  assert.deepStrictEqual(JSON.parse(read(dir, 'docs/theme.json')).accent.budget, neg.accent.budget);
+  assert.ok(neg.accent.budget, 'negative has a budget');
+});
+
+test('house has a budget but no accent rows: --accent is still refused', { skip }, () => {
+  const house = T.listThemes(THEMES).find((t) => t.id === 'house');
+  assert.strictEqual(house.accent.base, undefined);
+  assert.throws(() => T.apply(film(), THEMES, 'house', T.parseOverrides({ accent: '#FF0000' })), /no accent rows/);
+});
+
+test('every theme with an accent row has a valid budget', { skip }, () => {
+  for (const t of T.listThemes(THEMES)) {
+    if (t.accent && t.accent.base) assert.ok(t.accent.budget, `${t.id} has accent rows but no accent.budget`);
+    assert.strictEqual(T.accentBudgetProblem(t.accent), null, t.id);
+  }
+});
+
+test('an invalid accent.budget in theme.json fails clearly', () => {
+  const bad = (budget, base = 'accent') => fakeThemes(
+    'bud',
+    { id: 'bud', name: 'Budget', status: 'ready', frame: { width: 1080, height: 1920 }, plates: {}, accent: base ? { base, budget } : { budget }, palette: 'palette.js' },
+    { palette: "    accent: '#FF0000',\n" }
+  );
+  assert.throws(() => T.listThemes(bad(12)), /accent\.budget.*must be an object/);
+  assert.throws(() => T.listThemes(bad({})), /at least one of frames, share, area/);
+  assert.throws(() => T.listThemes(bad({ frames: 2.5 })), /whole number/);
+  assert.throws(() => T.listThemes(bad({ area: 2 })), /area must be/);
+  assert.throws(() => T.listThemes(bad({ share: 0 })), /share must be/);
+  assert.throws(() => T.listThemes(bad({ frames: 12, colour: 'red' })), /'colour' is not a budget field/);
+  assert.throws(() => T.listThemes(bad({ frames: 12, row: '(oops' })), /not a lib\.pal row name/);
+  assert.throws(() => T.listThemes(bad({ frames: 12 }, null)), /budget\.row/);
+  assert.doesNotThrow(() => T.listThemes(bad({ frames: 12, share: 0.1, area: 0.002 })));
+  assert.doesNotThrow(() => T.listThemes(bad({ row: 'magenta', frames: 12 }, null)));
+});
+
 test('--root and --themes reject a value-less flag', () => {
   const r1 = spawnSync(process.execPath, [BIN, 'list', '--root'], { encoding: 'utf8' });
   assert.notStrictEqual(r1.status, 0);

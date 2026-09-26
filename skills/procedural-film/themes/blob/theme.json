@@ -3,7 +3,7 @@
   "name": "Liquid blob",
   "status": "ready",
   "look": "White metaball bodies with tar rims and marble contours on a flat blue pool; plate B is a relief map",
-  "accent": { "base": "yolk" },
+  "accent": { "base": "yolk", "budget": { "area": 0.02 } },
   "frame": { "width": 1920, "height": 1080 },
   "plates": {
     "A": { "name": "pool", "mode": "illustrated", "post": 0.5, "base": "pool", "line": "tar", "text": "body" },

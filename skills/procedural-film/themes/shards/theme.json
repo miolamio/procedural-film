@@ -3,7 +3,7 @@
   "name": "Shards / Polygon",
   "status": "ready",
   "look": "Flat Voronoi facets in four blue steps that part on the beat; plate B is low-poly space; cuts shatter",
-  "accent": { "base": "flare", "hot": "flareHot" },
+  "accent": { "base": "flare", "hot": "flareHot", "budget": { "area": 0.05 } },
   "frame": { "width": 1920, "height": 1080 },
   "plates": {
     "A": { "name": "shard field", "mode": "schematic", "post": 0.4, "base": "ground", "line": "edge", "text": "shardPale" },
