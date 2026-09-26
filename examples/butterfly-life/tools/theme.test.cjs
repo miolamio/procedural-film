@@ -223,6 +223,16 @@ test('dropping --accent on a later apply restores the theme\'s own accent hex', 
   assert.doesNotMatch(b, /3AA0FF/i);
 });
 
+test('the override note names the theme\'s own accent hex, not the recoloured override', { skip }, () => {
+  const dir = film();
+  T.apply(dir, THEMES, 'negative', T.parseOverrides({ accent: '#3AA0FF' }));
+  const ab = read(dir, 'docs/art-bible.md');
+  // negative's palette.js has accent: '#FF9442', accentHot: '#FFD8A8', accentGlow: '#B8501A' before
+  // any override; the note must name those, not the newly recoloured #3AA0FF-derived rows.
+  assert.match(ab, /accent #3AA0FF instead of the theme's \(accent #FF9442, accentHot #FFD8A8, accentGlow #B8501A\)/);
+  assert.doesNotMatch(ab, /theme's \(accent #3AA0FF/);
+});
+
 test('an override equal to the theme\'s own value is not recorded as an override', { skip }, () => {
   const dir = film();
   const t = T.apply(dir, THEMES, 'phosphor', T.parseOverrides({ carrier: 'crt', frame: '1920x1080' }));
@@ -290,10 +300,29 @@ test('--root and --themes reject a value-less flag', () => {
   assert.match(r2.stderr, /--themes needs a path/);
 });
 
+test('--out rejects a value-less flag', () => {
+  const r = spawnSync(process.execPath, [BIN, 'lookbook', '--out'], { encoding: 'utf8' });
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /--out needs a path/);
+});
+
 test('lookbook embeds every theme and the brief line builder', { skip }, () => {
   const html = T.lookbook(THEMES);
   for (const t of T.listThemes(THEMES)) assert.ok(html.includes(`"id":"${t.id}"`), t.id);
   assert.doesNotMatch(html, /\/\*THEMES\*\//);
   assert.match(html, /<title>Style lookbook<\/title>/);
   assert.match(html, /node tools\/theme\.cjs apply/);
+});
+
+test('lookbook only emits accent/grain flags that differ from the theme\'s own value', { skip }, () => {
+  const html = T.lookbook(THEMES);
+  assert.match(html, /st\.accent&&st\.accent!==sel\.accent/);
+  assert.match(html, /st\.grain!==null&&st\.grain!==sel\.grain/);
+});
+
+test('lookbook escapes the frame dimension string and wraps long text without breaking mid-word', { skip }, () => {
+  const html = T.lookbook(THEMES);
+  assert.match(html, /esc\(dim\(t\)\)/);
+  assert.match(html, /overflow-wrap:anywhere/);
+  assert.doesNotMatch(html, /word-break:break-all/);
 });

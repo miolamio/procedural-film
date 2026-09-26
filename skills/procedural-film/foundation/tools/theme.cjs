@@ -111,6 +111,16 @@ function rowHex(palText, name) {
   return m ? m[1].toUpperCase() : null;
 }
 
+/** The theme's own accent rows as they stand in palette.js right now, read before any override rewrites them. */
+function originalAccentValues(theme, palText) {
+  const rows = theme.accent || {};
+  const out = {};
+  if (rows.base) out[rows.base] = rowHex(palText, rows.base);
+  if (rows.hot) out[rows.hot] = rowHex(palText, rows.hot);
+  if (rows.deep) out[rows.deep] = rowHex(palText, rows.deep);
+  return out;
+}
+
 function paletteBlock(theme, text, values) {
   let body = text.replace(/\s+$/, '');
   for (const [name, hex] of Object.entries(values)) {
@@ -146,13 +156,13 @@ function applyPalette(lib, rows) {
   return lines.join('\n');
 }
 
-function overrideNote(theme, o, values) {
+function overrideNote(theme, o, original) {
   const parts = [];
   if (o.frame) {
     const k = Math.min(o.frame.width / theme.frame.width, o.frame.height / theme.frame.height);
     parts.push(`frame ${o.frame.width}×${o.frame.height} instead of ${theme.frame.width}×${theme.frame.height}: every pixel value below assumes the theme's frame, so scale it by ${+k.toFixed(4)}, keep the ratios and recompose section 1 for the new frame`);
   }
-  if (o.accent) parts.push(`accent ${o.accent} instead of the theme's (${Object.entries(values).map(([n, h]) => `${n} ${h}`).join(', ')}); where section 2 names the old hex, read the new one`);
+  if (o.accent) parts.push(`accent ${o.accent} instead of the theme's (${Object.entries(original).map(([n, h]) => `${n} ${h}`).join(', ')}); where section 2 names the old hex, read the new one`);
   if (o.carrier === 'none') parts.push(`no carrier${theme.carrier ? `: the theme's ${theme.carrier.kind} is off` : ''}`);
   else if (o.carrier) parts.push(`carrier ${o.carrier} over the whole film`);
   if (o.grain !== undefined) parts.push(`post ${o.grain} on every plate instead of the theme's`);
@@ -205,7 +215,8 @@ function apply(root, dir, id, o) {
   const pal = fs.readFileSync(path.join(dir, id, theme.palette || 'palette.js'), 'utf8');
   const sections = fs.readFileSync(path.join(dir, id, 'art-bible-1-9.md'), 'utf8');
   const lib = applyPalette(fs.readFileSync(libFile, 'utf8'), paletteBlock(theme, pal, values));
-  const ab = applyArtBible(fs.readFileSync(abFile, 'utf8'), theme, sections, overrideNote(theme, o, values));
+  const original = o.accent ? originalAccentValues(theme, pal) : {};
+  const ab = applyArtBible(fs.readFileSync(abFile, 'utf8'), theme, sections, overrideNote(theme, o, original));
   const resolved = resolveTheme(theme, o);
   fs.writeFileSync(libFile, lib);
   fs.writeFileSync(abFile, ab);
@@ -241,6 +252,7 @@ function main() {
   try {
     if (args.root !== undefined && typeof args.root !== 'string') throw new Error('--root needs a path');
     if (args.themes !== undefined && typeof args.themes !== 'string') throw new Error('--themes needs a path');
+    if (args.out !== undefined && typeof args.out !== 'string') throw new Error('--out needs a path');
     const root = args.root ? path.resolve(args.root) : C.ROOT;
     const dir = findThemes(root, typeof args.themes === 'string' ? args.themes : null);
     if (cmd !== 'show' && !dir) throw new Error('no themes/ folder found: pass --themes <skill>/themes or set PF_THEMES');
@@ -303,7 +315,7 @@ h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
 fieldset{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 12px}
 legend{font-weight:600;padding:0 4px}label{margin-right:14px;white-space:nowrap}
 dl{margin:8px 0 0;font-size:13px}dt{color:var(--muted)}dd{margin:0 0 6px}
-pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-all;margin:6px 0}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0}
 button.copy{font:inherit;font-size:13px;padding:3px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:inherit;cursor:pointer}
 </style>
 <main>
@@ -333,7 +345,7 @@ let sel=THEMES[0];
 const st={frame:null,carrier:null,accent:null,grain:null};
 const dim=(t)=>t.frame.width+'x'+t.frame.height;
 function radios(host,name,opts,def,cur){host.innerHTML=opts.map((o)=>'<label><input type="radio" name="'+name+'" value="'+o+'"'+((cur||def)===o?' checked':'')+'> '+o+(o===def?' (theme)':'')+'</label>').join('');}
-function cards(){$('cards').innerHTML=THEMES.map((t)=>'<button class="card" type="button" data-id="'+t.id+'" aria-pressed="'+(t===sel)+'">'+(t.preview?'<img alt="" src="'+t.preview+'">':'')+'<div class="t"><b>'+esc(t.name)+'</b><span>'+esc(t.id)+' · '+dim(t)+' · '+esc(t.status)+'</span><br><span>'+esc(t.look)+'</span><div class="sw">'+t.swatches.map((h)=>'<i style="background:'+h+'"></i>').join('')+'</div></div></button>').join('');}
+function cards(){$('cards').innerHTML=THEMES.map((t)=>'<button class="card" type="button" data-id="'+t.id+'" aria-pressed="'+(t===sel)+'">'+(t.preview?'<img alt="" src="'+t.preview+'">':'')+'<div class="t"><b>'+esc(t.name)+'</b><span>'+esc(t.id)+' · '+esc(dim(t))+' · '+esc(t.status)+'</span><br><span>'+esc(t.look)+'</span><div class="sw">'+t.swatches.map((h)=>'<i style="background:'+h+'"></i>').join('')+'</div></div></button>').join('');}
 function controls(){
   radios($('frame'),'frame',FRAMES,dim(sel),st.frame);
   radios($('carrier'),'carrier',['none','crt'],sel.carrier,st.carrier);
@@ -349,8 +361,8 @@ function outputs(){
   const parts=['Style: '+sel.id],flags=[];
   if(st.frame&&st.frame!==dim(sel)){parts.push('frame '+st.frame);flags.push('--frame '+st.frame);}
   if(st.carrier&&st.carrier!==sel.carrier){parts.push('carrier '+st.carrier);flags.push('--carrier '+st.carrier);}
-  if(st.accent){parts.push('accent '+st.accent);flags.push("--accent '"+st.accent+"'");}
-  if(st.grain!==null){parts.push('grain '+st.grain);flags.push('--grain '+st.grain);}
+  if(st.accent&&st.accent!==sel.accent){parts.push('accent '+st.accent);flags.push("--accent '"+st.accent+"'");}
+  if(st.grain!==null&&st.grain!==sel.grain){parts.push('grain '+st.grain);flags.push('--grain '+st.grain);}
   $('brief').textContent=parts.join('; ');
   $('cmd').textContent='node tools/theme.cjs apply '+sel.id+(flags.length?' '+flags.join(' '):'');
 }
