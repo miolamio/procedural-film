@@ -23,7 +23,7 @@ Planned, second wave: `snow` (snow and one drop), `drybrush`, `relief` (heat map
 ## Picking a style
 
 - Step 0 shows the lookbook (`tools/theme.cjs lookbook`) or `tools/theme.cjs list`; the user answers with one `Style:` line.
-- Step 3 applies it: `node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt] [--accent #RRGGBB] [--grain 0..1]`.
+- Step 3 applies it: `node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt] [--accent '#RRGGBB'] [--grain 0..1]`.
 - A theme fixes line, tone, motion, plate B, font, match cuts and overlays. Frame, carrier, accent and grain hold across themes and may be overridden per film; `docs/theme.json` records the overrides and check 4 warns when the timeline leaves them.
 - Pick `house` unless the user names another look or the subject calls for one; say which theme you picked and why in one line.
 - A `draft` theme is usable only within what its `status` and `needs` allow. Tell the user what is missing.

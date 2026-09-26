@@ -51,7 +51,7 @@ Done when: every phase of the story traces to a captured source listed in `SUMMA
 Apply the brief's `Style:` line. With none, apply `house`, unless the subject calls for another theme: then say which and why in one line. A `draft` theme only within what its `needs` allow.
 
 ```bash
-node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt] [--accent #RRGGBB] [--grain 0..1]
+node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt] [--accent '#RRGGBB'] [--grain 0..1]
 ```
 
 It pastes the theme's sections 1–9 into `docs/art-bible.md` (headed by a Film overrides note when an axis changes), the theme's palette rows inside the 2.2 markers of `src/lib.js` (the accent rows recoloured) and the resolved `docs/theme.json`, and prints the timeline's `width`, `height` and `carrier` and each plate's `mode`, `post` and `grade`, which step 5 takes as they are. Rerun it to switch theme: sections 1–9 and the theme rows are swapped, the subject rows stay. `node tools/theme.cjs show` prints the applied style again. Line, tone and motion are not overrides: for another line, pick another theme or run a reference analysis.
