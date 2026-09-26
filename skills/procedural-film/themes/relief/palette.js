@@ -1,0 +1,10 @@
+    // Theme relief, art bible 2.1 (the void, the height ramp, the wire, one amber thread). Paste before the subject rows.
+    reliefVoid: '#000000',
+    reliefBlue: '#1E3F9A',
+    reliefSand: '#D8C48A',
+    reliefRed: '#901B20',
+    reliefSun: '#DFC505',
+    reliefWire: '#E6E1D3',
+    reliefDim: '#6E7280',
+    amber: '#FF9F1C',
+    amberHot: '#FFE2A8',

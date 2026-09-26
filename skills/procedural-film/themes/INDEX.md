@@ -23,8 +23,7 @@ Each theme folder holds:
 | [`snow`](snow/) | 1920×1080 | Bare ink trees and stick figures in an overexposed white that eats the ground, stipple and snow on ones, one red drop for the whole film; plate B is the same frame as its negative, the drop still red | ready |
 | [`firs`](firs/) | 1920×1080 | A night collage: one pitch-black jagged fir edge without contour on a flat ember sky, a drifting swarm of cut-paper almond eyes, lollipop figures on the snow, one ice iris; plate B is the negative | ready |
 | [`drybrush`](drybrush/) | 1920×1080 | Dry-brush silhouettes of trees and figures in one blue-black ink on grey paper in a black passe-partout: three planes tracked on twos, paper eyes, no tone and no accent; plate B is the same frame in negative | ready |
-
-Planned, second wave: `relief` (heat map).
+| [`relief`](relief/) | 1080×1920 | A false-colour massif on black (blue shallows, a sand coast, red slopes, a yellow summit) as a perspective mesh in wire of one width, one amber isoline threaded round it, pixel labels and ruler brackets; plate B is the same surface from above as an isoline map, cut on the thread | ready |
 
 ## Picking a style
 
@@ -55,5 +54,6 @@ A frame shows the accent when pixels within 24 of the row's colour on every chan
 | `shards` | `{ area: 0.05 }` | flare red on one facet or one solid |
 | `blob` | `{ area: 0.02 }` | yolk yellow on one small thing |
 | `crater` | `{ area: 0.08 }` | yolk only in the throat's core, at the bottom of the well |
+| `relief` | `{ area: 0.01 }` | amber on one isoline, the thread, and nothing else |
 
 A one-point look (`snow`, one drop for the whole film) budgets `{ area: 0.002 }`.

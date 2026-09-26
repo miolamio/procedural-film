@@ -1,0 +1,26 @@
+{
+  "id": "relief",
+  "name": "Heat map / Relief",
+  "status": "ready",
+  "look": "A false-colour massif on black, blue shallows to a sand coast, red slopes and a yellow summit, as a perspective mesh in wire of one width; one amber isoline threads round the mountain; pixel-font labels and ruler brackets; plate B is the same surface from above as an isoline map",
+  "accent": { "base": "amber", "hot": "amberHot", "budget": { "area": 0.01 } },
+  "frame": { "width": 1080, "height": 1920 },
+  "plates": {
+    "A": { "name": "relief", "mode": "illustrated", "post": 0, "base": "reliefVoid", "line": "reliefWire", "text": "reliefWire" },
+    "B": { "name": "isoline map", "mode": "schematic", "post": 0, "base": "reliefVoid", "line": "reliefWire", "text": "reliefWire" }
+  },
+  "axes": {
+    "base": "the void: flat black, nothing lit but the surface and the furniture",
+    "line": "wire of one constant width (1.4 px) over every quad of the mesh, near and far alike; 2 px isolines on plate B",
+    "tone": "the height ramp: blue shallows, a hard sand coast, red slopes, a yellow summit, with a soft lambert shade per quad",
+    "planB": "isoline map: the same surface from above, each level in its ramp colour on black, heights on every third level, a faint graticule and a section with its profile",
+    "motion": "weightless 24: the camera drifts and descends on ones, the thread draws on, the section slides; nothing on twos",
+    "carrier": "clean: no grain, no post",
+    "accent": "the amber thread: one isoline, on the mesh and on the map, nothing else amber",
+    "font": "monospace: pixelText (5×7) in wire and dim, labels on black knock-outs",
+    "match": "isoline: the camera lands straight down on the last frame of plate A and the amber thread lies on plate B's isoline",
+    "overlays": "ruler brackets round the map, a ruler under the title, callouts on leaders, a stepped legend"
+  },
+  "recipes": [10, 11, 20, 21, 51],
+  "palette": "palette.js"
+}
