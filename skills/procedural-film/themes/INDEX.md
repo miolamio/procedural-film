@@ -17,6 +17,7 @@ Each theme folder holds:
 | [`phosphor`](phosphor/) | 1920×1080 | Green vector strokes and a typing pixel-font terminal on a CRT carrier; plate B is an oscilloscope; acts end on `crtoff` | ready |
 | [`shards`](shards/) | 1920×1080 | Flat Voronoi facets in four blue steps that part on the beat; plate B is low-poly space and tunnels; cuts shatter | ready |
 | [`blob`](blob/) | 1920×1080 | White metaball bodies with tar rims and marble contours on a flat blue pool; they merge, drip and melt; plate B is a relief map of the same field | ready |
+| [`scallop`](scallop/) | 1920×1080 | A flat print in three inks (white, scarlet, soot) and one lagoon cyan: even heavy contours, scallop waves in three offset rows, fir rows, on threes; plate B is the same frame as a white-wire schematic on scarlet | ready — no wordmark until the engine has a stroke font |
 
 Planned, second wave: `snow` (snow and one drop), `drybrush`, `relief` (heat map), `crater` (red paper).
 

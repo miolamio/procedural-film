@@ -1,0 +1,26 @@
+{
+  "id": "scallop",
+  "name": "Flat scallop / Three inks",
+  "status": "ready",
+  "look": "Flat print in white, scarlet and soot with one lagoon cyan: heavy even contours, offset scallop waves, fir rows; plate B is a wire schematic on scarlet",
+  "accent": { "base": "lagoon" },
+  "frame": { "width": 1920, "height": 1080 },
+  "plates": {
+    "A": { "name": "print", "mode": "illustrated", "post": 0, "base": "sheet", "line": "soot", "text": "soot" },
+    "B": { "name": "plan", "mode": "schematic", "post": 0, "base": "scarlet", "line": "sheet", "text": "sheet" }
+  },
+  "axes": {
+    "base": "flat white sheet, no texture",
+    "line": "one soot contour of constant width on every shape; no pressure, no taper",
+    "tone": "flat fills in three inks; no tone, no hatching, no gradient",
+    "planB": "schematic: the same frame in sheet wire on scarlet, soot guides and dimensions",
+    "motion": "on threes (8 drawings a second) with a small shake per drawing",
+    "carrier": "clean: no grain, no post",
+    "accent": "lagoon cyan on one thing per shot",
+    "font": "stencil capitals once the engine has a stroke font; none until then",
+    "match": "silhouette: the accent shape keeps its outline and place across the cut",
+    "overlays": "none"
+  },
+  "recipes": [22, 26, 29, 31, 38, 39],
+  "palette": "palette.js"
+}

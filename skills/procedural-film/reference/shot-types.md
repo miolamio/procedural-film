@@ -399,3 +399,25 @@ A body made of metaballs that merges, splits, drips and melts: a flat fill, a he
 - Mistake: animating the outline instead of the balls — the balls are the character, the rim follows. A `phase` that stands still, so the body freezes between moves. Too fine a `cell` on a large body: 8 to 12 px is smooth enough and keeps the frame in budget. A drip drawn as a separate shape: give it a ball and it joins and leaves the body by itself
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/25-fx-blob.js`
 
+## 38. Scallop waves
+
+Water as a flat print: three rows of scallop edges, each a run of circular sags between sharp cusps, filled in one ink to the bottom of the frame and stroked with one even contour. The middle row sits half a period off the other two, and the rows slide against each other on threes.
+
+- Duration: 1.0 to 4.0 s; the rows swing once a bar, so any length on the bar grid holds
+- Plate: flat sheet (`sheet` on the scallop theme); the rows are scarlet with a soot contour
+- Camera: locked. The rows move; the frame does not
+- Leans on: `boil(T, 8)` for the drawing index, `noise2` for the per-drawing shake, plain `ctx` paths (no `inkPath`: the contour has no pressure). An edge is `P` period, `D` sag, arc radius `R = (P²/4 + D²) / 2D`, sampled into a polyline so the shake can move its vertices
+- Mistake: more than three rows, or all rows in phase — the half-period offset is the pattern. A row stroked but not filled, so the row behind shows through. Moving the rows on `t` at 24 fps: they swim instead of print. A boat drawn after the last row, so nothing sits in the water
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/35-fx-scallop.js`
+
+## 39. Fir row
+
+A shore of flat firs standing on one line: 3 or 4 stacked tiers and a short trunk each, one closed outline per fir, heights and spacing from a seeded `rng`, sorted so the tallest stand in front and knock out the ones behind.
+
+- Duration: a background layer; it holds for the whole shot
+- Plate: soot firs with a soot contour on a soot shore band (plate A); scarlet fills with a sheet wire (plate B)
+- Camera: locked, or a slow pan that moves the whole row as one
+- Leans on: `rng`, `hash` (the row is a function of its seed and the base line), the same shake as recipe 38
+- Mistake: a fresh seed per frame, or `Math.random`, so the forest jumps. Drawing the firs in placement order, so a short fir covers a tall one. Tiers built without the notch at each step, which turns a fir into a triangle
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/35-fx-scallop.js`
+
