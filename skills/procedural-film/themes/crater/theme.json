@@ -1,0 +1,26 @@
+{
+  "id": "crater",
+  "name": "Crater / Red paper",
+  "status": "ready",
+  "look": "Red paper with grain, a throat glowing from red through orange to yolk at the bottom of a well, a rim of hanging hair loops, scrawled stick figures falling into it; plate B is the same frame as a stepped heat map",
+  "accent": { "base": "yolk", "hot": "yolkHot", "budget": { "area": 0.08 } },
+  "frame": { "width": 1080, "height": 1920 },
+  "plates": {
+    "A": { "name": "red paper", "mode": "illustrated", "post": 0.8, "base": "crater", "line": "scrawl", "text": "scratch" },
+    "B": { "name": "heat map", "mode": "schematic", "post": 0, "base": "craterDeep", "line": "scrawl", "text": "scratch" }
+  },
+  "axes": {
+    "base": "dense colour fill: flat crater red with paper grain",
+    "line": "scrawl: a thin trembling line in two or three passes a hair apart (stickFigure, springLimb); inkPath with pressure for the wordmark",
+    "tone": "the throat: a radial gradient down the crater ramp, red to orange to yolk at the bottom of the well",
+    "planB": "heat map: the same frame in stepped bands of the crater ramp, isotherms in scrawl, a banded scale",
+    "motion": "on twos (figures, the pulse) with the line and the grain boiling at 12 fps",
+    "carrier": "clean: paper grain only (post 0.8 on plate A)",
+    "accent": "yolk: the throat's core, at the bottom of the frame, nowhere else",
+    "font": "hand-scratched: strokeText in the hand style, in scratch on red",
+    "match": "silhouette: the hero figure keeps its outline and place across the cut",
+    "overlays": "none on plate A; the banded scale on plate B"
+  },
+  "recipes": [11, 19, 23, 28, 38, 41],
+  "palette": "palette.js"
+}

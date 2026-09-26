@@ -432,3 +432,14 @@ A shore of flat firs standing on one line: 3 or 4 stacked tiers and a short trun
 - Mistake: a fresh seed per frame, or `Math.random`, so the forest jumps. Drawing the firs in placement order, so a short fir covers a tall one. Tiers built without the notch at each step, which turns a fir into a triangle
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/35-fx-scallop.js`
 
+## 41. Fall into the throat
+
+Figures falling into depth: each one shrinks toward one vanishing point at the bottom of a well, the near one big enough to carry the shot, the far ones a few pixels tall. The well is a radial glow down a colour ramp, framed by hair hanging from the top edge and a ragged lip; scale, not speed, says how deep it goes.
+
+- Duration: 1.0 to 4.0 s; a figure loses about 14 percent of its height a second, so a fall reads over any length on the bar grid
+- Plate: red paper (`crater` on the crater theme) with the throat's gradient; plate B is the same frame as a stepped heat map
+- Camera: locked. The figures fall; the frame does not
+- Leans on: `stickFigure` (`head: 'face'`, `joint: 0`, two or three passes on other seeds for the scrawl), `springLimb` for the scribbled torso, `onTwos` for the fall clock, `boil(T, 12)` and `h3` for the hair, the lip and the grain, `ramp` over the theme's rows for the glow and the bands, `isolines` for the isotherms, `strokeText` for a scratched wordmark
+- Mistake: a fall clock on the shot's `t`, so the figures jump on the cut; keep it a closed form of global `T`: `p = (onTwos(T) · speed + phase) mod 1`, `s = exp(−k p)`, place `vp + (start − vp) · s`, height `H0 · s`, with a fade at both ends of `p`. Shrinking the figure but not its line width, so the far ones turn into blots; scale the width with the height. Large joint jitter on the extra passes, which splits the face into several; tremble the segments, not the joints. Yellow outside the throat: the accent is the core only
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/38-fx-crater.js`
+
