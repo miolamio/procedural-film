@@ -38,6 +38,7 @@ Expect 1000+ lines for a dense shot — density is part of the look (hundreds of
 - A line that draws on uses `inkPath` `reveal` (0..1 by arc length, or `[from, to]` for a running dash) and `nib` on the tip; do not slice the point list.
 - Caches only for t-independent data. Anything time-varying derives from `t` alone.
 - Particle fields are `lib.particles` (sparks, dust, pollen, smoke): position is a closed function of time, never stored between frames. `loop` repeats background dust; `onTwos` holds the drawing on the 12 fps grid.
+- The medium is the timeline's `carrier`, not the scene: `crt` scanlines and screen, `vhs` chroma lag, tracking tears, head noise and the tape counter are drawn once per frame over the finished picture, transitions included. A scene never draws its own.
 - Watercolour tone is `lib.wash(ctx, clip, opts)`, cached like paper and blitted each frame; hatch sits on top of it.
 
 ## Text

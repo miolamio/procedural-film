@@ -106,11 +106,18 @@ test('carrier none drops the theme carrier', { skip }, () => {
   assert.strictEqual(t.carrier, undefined);
 });
 
+test('--carrier vhs puts the vhs carrier on the timeline', { skip }, () => {
+  const t = T.apply(film(), THEMES, 'house', T.parseOverrides({ carrier: 'vhs' }));
+  assert.deepStrictEqual(t.carrier, { kind: 'vhs' });
+  assert.strictEqual(t.overrides.carrier, 'vhs');
+  assert.match(T.summary(t), /carrier: \{"kind":"vhs"\}/);
+});
+
 test('bad input is refused before anything is written', { skip }, () => {
   assert.throws(() => T.parseOverrides({ frame: '800x600' }), /--frame/);
   assert.throws(() => T.parseOverrides({ accent: 'red' }), /--accent/);
   assert.throws(() => T.parseOverrides({ grain: '2' }), /--grain/);
-  assert.throws(() => T.parseOverrides({ carrier: 'vhs' }), /--carrier/);
+  assert.throws(() => T.parseOverrides({ carrier: 'betamax' }), /--carrier/);
   // a bare flag (--grain with no value) parses to `true`; `--grain=` parses to ''. Neither is a value.
   assert.throws(() => T.parseOverrides({ frame: true }), /--frame/);
   assert.throws(() => T.parseOverrides({ frame: '' }), /--frame/);
@@ -356,6 +363,8 @@ test('lookbook embeds every theme and the brief line builder', { skip }, () => {
   assert.doesNotMatch(html, /\/\*THEMES\*\//);
   assert.match(html, /<title>Style lookbook<\/title>/);
   assert.match(html, /node tools\/theme\.cjs apply/);
+  assert.doesNotMatch(html, /\/\*CARRIERS\*\//);
+  assert.match(html, /const CARRIERS=\["none","crt","vhs"/);
 });
 
 test('lookbook only emits accent/grain flags that differ from the theme\'s own value', { skip }, () => {

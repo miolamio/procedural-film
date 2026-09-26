@@ -24,7 +24,8 @@ Planned, second wave: `snow` (snow and one drop), `drybrush`, `relief` (heat map
 
 - Step 0 shows the lookbook (`tools/theme.cjs lookbook`) or `tools/theme.cjs list`; the user answers with one `Style:` line.
 - At step 0, with no answer, pick `house` unless the subject calls for another theme; say which and why in one line.
-- Step 3 applies it: `node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt] [--accent '#RRGGBB'] [--grain 0..1]`.
+- Step 3 applies it: `node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt|vhs] [--accent '#RRGGBB'] [--grain 0..1]`.
 - A theme fixes line, tone, motion, plate B, font, match cuts and overlays. Frame, carrier, accent and grain hold across themes and may be overridden per film; `docs/theme.json` records the overrides, and check 4 warns when the timeline's frame or carrier differs from it.
+- Carriers (`--carrier`): `crt` (a tube: scanlines, a rounded screen, a hum bar; the phosphor theme's) and `vhs` (a tape: chroma lag, a rolling tracking band, head-switching noise, a pixel-font counter; pair it with `transitionIn: { kind: 'tracking' }` for cuts that lose tracking).
 - A `draft` theme is usable only within what its `status` and `needs` allow. Tell the user what is missing.
 - If no theme fits, run a reference analysis (`templates/reference-analysis.md`) and write sections 1 to 9 by hand; a look that proves itself on a finished film becomes a new theme folder with its own `preview.jpg`.
