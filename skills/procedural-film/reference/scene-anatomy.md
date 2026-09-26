@@ -43,6 +43,7 @@ Expect 1000+ lines for a dense shot — density is part of the look (hundreds of
 ## Text
 
 Almost none — `lib.text` appears once per film (the closing wordmark). Labels ride on `bracket({ label })`, `arcAnnotation({ label })` and `ticks`. Schematic shots carry no text at all (art bible §5).
+A hand-scratched or stencilled wordmark (crater, scallop, xerox) is `lib.strokeText` (`style: 'hand'` with `reveal` to write it on, or `style: 'stencil'`), never a system font.
 
 ## What the gate catches — the expensive mistakes
 

@@ -7220,6 +7220,406 @@
   lib.plot = plot;
 
   // ===========================================================================
+  // Stroke font
+  // ===========================================================================
+
+  // A single-line font drawn as strokes, the same on every machine (a system font is not). Glyphs
+  // live on a grid 10 units tall: y 0 is the cap line, y 10 the baseline; a glyph is w units wide.
+  // Each stroke is a polyline [x, y, x, y, ...]; a stroke of one point is a dot. Strokes are listed
+  // stems first: in the stencil style a stroke whose end touches an earlier stroke is cut short
+  // there (the bridge), so O is two halves (bridges top and bottom) and E a stem with three bars.
+  // The hand style joins strokes that meet end to end back into one pen line. Upper case only:
+  // lower case draws as upper case (Latin and Cyrillic), an unknown character as '?'.
+  const SF = {};
+  function sfArc(cx, cy, rx, ry, a0, a1) {
+    const n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / 12));
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const a = ((a0 + ((a1 - a0) * i) / n) * Math.PI) / 180;
+      out.push(+(cx + rx * Math.cos(a)).toFixed(3), +(cy + ry * Math.sin(a)).toFixed(3));
+    }
+    return out;
+  }
+  const sfG = (chars, w, ...strokes) => {
+    for (const ch of chars) SF[ch] = { w, s: strokes };
+  };
+  {
+    const A = sfArc;
+    const ring = (cx, rx) => [A(cx, 5, rx, 5, -90, 90), A(cx, 5, rx, 5, 90, 270)];
+    // Latin
+    sfG('AА', 6, [0, 10, 3, 0], [3, 0, 6, 10], [1.05, 6.5, 4.95, 6.5]);
+    sfG('BВ', 6.75, [0, 0, 0, 10], [0, 0, 3.5, 0].concat(A(3.5, 2.25, 2.25, 2.25, -90, 90), [0, 4.5]), [0, 4.5, 4, 4.5].concat(A(4, 7.25, 2.75, 2.75, -90, 90), [0, 10]));
+    sfG('CС', 6.3, A(3.4, 5, 3.4, 5, -42, -318));
+    sfG('D', 6, [0, 0, 0, 10], [0, 0, 1.5, 0].concat(A(1.5, 5, 4.5, 5, -90, 90), [0, 10]));
+    sfG('EЕ', 5, [0, 0, 0, 10], [0, 0, 5, 0], [0, 10, 5, 10], [0, 5, 4, 5]);
+    sfG('F', 5, [0, 0, 0, 10], [0, 0, 5, 0], [0, 5, 4, 5]);
+    sfG('G', 6.6, A(3.3, 5, 3.3, 5, -40, -360), [3.6, 5, 6.6, 5]);
+    sfG('HН', 6, [0, 0, 0, 10], [6, 0, 6, 10], [0, 5, 6, 5]);
+    sfG('I', 0, [0, 0, 0, 10]);
+    sfG('J', 5, [5, 0, 5, 7].concat(A(2.5, 7, 2.5, 3, 0, 180)));
+    sfG('KК', 5.5, [0, 0, 0, 10], [5.5, 0, 0, 6], [1.8, 4.036, 5.5, 10]);
+    sfG('L', 5, [0, 0, 0, 10], [0, 10, 5, 10]);
+    sfG('MМ', 7.5, [0, 10, 0, 0], [0, 0, 3.75, 7], [3.75, 7, 7.5, 0], [7.5, 0, 7.5, 10]);
+    sfG('N', 6, [0, 10, 0, 0], [0, 0, 6, 10], [6, 10, 6, 0]);
+    sfG('OО', 6.6, ...ring(3.3, 3.3));
+    sfG('PР', 6.25, [0, 0, 0, 10], [0, 0, 3.5, 0].concat(A(3.5, 2.75, 2.75, 2.75, -90, 90), [0, 5.5]));
+    sfG('Q', 6.6, ...ring(3.3, 3.3), [4, 7.2, 6.8, 10.6]);
+    sfG('R', 6.25, [0, 0, 0, 10], [0, 0, 3.5, 0].concat(A(3.5, 2.75, 2.75, 2.75, -90, 90), [0, 5.5]), [2.8, 5.5, 6.1, 10]);
+    sfG('S', 5.8, A(2.9, 2.5, 2.8, 2.5, -25, -270), A(2.9, 7.5, 2.9, 2.5, -90, 155));
+    sfG('TТ', 6, [0, 0, 6, 0], [3, 0, 3, 10]);
+    sfG('U', 6, [6, 0, 6, 10], [0, 0, 0, 7].concat(A(3, 7, 3, 3, 180, 0)));
+    sfG('V', 6, [0, 0, 3, 10], [3, 10, 6, 0]);
+    sfG('W', 8.4, [0, 0, 2.1, 10], [2.1, 10, 4.2, 2], [4.2, 2, 6.3, 10], [6.3, 10, 8.4, 0]);
+    sfG('XХ', 6, [0, 0, 6, 10], [6, 0, 0, 10]);
+    sfG('Y', 6, [0, 0, 3, 5], [6, 0, 3, 5], [3, 5, 3, 10]);
+    sfG('Z', 6, [0, 0, 6, 0], [6, 0, 0, 10], [0, 10, 6, 10]);
+    // digits
+    sfG('0', 5.5, ...ring(2.75, 2.75));
+    sfG('1', 3, [0, 2, 3, 0], [3, 0, 3, 10]);
+    sfG('2', 5.5, A(2.75, 2.9, 2.75, 2.9, -165, 25).concat([0, 10]), [0, 10, 5.5, 10]);
+    sfG('3З', 5.6, A(2.7, 2.5, 2.6, 2.5, -150, 90), A(2.7, 7.5, 2.9, 2.5, -90, 150));
+    sfG('4', 6, [4.5, 10, 4.5, 0], [4.5, 0, 0, 7], [0, 7, 6, 7]);
+    {
+      const bowl5 = A(2.6, 6.9, 2.9, 3.1, -140, 150);
+      sfG('5', 5.5, [5.2, 0, 0.6, 0], [0.6, 0, bowl5[0], bowl5[1]], bowl5);
+    }
+    {
+      const stem6 = A(4.5, 7, 4.5, 7, -80, -180);
+      sfG('6', 5.5, stem6, A(2.75, 7, 2.75, 3, 180, -180));
+      sfG('9', 5.5, A(2.75, 3, 2.75, 3, 0, 360), A(1, 3, 4.5, 7, 0, 80));
+    }
+    sfG('7', 5.5, [0, 0, 5.5, 0], [5.5, 0, 1.8, 10]);
+    sfG('8', 5.5, A(2.75, 2.5, 2.4, 2.5, 90, 450), A(2.75, 7.5, 2.75, 2.5, -90, 270));
+    // punctuation
+    sfG(' ', 3);
+    sfG('.', 0, [0, 9.6]);
+    sfG(',', 0.8, [0.8, 9.2, 0.8, 10, 0, 11.6]);
+    sfG(':', 0, [0, 3.6], [0, 9.6]);
+    sfG(';', 0.8, [0.8, 3.6], [0.8, 9.2, 0.8, 10, 0, 11.6]);
+    sfG('!', 0, [0, 0, 0, 7], [0, 9.6]);
+    sfG('?', 5, A(2.5, 2.5, 2.5, 2.5, -165, 60).concat([2.5, 5.6, 2.5, 7]), [2.5, 9.6]);
+    sfG("'’", 0, [0, 0, 0, 2.8]);
+    sfG('"', 2.4, [0, 0, 0, 2.8], [2.4, 0, 2.4, 2.8]);
+    sfG('-–—', 3.5, [0, 5.5, 3.5, 5.5]);
+    sfG('_', 5, [0, 10, 5, 10]);
+    sfG('/', 4, [4, 0, 0, 10]);
+    sfG('+', 5, [0, 5, 5, 5], [2.5, 2.5, 2.5, 7.5]);
+    sfG('=', 5, [0, 3.8, 5, 3.8], [0, 6.8, 5, 6.8]);
+    sfG('(', 2.5, A(5, 5, 5, 6, -120, -240));
+    sfG(')', 2.5, A(-2.5, 5, 5, 6, -60, 60));
+    // Cyrillic (А В Е К М Н О Р С Т Х З share the Latin and digit shapes above)
+    sfG('Б', 6.25, [0, 0, 0, 10], [0, 0, 5.5, 0], [0, 4.5, 3.5, 4.5].concat(A(3.5, 7.25, 2.75, 2.75, -90, 90), [0, 10]));
+    sfG('Г', 5, [0, 0, 0, 10], [0, 0, 5, 0]);
+    sfG('Д', 6.8, [1.8, 0, 5.8, 0], [1.8, 0, 0.8, 8.2], [5.8, 0, 5.8, 8.2], [0, 8.2, 6.8, 8.2], [0, 8.2, 0, 10], [6.8, 8.2, 6.8, 10]);
+    sfG('Ж', 8, [4, 0, 4, 10], [4, 5, 0.3, 0], [4, 5, 7.7, 0], [4, 5, 0, 10], [4, 5, 8, 10]);
+    sfG('И', 6, [0, 0, 0, 10], [6, 0, 6, 10], [0, 10, 6, 0]);
+    sfG('Й', 6, [0, 0, 0, 10], [6, 0, 6, 10], [0, 10, 6, 0], A(3, -2.2, 1.6, 1, 180, 0));
+    sfG('Л', 6, [6, 0, 6, 10], [1.8, 0, 6, 0], [0, 10, 1.8, 0]);
+    sfG('П', 6, [0, 0, 0, 10], [6, 0, 6, 10], [0, 0, 6, 0]);
+    sfG('У', 6, [6, 0, 1.2, 10], [0, 0, 2.832, 6.6]);
+    sfG('Ф', 7, [3.5, 0, 3.5, 10], A(3.5, 4.5, 3.5, 2.8, -90, 90), A(3.5, 4.5, 3.5, 2.8, 90, 270));
+    sfG('Ц', 6.8, [0, 0, 0, 8.4], [6, 0, 6, 8.4], [0, 8.4, 6.8, 8.4], [6.8, 8.4, 6.8, 10.8]);
+    sfG('Ч', 6, [6, 0, 6, 10], [0, 0, 0, 3.4].concat(A(3, 3.4, 3, 2.1, 180, 90), [6, 5.1]));
+    sfG('Ш', 8, [0, 0, 0, 10], [0, 10, 8, 10], [4, 0, 4, 10], [8, 0, 8, 10]);
+    sfG('Щ', 8.8, [0, 0, 0, 10], [0, 10, 8.8, 10], [4, 0, 4, 10], [8, 0, 8, 10], [8.8, 10, 8.8, 11.6]);
+    sfG('Ъ', 6.8, [1.5, 0, 1.5, 10], [0, 0, 1.5, 0], [1.5, 4.5, 4, 4.5].concat(A(4, 7.25, 2.75, 2.75, -90, 90), [1.5, 10]));
+    sfG('Ы', 7.5, [0, 0, 0, 10], [7.5, 0, 7.5, 10], [0, 4.5, 2.5, 4.5].concat(A(2.5, 7.25, 2.75, 2.75, -90, 90), [0, 10]));
+    sfG('Ь', 5.25, [0, 0, 0, 10], [0, 4.5, 2.5, 4.5].concat(A(2.5, 7.25, 2.75, 2.75, -90, 90), [0, 10]));
+    sfG('Э', 6.2, A(2.9, 5, 3.3, 5, -138, 138), [2, 5, 6.2, 5]);
+    sfG('Ю', 8.6, [0, 0, 0, 10], [0, 5, 2.2, 5], ...ring(5.6, 3));
+    sfG('Я', 6.25, [6.25, 0, 6.25, 10], [6.25, 0, 2.75, 0].concat(A(2.75, 2.75, 2.75, 2.75, -90, -270), [6.25, 5.5]), [3.3, 5.5, 0, 10]);
+    sfG('Ё', 5, [0, 0, 0, 10], [0, 0, 5, 0], [0, 10, 5, 10], [0, 5, 4, 5], [1, -1.8], [4, -1.8]);
+  }
+  for (const ch of Object.keys(SF)) {
+    SF[ch].s.forEach(Object.freeze);
+    Object.freeze(SF[ch].s);
+    Object.freeze(SF[ch]);
+  }
+  lib.strokeFont = Object.freeze(SF);
+
+  const sfNear = (ax, ay, bx, by) => Math.abs(ax - bx) < 0.05 && Math.abs(ay - by) < 0.05;
+  // distance from (px, py) to a polyline
+  function sfDist(px, py, s) {
+    if (s.length === 2) return Math.hypot(px - s[0], py - s[1]);
+    let best = Infinity;
+    for (let i = 0; i + 3 < s.length; i += 2) best = Math.min(best, ptSegDist(px, py, s[i], s[i + 1], s[i + 2], s[i + 3]));
+    return best;
+  }
+  function sfLen(s) {
+    let L = 0;
+    for (let i = 0; i + 3 < s.length; i += 2) L += Math.hypot(s[i + 2] - s[i], s[i + 3] - s[i + 1]);
+    return L;
+  }
+  function sfReverse(s) {
+    const r = [];
+    for (let i = s.length - 2; i >= 0; i -= 2) r.push(s[i], s[i + 1]);
+    return r;
+  }
+  // hand style: strokes that meet end to end become one pen line (E is one line and a bar)
+  const sfChainCache = new Map();
+  function sfChains(ch) {
+    let out = sfChainCache.get(ch);
+    if (out) return out;
+    const left = SF[ch].s.filter((s) => s.length >= 4).map((s) => s.slice());
+    const dots = SF[ch].s.filter((s) => s.length === 2);
+    out = [];
+    while (left.length) {
+      let line = left.shift();
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (let j = 0; j < left.length; j++) {
+          const s = left[j];
+          const n = line.length, m = s.length;
+          let add = null;
+          if (sfNear(line[n - 2], line[n - 1], s[0], s[1])) add = ['end', s];
+          else if (sfNear(line[n - 2], line[n - 1], s[m - 2], s[m - 1])) add = ['end', sfReverse(s)];
+          else if (sfNear(line[0], line[1], s[m - 2], s[m - 1])) add = ['start', s];
+          else if (sfNear(line[0], line[1], s[0], s[1])) add = ['start', sfReverse(s)];
+          if (!add) continue;
+          line = add[0] === 'end' ? line.concat(add[1].slice(2)) : add[1].slice(0, -2).concat(line);
+          left.splice(j, 1);
+          grew = true;
+          break;
+        }
+      }
+      out.push(line);
+    }
+    out = out.concat(dots);
+    sfChainCache.set(ch, out);
+    return out;
+  }
+  // cut a polyline back by d units at its start or end
+  function sfTrim(s, d, atEnd) {
+    const p = atEnd ? sfReverse(s) : s.slice();
+    let left = d;
+    while (p.length >= 4) {
+      const seg = Math.hypot(p[2] - p[0], p[3] - p[1]);
+      if (seg > left) {
+        const f = left / seg;
+        p[0] += (p[2] - p[0]) * f;
+        p[1] += (p[3] - p[1]) * f;
+        return atEnd ? sfReverse(p) : p;
+      }
+      left -= seg;
+      p.splice(0, 2);
+    }
+    return null;
+  }
+  // stencil style, drawn with butt caps and mitred corners, in glyph units. Strokes that meet end
+  // to end at a sharp angle (V, M, N, W, the arms of Y) join into one polyline: a bridge there
+  // would eat the letter. Any other end that touches an earlier stroke is cut back until its end
+  // corners clear that stroke by half a weight plus the bridge, so the gap is the same at any
+  // angle; an end that would need more than a weight past that stays joined (K's leg). A free end
+  // that runs level or plumb is lengthened by half a weight for a square corner. A stroke too short
+  // to lose its ends (A's bar at a heavy weight) keeps them. A dot becomes a square.
+  const sfStencilCache = new Map();
+  function sfEnd(s, atEnd) {
+    const n = s.length;
+    const [x, y, px, py] = atEnd ? [s[n - 2], s[n - 1], s[n - 4], s[n - 3]] : [s[0], s[1], s[2], s[3]];
+    const L = Math.hypot(x - px, y - py) || 1;
+    return { x, y, tx: (x - px) / L, ty: (y - py) / L }; // tangent points out of the stroke
+  }
+  function sfStencil(ch, wU, bU) {
+    const key = ch + '|' + wU.toFixed(3) + '|' + bU.toFixed(3);
+    let out = sfStencilCache.get(key);
+    if (out) return out;
+    const src = SF[ch].s.map((q) => q.slice());
+    for (let merged = true; merged; ) {
+      merged = false;
+      for (let i = 0; i < src.length && !merged; i++) {
+        for (let j = i + 1; j < src.length && !merged; j++) {
+          const A = src[i], B = src[j];
+          if (A.length < 4 || B.length < 4) continue;
+          for (const ea of [false, true]) {
+            for (const eb of [false, true]) {
+              const pa = sfEnd(A, ea), pb = sfEnd(B, eb);
+              const dot = pa.tx * pb.tx + pa.ty * pb.ty; // 1: the two run back over each other
+              if (merged || !sfNear(pa.x, pa.y, pb.x, pb.y) || dot < 0.26 || dot > 0.97) continue;
+              const a2 = ea ? A : sfReverse(A); // runs into the joint
+              const b2 = eb ? sfReverse(B) : B; // runs out of it
+              src[i] = a2.concat(b2.slice(2));
+              src.splice(j, 1);
+              merged = true;
+            }
+          }
+        }
+      }
+    }
+    const need = wU / 2 + bU - 1e-3;
+    const most = need + wU;
+    out = [];
+    for (let j = 0; j < src.length; j++) {
+      let s = src[j];
+      if (s.length === 2) {
+        out.push([s[0], s[1] - wU / 2, s[0], s[1] + wU / 2]);
+        continue;
+      }
+      const touches = (x, y) => {
+        for (let i = 0; i < j; i++) if (src[i].length >= 4 && sfDist(x, y, src[i]) < 0.25) return true;
+        return false;
+      };
+      const clear = (e) => {
+        for (const q of out) {
+          if (sfDist(e.x, e.y, q) < need) return false;
+          if (sfDist(e.x - (e.ty * wU) / 2, e.y + (e.tx * wU) / 2, q) < need) return false;
+          if (sfDist(e.x + (e.ty * wU) / 2, e.y - (e.tx * wU) / 2, q) < need) return false;
+        }
+        return true;
+      };
+      // shortest cut from one end that clears, or -1
+      const cutFor = (atEnd, room) => {
+        for (let d = wU / 2; d <= Math.min(room, most); d += 0.05) {
+          const r = sfTrim(s, d, atEnd);
+          if (r && r.length >= 4 && clear(sfEnd(r, atEnd))) return d;
+        }
+        return -1;
+      };
+      const n = s.length;
+      const a = touches(s[0], s[1]), b = touches(s[n - 2], s[n - 1]);
+      const room = sfLen(s) - 0.6;
+      let ca = a ? Math.max(0, cutFor(false, room)) : 0;
+      let cb = b ? Math.max(0, cutFor(true, room)) : 0;
+      if (ca + cb > room) ca = cb = 0;
+      if (ca > 0) s = sfTrim(s, ca, false);
+      if (cb > 0) s = sfTrim(s, cb, true);
+      s = s.slice();
+      const m = s.length;
+      for (const atEnd of [false, true]) {
+        if (atEnd ? cb > 0 : ca > 0) continue;
+        const e = sfEnd(s, atEnd);
+        if (Math.abs(e.tx) < 0.02 || Math.abs(e.ty) < 0.02) {
+          const i = atEnd ? m - 2 : 0;
+          s[i] += (e.tx * wU) / 2;
+          s[i + 1] += (e.ty * wU) / 2;
+        }
+      }
+      out.push(s);
+    }
+    if (sfStencilCache.size > 512) sfStencilCache.clear();
+    sfStencilCache.set(key, out);
+    return out;
+  }
+
+  /**
+   * strokeText(ctx, str, x, y, opts) : text in the built-in stroke font, identical on every machine.
+   * Latin, digits, basic punctuation and Cyrillic, upper case (lower case draws as upper case, an
+   * unknown character as '?'); '\n' starts a new line. (x, y) is the cap line of the first line at
+   * its align point; size is the cap height, a line is 1.6 × size.
+   *   style 'hand'            'hand': each pen line through inkPath (tapers, wobble, boil, reveal);
+   *                           'stencil': flat bars with bridges cut where strokes meet
+   *   size 64   color pal.ink   alpha 1   align 'left' | 'center' | 'right'   tracking 0 (units)
+   *   weight                  stroke width in px (hand size × 0.075, stencil size × 0.17)
+   *   bridge                  stencil gap in px (weight × 0.45)
+   *   slant                   shear, x per unit of height (hand 0.12, stencil 0)
+   *   jitter                  hand: per-letter baseline, tilt and scale drift, 0 for none (hand 1, stencil 0)
+   *   seed 1   boil          seeds the jitter and the ink; boil as in inkPath (hand only)
+   *   reveal                  0..1 of the whole text written in order, the pen tip on the open end (hand only)
+   *   ink {}                  extra inkPath options for the hand style (double, rough, wobble, nib...)
+   * Returns { width, height } of the whole text in px.
+   */
+  function strokeText(ctx, str, x, y, o = {}) {
+    const stencil = o.style === 'stencil';
+    const size = o.size != null ? o.size : 64;
+    const u = size / 10;
+    const weight = o.weight != null ? o.weight : size * (stencil ? 0.17 : 0.075);
+    const bridge = o.bridge != null ? o.bridge : weight * 0.45;
+    const slant = o.slant != null ? o.slant : stencil ? 0 : 0.12;
+    const jitter = o.jitter != null ? o.jitter : stencil ? 0 : 1;
+    const seed = seedInt(o.seed === undefined ? 1 : o.seed);
+    const gap = 1.8 * u + weight + (o.tracking || 0) * u;
+    const lead = size * 1.6;
+    const lines = String(str).toUpperCase().split('\n');
+    // layout: every glyph placed as a list of px polylines
+    const placed = [];
+    let width = 0;
+    lines.forEach((line, li) => {
+      const chars = Array.from(line).map((ch) => (SF[ch] ? ch : '?'));
+      let w = 0;
+      chars.forEach((ch, k) => (w += SF[ch].w * u + (k < chars.length - 1 ? gap : 0)));
+      if (chars.length) w += weight;
+      width = Math.max(width, w);
+      let pen = (o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x) + weight / 2;
+      const top = y + li * lead;
+      chars.forEach((ch, k) => {
+        const g = SF[ch];
+        const r = rng(hash(seed, li, k, 71));
+        const dy = jitter * (r() - 0.5) * 0.5 * u;
+        const rot = jitter * (r() - 0.5) * 0.1;
+        const sc = 1 + jitter * (r() - 0.5) * 0.08;
+        const cs = Math.cos(rot) * sc, sn = Math.sin(rot) * sc;
+        const cx = (g.w * u) / 2, cy = 5 * u;
+        const map = (s) => {
+          const out = [];
+          for (let i = 0; i < s.length; i += 2) {
+            const lx = s[i] * u - cx, ly = s[i + 1] * u - cy;
+            const px = cx + lx * cs - ly * sn, py = cy + lx * sn + ly * cs;
+            out.push([pen + px + slant * (10 * u - py), top + py + dy]);
+          }
+          return out;
+        };
+        const strokes = stencil ? sfStencil(ch, weight / u, bridge / u) : sfChains(ch);
+        strokes.forEach((s, j) => placed.push({ pts: map(s), seed: hash(seed, li, k, j) | 0 }));
+        pen += g.w * u + gap;
+      });
+    });
+    const height = lines.length ? (lines.length - 1) * lead + size : 0;
+    const color = o.color || pal.ink;
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    if (stencil) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = weight;
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      ctx.miterLimit = 2; // square corners stay square, V's point is cut flat
+      ctx.beginPath();
+      for (const p of placed) {
+        const P = p.pts;
+        ctx.moveTo(P[0][0], P[0][1]);
+        if (P.length === 1) ctx.lineTo(P[0][0], P[0][1] + 0.01);
+        for (let i = 1; i < P.length; i++) ctx.lineTo(P[i][0], P[i][1]);
+      }
+      ctx.stroke();
+      ctx.restore();
+      return { width, height };
+    }
+    // hand: lengths first, so reveal can write the text in order
+    let total = 0;
+    for (const p of placed) {
+      let L = 0;
+      for (let i = 1; i < p.pts.length; i++) L += Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]);
+      p.len = p.pts.length === 1 ? weight : L;
+      total += p.len;
+    }
+    const upto = o.reveal != null ? clamp(+o.reveal || 0, 0, 1) * total : Infinity;
+    let done = 0;
+    ctx.fillStyle = color;
+    for (const p of placed) {
+      if (done >= upto) break;
+      const part = upto >= done + p.len ? null : (upto - done) / p.len;
+      done += p.len;
+      if (p.pts.length === 1) {
+        const r = rng(p.seed);
+        ctx.beginPath();
+        ctx.arc(p.pts[0][0] + (r() - 0.5) * weight * 0.3, p.pts[0][1], weight * 0.72, 0, TAU);
+        ctx.fill();
+        continue;
+      }
+      const t = Math.min(weight * 2.2, p.len * 0.3);
+      const q = Object.assign(
+        { color, width: weight, seed: p.seed, smooth: false, step: Math.max(1.5, weight * 0.4), wobble: jitter * weight * 0.2, taper: [t * 0.7, t], boil: o.boil },
+        o.ink
+      );
+      if (o.boil === undefined) delete q.boil;
+      if (part != null) q.reveal = part;
+      inkPath(ctx, p.pts, q);
+    }
+    ctx.restore();
+    return { width, height };
+  }
+  lib.strokeText = strokeText;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
