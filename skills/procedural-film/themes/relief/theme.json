@@ -4,6 +4,7 @@
   "status": "ready",
   "look": "A false-colour massif on black, blue shallows to a sand coast, red slopes and a yellow summit, as a perspective mesh in wire of one width; one amber isoline threads round the mountain; pixel-font labels and ruler brackets; plate B is the same surface from above as an isoline map",
   "accent": { "base": "amber", "hot": "amberHot", "budget": { "area": 0.01 } },
+  "ramps": { "relief": [[0, "reliefBlue"], [0.3, "reliefBlue"], [0.3, "reliefSand"], [0.7, "reliefRed"], [1, "reliefSun"]] },
   "frame": { "width": 1080, "height": 1920 },
   "plates": {
     "A": { "name": "relief", "mode": "illustrated", "post": 0, "base": "reliefVoid", "line": "reliefWire", "text": "reliefWire" },

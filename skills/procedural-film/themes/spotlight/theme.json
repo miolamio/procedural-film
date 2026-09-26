@@ -4,6 +4,7 @@
   "status": "ready",
   "look": "Thick black brush ink with pressure on a pool of cyan light in a dark teal void, one violet accent on the joints; plate B is the same frame as light wire with isolux rings",
   "accent": { "base": "violet", "budget": { "area": 0.01 } },
+  "ramps": { "spot": [[0, "beamHot"], [0.28, "beamHot"], [0.93, "beam"], [1, "beam"]] },
   "frame": { "width": 1080, "height": 1920 },
   "plates": {
     "A": { "name": "spot", "mode": "illustrated", "post": 0, "base": "tealVoid", "line": "sumi", "text": "beamHot" },

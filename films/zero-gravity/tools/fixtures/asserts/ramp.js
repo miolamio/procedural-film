@@ -76,7 +76,9 @@ FILM.assert('an inline list equals the same list by text, and bad ramps throw Ty
   FILM.expect.eq(L.rampStops(['night', 'sun']), L.rampStops(['night', 'sun']), 'an inline list is rebuilt every call');
   FILM.expect.true(rampThrows(() => L.ramp('nope', 0.5)), 'an unknown ramp name');
   FILM.expect.true(rampThrows(() => L.ramp(['ink'], 0.5)), 'a single stop');
-  FILM.expect.true(rampThrows(() => L.ramp(['ink', '#FF0000'], 0.5)), 'a hex instead of a pal name');
+  FILM.expect.true(rampThrows(() => L.ramp(['ink', 'notAPalName'], 0.5)), 'a name missing from pal');
+  FILM.expect.true(rampThrows(() => L.ramp(['ink', '#F00'], 0.5)), 'a short hex');
+  FILM.expect.true(rampThrows(() => L.ramp(['ink', 'rgb(255,0,0)'], 0.5)), 'an rgb() string');
   FILM.expect.true(rampThrows(() => L.ramp([[0.6, 'ink'], [0.2, 'sun']], 0.5)), 'decreasing positions');
   FILM.expect.true(rampThrows(() => L.ramp([[0, 'ink'], [1.5, 'sun']], 0.5)), 'a position above 1');
   FILM.expect.true(rampThrows(() => L.ramp(42, 0.5)), 'a number as the ramp');
@@ -96,4 +98,20 @@ FILM.assert('ramp is monotone in brightness along heat, and deterministic', () =
   for (let i = 0; i < 50; i++) a.push(L.ramp('terrain', i / 49));
   for (let i = 49; i >= 0; i--) b.unshift(L.ramp('terrain', i / 49));
   FILM.expect.eq(a.join(' '), b.join(' '));
+});
+
+FILM.assert('a hex stop mixes like the pal name with the same colour', () => {
+  const L = FILM.lib;
+  const P = L.pal;
+  const byHex = [[0, P.night], [0.4, 'sun'], [1, '#FFFFFF']];
+  const byName = [[0, 'night'], [0.4, 'sun'], [1, '#ffffff']];
+  for (const v of [0, 0.2, 0.4, 0.7, 1]) FILM.expect.eq(L.ramp(byHex, v), L.ramp(byName, v), `at ${v}`);
+  FILM.expect.eq(L.rampStops(byHex)[2][1], '#FFFFFF', 'rampStops keeps the hex as written');
+  FILM.expect.eq(L.ramp(['#000000', '#FF0000'], 0.5), 'rgb(128,0,0)');
+});
+
+FILM.assert('every row of lib.ramps builds', () => {
+  // A theme's rows (between the ramps markers) name colours its 2.2 rows add.
+  const L = FILM.lib;
+  for (const name of Object.keys(L.ramps)) FILM.expect.true(L.rampStops(name).length >= 2, name);
 });

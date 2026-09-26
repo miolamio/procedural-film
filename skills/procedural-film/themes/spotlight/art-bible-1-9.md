@@ -26,13 +26,13 @@ Names below are the keys of `FILM.lib.pal`. The theme's colours (2.1) and the fi
 | sumi | #0B1011 | Every brush stroke and every silhouette |
 | violet | #8E4FC2 | The one accent: joints |
 
-The pool is a ramp, not a flat fill. Add one row to the ramps table in `src/lib.js` (beside `heat` and `terrain`):
+The pool is a ramp, not a flat fill. `tools/theme.cjs apply` writes it as the row `spot` of the ramps table in `src/lib.js` (from `ramps` in `theme.json`):
 
 ```js
     spot: [[0, 'beamHot'], [0.28, 'beamHot'], [0.93, 'beam'], [1, 'beam']],
 ```
 
-and paint the pool with `lib.rampStops('spot')` as the stops of one radial gradient (section 4).
+Paint the pool with `lib.rampStops('spot')` as the stops of one radial gradient (section 4).
 
 ### 2.2 Subject palette
 

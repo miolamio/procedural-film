@@ -7237,17 +7237,21 @@
   // Colour scales made of lib.pal names, so a false-colour relief, a heat map or a cooling glow
   // stays on the published palette with no hex in scene code. A ramp is a list of stops: a pal
   // name (spaced evenly from 0 to 1) or [at, name] with at in 0..1, never decreasing (two stops at
-  // the same at make a hard edge). Colours mix linearly in RGB, like lib.mix.
+  // the same at make a hard edge). Colours mix linearly in RGB, like lib.mix. A stop may also be a
+  // '#RRGGBB' hex, for a colour that is not in lib.pal (a fixture plate showing a theme's colours);
+  // a film names its colours in 2.2 and its ramps here instead, since check 3 warns on scene hex.
   //
-  // Named ramps live in this table. A theme or a film adds its own rows here, next to the colours
-  // its 2.2 rows add to the palette, for example
+  // Named ramps live in this table. The rows first use only the 2.1 and 2.3 names, which every
+  // film's palette carries; then, between the ramps markers, the theme's rows (theme.json
+  // "ramps", written by tools/theme.cjs apply) and the film's own, for example
   //     crater: ['craterDeep', 'crater', 'craterHot', 'yolk'],
-  // The rows below use only the 2.1 and 2.3 names, which every film's palette carries.
   const ramps = {
     heat: ['night', 'dusk', 'red', 'orange', 'sun', 'white'],
     terrain: [[0, 'tealDeep'], [0.38, 'teal'], [0.4, 'paperDeep'], [0.62, 'sage'], [0.82, 'wood'], [1, 'white']],
     blueprint: ['navyDeep', 'navy', 'grid', 'paleBlue', 'lineWhite'],
     tone: ['paper', 'tan', 'inkFaint', 'inkSoft', 'ink'],
+    // BEGIN ramps — the theme's rows (tools/theme.cjs writes them from theme.json), then the film's own
+    // END ramps
   };
   for (const k of Object.keys(ramps)) {
     for (const s of ramps[k]) if (Array.isArray(s)) Object.freeze(s);
@@ -7260,6 +7264,8 @@
   const rampByName = new Map();
   const rampByList = new WeakMap();
   const rampByText = new Map();
+
+  const RAMP_HEX = /^#[0-9A-Fa-f]{6}$/;
 
   function buildRamp(list, label) {
     if (!Array.isArray(list) || list.length < 2) {
@@ -7277,13 +7283,14 @@
       if (!(pos >= 0 && pos <= 1) || pos < prev) {
         throw new TypeError(`lib.ramp ${label}: stop ${i} needs a position in 0..1, not below the stop before it`);
       }
-      if (typeof name !== 'string' || typeof pal[name] !== 'string') {
-        throw new TypeError(`lib.ramp ${label}: stop ${i} '${String(name)}' is not a lib.pal name`);
+      const hex = typeof name !== 'string' ? null : RAMP_HEX.test(name) ? name : typeof pal[name] === 'string' ? pal[name] : null;
+      if (hex === null) {
+        throw new TypeError(`lib.ramp ${label}: stop ${i} '${String(name)}' is neither a lib.pal name nor a '#RRGGBB' hex`);
       }
       prev = pos;
       at[i] = pos;
-      rgb.push(parseColor(pal[name]));
-      stops.push(Object.freeze([pos, pal[name]]));
+      rgb.push(parseColor(hex));
+      stops.push(Object.freeze([pos, hex]));
     }
     return { at, rgb, stops: Object.freeze(stops) };
   }
@@ -7316,7 +7323,7 @@
       }
       return R;
     }
-    throw new TypeError('lib.ramp: pass a ramp name or a list of lib.pal names');
+    throw new TypeError('lib.ramp: pass a ramp name or a list of stops (lib.pal names or hex)');
   }
 
   function rampEval(R, v, out) {
@@ -9199,7 +9206,7 @@
    *   box [0, 0, W, H]   the map's footprint in px; the mesh stands on it
    *   res 96 (mesh 40)   grid cells across (rows follow the box aspect); a grid field keeps its own
    *   range [lo, hi]     heights mapped to ramp 0..1 (default the sampled min and max)
-   *   ramp 'terrain'     a lib.ramps name or a list of pal names; steps 0 (N: N flat bands)
+   *   ramp 'terrain'     a lib.ramps name or a list of stops (pal names or hex); steps 0 (N: N flat bands)
    *   shade 0.35 (0..1)  hillshade from light [-0.5, -0.6, 0.62] (map x, map y, up)
    *   lift 0.2 × box w   px the whole range stands up in the mesh (and steepens the shade)
    *   cut                heights below this are left empty (an island on the ground)

@@ -427,3 +427,84 @@ test('lookbook escapes the frame dimension string and wraps long text without br
   assert.match(html, /overflow-wrap:anywhere/);
   assert.doesNotMatch(html, /word-break:break-all/);
 });
+
+const rampsBlock = (lib) => lib.slice(lib.indexOf('// BEGIN ramps'), lib.indexOf('// END ramps'));
+
+test('apply writes the theme\'s ramps into the ramps table, and a scene can call them by name', { skip }, () => {
+  const dir = film();
+  T.apply(dir, THEMES, 'crater', {});
+  const lib = read(dir, 'src/lib.js');
+  assert.match(rampsBlock(lib), /\/\/ BEGIN theme crater ramps/);
+  assert.match(rampsBlock(lib), /crater: \[\[0, 'craterDeep'\], \[0\.3, 'crater'\], \[0\.62, 'craterHot'\], \[0\.84, 'yolk'\], \[1, 'yolkHot'\]\],/);
+  // the lib runs: the row resolves to the theme's colours
+  const win = {};
+  new Function('window', lib)(win);
+  const FILM = win.FILM;
+  assert.strictEqual(FILM.lib.ramp('crater', 0), 'rgb(107,7,12)');
+  assert.strictEqual(FILM.lib.ramp('crater', 1), 'rgb(244,238,138)');
+});
+
+test('switching theme swaps the theme ramps, a theme without ramps clears them, the film\'s own rows stay', { skip }, () => {
+  const dir = film();
+  T.apply(dir, THEMES, 'crater', {});
+  const f = path.join(dir, 'src', 'lib.js');
+  fs.writeFileSync(f, read(dir, 'src/lib.js').replace('    // END ramps', "    glow: ['ink', 'white'],\n    // END ramps"));
+  T.apply(dir, THEMES, 'spotlight', {});
+  let r = rampsBlock(read(dir, 'src/lib.js'));
+  assert.doesNotMatch(r, /crater/);
+  assert.match(r, /spot: \[\[0, 'beamHot'\]/);
+  assert.match(r, /glow: \['ink', 'white'\]/);
+  T.apply(dir, THEMES, 'negative', {});
+  r = rampsBlock(read(dir, 'src/lib.js'));
+  assert.doesNotMatch(r, /BEGIN theme|spot:/);
+  assert.match(r, /glow:/);
+});
+
+test('apply twice with ramps is idempotent', { skip }, () => {
+  const dir = film();
+  T.apply(dir, THEMES, 'relief', {});
+  const once = read(dir, 'src/lib.js');
+  T.apply(dir, THEMES, 'relief', {});
+  assert.strictEqual(read(dir, 'src/lib.js'), once);
+});
+
+test('a ramp name already in the table is refused as pasted by hand', { skip }, () => {
+  const dir = film();
+  const f = path.join(dir, 'src', 'lib.js');
+  fs.writeFileSync(f, read(dir, 'src/lib.js').replace('    // END ramps', "    crater: ['ink', 'white'],\n    // END ramps"));
+  assert.throws(() => T.apply(dir, THEMES, 'crater', {}), /already has a ramp 'crater'/);
+});
+
+test('a lib.js without the ramps markers: refused for a theme with ramps, fine for one without', { skip }, () => {
+  const dir = film();
+  const f = path.join(dir, 'src', 'lib.js');
+  fs.writeFileSync(f, read(dir, 'src/lib.js').replace(/^.*\/\/ (BEGIN|END) ramps.*\n/gm, ''));
+  assert.throws(() => T.apply(dir, THEMES, 'crater', {}), /no \/\/ BEGIN ramps/);
+  assert.doesNotThrow(() => T.apply(dir, THEMES, 'negative', {}));
+});
+
+test('invalid ramps in theme.json fail clearly', () => {
+  const base = { id: 'x', name: 'X', frame: { width: 1080, height: 1920 } };
+  for (const [ramps, re] of [
+    [[], /must be an object/],
+    [{ 'bad name': ['a', 'b'] }, /not a ramp name/],
+    [{ r: ['a'] }, /at least two stops/],
+    [{ r: [[0.5, 'a'], [0.2, 'b']] }, /position in 0\.\.1/],
+    [{ r: ['a', '#FF0000'] }, /never a hex/],
+  ]) {
+    assert.throws(() => T.listThemes(fakeThemes('x', Object.assign({ ramps }, base))), re, JSON.stringify(ramps));
+  }
+});
+
+test('a theme ramp naming a row its palette does not carry is refused on apply', () => {
+  const themes = fakeThemes('x', { id: 'x', name: 'X', frame: { width: 1080, height: 1920 }, ramps: { r: ['ink', 'nowhere'] } }, { palette: "    xRow: '#123456',\n" });
+  const dir = film();
+  assert.throws(() => T.apply(dir, themes, 'x', {}), /names 'nowhere', which is not a lib\.pal row/);
+});
+
+test('every theme ramp names rows its palette.js or the base palette carries', { skip }, () => {
+  for (const t of T.listThemes(THEMES)) {
+    if (!t.ramps) continue;
+    assert.doesNotThrow(() => T.apply(film(), THEMES, t.id, {}), t.id);
+  }
+});
