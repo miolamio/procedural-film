@@ -710,8 +710,8 @@
   });
 
   // ---------------------------------------------------------------------------
-  // Shot grade: after the drawing, before the grain. difference / multiply / screen / overlay
-  // and one radial gradient — never getImageData on the frame. A neutral grade
+  // Shot grade: after the drawing, before the grain. difference / saturation / color-burn /
+  // color-dodge / multiply / screen / overlay and one radial gradient — never getImageData on the frame. A neutral grade
   // returns before touching the context, so an ungraded shot stays byte-identical.
   // ---------------------------------------------------------------------------
 
@@ -724,8 +724,31 @@
 
   function gradeActive(g) {
     if (!g || typeof g !== 'object') return false;
-    if (g._mixed) return !!(g.invert || g.warmth || g.fade || g.vignette || g.paperAge || (g.tints && g.tints.length));
-    return !!(g.invert || g.warmth || g.fade || g.vignette || g.paperAge || (g.tint && g.tintAmount));
+    if (g._mixed) return !!(g.invert || g.threshold || g.warmth || g.fade || g.vignette || g.paperAge || (g.tints && g.tints.length) || g.duo);
+    return !!(g.invert || g.threshold || g.warmth || g.fade || g.vignette || g.paperAge || (g.tint && g.tintAmount) || duoEntry(g));
+  }
+
+  // duotone: [dark, light] pal names; duotoneAmount defaults to 1. Resolved to rgb here so a
+  // mixed grade can crossfade two pairs colour by colour. null when off or a name is not in lib.pal.
+  function duoEntry(g) {
+    if (!g || typeof g !== 'object') return null;
+    if (g._mixed) return g.duo || null;
+    const d = g.duotone;
+    if (!Array.isArray(d) || d.length !== 2) return null;
+    const amount = g.duotoneAmount == null ? 1 : gradeNum(g, 'duotoneAmount', 0, 1);
+    if (!(amount > 0)) return null;
+    const a = parseHex(palColor(d[0]));
+    const b = parseHex(palColor(d[1]));
+    if (!a || !b) return null;
+    return { a, b, amount };
+  }
+
+  function lerpDuo(x, y, p) {
+    if (!x && !y) return null;
+    if (!y) return { a: x.a, b: x.b, amount: x.amount * (1 - p) };
+    if (!x) return { a: y.a, b: y.b, amount: y.amount * p };
+    const mix = (u, v) => [u[0] + (v[0] - u[0]) * p, u[1] + (v[1] - u[1]) * p, u[2] + (v[2] - u[2]) * p];
+    return { a: mix(x.a, y.a), b: mix(x.b, y.b), amount: x.amount + (y.amount - x.amount) * p };
   }
 
   function tintEntries(g) {
@@ -748,6 +771,7 @@
     if (!gradeActive(a) && !gradeActive(b)) return null;
     const q = 1 - p;
     const invert = gradeNum(a, 'invert', 0, 1) * q + gradeNum(b, 'invert', 0, 1) * p;
+    const threshold = gradeNum(a, 'threshold', 0, 1) * q + gradeNum(b, 'threshold', 0, 1) * p;
     const warmth = gradeNum(a, 'warmth', -1, 1) * q + gradeNum(b, 'warmth', -1, 1) * p;
     const fade = gradeNum(a, 'fade', 0, 1) * q + gradeNum(b, 'fade', 0, 1) * p;
     const vignette = gradeNum(a, 'vignette', 0, 1) * q + gradeNum(b, 'vignette', 0, 1) * p;
@@ -757,8 +781,10 @@
     for (const t of tintEntries(b)) byName.set(t.name, (byName.get(t.name) || 0) + t.amount * p);
     const tints = [];
     for (const [name, amount] of byName) if (amount > 0) tints.push({ name, amount });
-    if (!invert && !warmth && !fade && !vignette && !paperAge && !tints.length) return null;
-    return { _mixed: true, invert, warmth, fade, vignette, paperAge, tints };
+    let duo = lerpDuo(duoEntry(a), duoEntry(b), p);
+    if (duo && !(duo.amount > 0)) duo = null;
+    if (!invert && !threshold && !warmth && !fade && !vignette && !paperAge && !tints.length && !duo) return null;
+    return { _mixed: true, invert, threshold, warmth, fade, vignette, paperAge, tints, duo };
   }
 
   // Same p the picture uses, so the grade tracks the dissolve.
@@ -892,16 +918,55 @@
     return c;
   }
 
+  // Duotone as a gradient map: grey = the plate's luminosity (saturation with a grey), then
+  // multiply by m = (b - a) / (1 - a) and screen by a gives a + grey * (b - a), exact per channel
+  // where light >= dark; a channel where it is not stays at the dark colour. At amount k the grey is
+  // laid at alpha k and m and a are pulled toward the no-op (white, black), so 0 is the plate.
+  function duotoneFills(ctx, w, h, duo, grey) {
+    const k = duo.amount > 1 ? 1 : duo.amount;
+    const m = [0, 0, 0];
+    const a = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      const lo = duo.a[i] / 255;
+      const hi = duo.b[i] / 255;
+      const mi = lo < 1 && hi > lo ? (hi - lo) / (1 - lo) : 0;
+      m[i] = (1 - k + k * mi) * 255;
+      a[i] = lo * k * 255;
+    }
+    if (!grey) gradeFill(ctx, w, h, 'saturation', '#808080', k);
+    gradeFill(ctx, w, h, 'multiply', cssRgb(m), 1);
+    gradeFill(ctx, w, h, 'screen', cssRgb(a), 1);
+  }
+
+  // Threshold as a contrast ramp around mid grey: saturation with a grey drops the colour,
+  // color-burn by s sends everything below 1 - s to black and stretches the rest by 1 / s,
+  // color-dodge by d stretches that by 1 / (1 - d) into white. With s = 0.5 + r / 2 and
+  // 1 - d = r / s the ramp runs from 0.5 - r / 2 to 0.5 + r / 2. r = 0.02^(t²): 0 is the identity,
+  // 1 is black and white with five grey levels left at the edge so a line does not stair-step.
+  // The stretch multiplies what colour is left by 1 / r, so the grey goes on at 1 - r (1 - t):
+  // the chroma that survives shrinks from the plate's at 0 to none at 1 instead of blowing out.
+  function thresholdFills(ctx, w, h, t) {
+    const k = t > 1 ? 1 : t;
+    const r = Math.pow(0.02, k * k);
+    const s = 0.5 + r / 2;
+    const d = 1 - r / s;
+    gradeFill(ctx, w, h, 'saturation', '#808080', 1 - r * (1 - k));
+    gradeFill(ctx, w, h, 'color-burn', cssRgb([s * 255, s * 255, s * 255]), 1);
+    gradeFill(ctx, w, h, 'color-dodge', cssRgb([d * 255, d * 255, d * 255]), 1);
+  }
+
   function applyGrade(ctx, grade) {
     if (!gradeActive(grade)) return;
     const mixed = grade._mixed ? grade : null;
     const invert = mixed ? grade.invert : gradeNum(grade, 'invert', 0, 1);
+    const threshold = mixed ? grade.threshold : gradeNum(grade, 'threshold', 0, 1);
     const warmth = mixed ? grade.warmth : gradeNum(grade, 'warmth', -1, 1);
     const fade = mixed ? grade.fade : gradeNum(grade, 'fade', 0, 1);
     const vignette = mixed ? grade.vignette : gradeNum(grade, 'vignette', 0, 1);
     const paperAge = mixed ? grade.paperAge : gradeNum(grade, 'paperAge', 0, 1);
     const tints = tintEntries(grade);
-    if (!invert && !warmth && !fade && !vignette && !paperAge && !tints.length) return;
+    const duo = duoEntry(grade);
+    if (!invert && !threshold && !warmth && !fade && !vignette && !paperAge && !tints.length && !duo) return;
     const c = ctx.canvas;
     const w = c.width;
     const h = c.height;
@@ -916,6 +981,10 @@
     // The negative first, so the wash and the vignette grade the inverted plate.
     // White difference at alpha a is lerp(c, 1 - c, a): 1 is the exact negative.
     if (invert > 0) gradeFill(ctx, w, h, 'difference', '#ffffff', invert);
+    // Threshold before duotone, so a duotone over it prints two flat inks.
+    if (threshold > 0) thresholdFills(ctx, w, h, threshold);
+    // threshold 1 leaves the frame grey already, so the duotone skips its own desaturation.
+    if (duo) duotoneFills(ctx, w, h, duo, threshold >= 1);
     if (wash) gradeFill(ctx, w, h, wash.op, wash.color, wash.alpha);
     if (vignette > 0) {
       ctx.globalCompositeOperation = 'multiply';

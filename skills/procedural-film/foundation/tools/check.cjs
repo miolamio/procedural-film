@@ -18,7 +18,7 @@
 //                  no text drawn below the safe area (a literal y above FILM.safeArea().y1: 1540 on
 //                  1080×1920, the centred 90% box otherwise; an expression is not read);
 //                  warns on a literal colour outside lib.js (colours come from lib.pal)
-//   4 timeline     coverage, ids, transitions, grade ranges and tint names; warns on off-grid hits
+//   4 timeline     coverage, ids, transitions, grade ranges, tint and duotone names; warns on off-grid hits
 //                  and cuts, a bpm whose 16ths miss the frame grid, a duration that is not whole bars,
 //                  and a frame or carrier that differs from docs/theme.json
 //   5 draw         every checked frame draws without throwing and is not one flat colour
@@ -878,7 +878,7 @@ async function main() {
     if (!TL.hasDuration) tlProblems.push('timeline has no "duration"');
     if (!(TL.duration > 0)) tlProblems.push(`duration is not positive (${TL.duration})`);
     const ids = new Set();
-    const GRADE_RANGE = { invert: [0, 1], warmth: [-1, 1], fade: [0, 1], vignette: [0, 1], paperAge: [0, 1], tintAmount: [0, 1] };
+    const GRADE_RANGE = { invert: [0, 1], warmth: [-1, 1], fade: [0, 1], vignette: [0, 1], paperAge: [0, 1], tintAmount: [0, 1], duotoneAmount: [0, 1], threshold: [0, 1] };
     const palNames = readPalNames();
     if (!palNames.size) tlProblems.push('could not read colour names from lib.pal');
     // carrier kinds and their numeric fields; keep in step with FILM.defineCarrier in src/core.js
@@ -965,7 +965,7 @@ async function main() {
           tlProblems.push(`shot '${s.id}' grade must be an object`);
         } else {
           for (const key of Object.keys(g)) {
-            if (!Object.prototype.hasOwnProperty.call(GRADE_RANGE, key) && key !== 'tint') {
+            if (!Object.prototype.hasOwnProperty.call(GRADE_RANGE, key) && key !== 'tint' && key !== 'duotone') {
               tlProblems.push(`shot '${s.id}' grade.${key} is not a grade field`);
             }
           }
@@ -978,6 +978,11 @@ async function main() {
           }
           if (g.tint != null && (typeof g.tint !== 'string' || !palNames.has(g.tint))) {
             tlProblems.push(`shot '${s.id}' grade.tint '${g.tint}' is not a colour in lib.pal`);
+          }
+          if (g.duotone != null) {
+            const d = g.duotone;
+            if (!Array.isArray(d) || d.length !== 2) tlProblems.push(`shot '${s.id}' grade.duotone must be [dark, light], two lib.pal names`);
+            else for (const n of d) if (typeof n !== 'string' || !palNames.has(n)) tlProblems.push(`shot '${s.id}' grade.duotone '${n}' is not a colour in lib.pal`);
           }
         }
       }
