@@ -882,7 +882,11 @@ async function main() {
     const palNames = readPalNames();
     if (!palNames.size) tlProblems.push('could not read colour names from lib.pal');
     // carrier kinds and their numeric fields; keep in step with FILM.defineCarrier in src/core.js
-    const CARRIER_FIELDS = { crt: ['scanlines', 'period', 'mask', 'radius', 'edge', 'hum', 'humPeriod', 'flicker'] };
+    const CARRIER_FIELDS = {
+      crt: ['scanlines', 'period', 'mask', 'radius', 'edge', 'hum', 'humPeriod', 'flicker'],
+      vhs: ['chroma', 'tracking', 'trackPeriod', 'head', 'timecode', 'clock'],
+      film: ['perf', 'weave', 'scratches', 'dust', 'flicker', 'gate'],
+    };
     const carrierProblems = (c, at) => {
       if (c === undefined || c === null || c === false) return;
       if (typeof c !== 'object' || !CARRIER_FIELDS[c.kind]) {
@@ -944,7 +948,7 @@ async function main() {
       if (offGrid(s.start)) tlWarnings.push(`shot '${s.id}' starts at ${s.start}s, off the 16th-note grid at ${TL.bpm} bpm`);
       const tr = s.transitionIn;
       if (tr) {
-        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph', 'crtoff', 'shatter'];
+        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph', 'crtoff', 'shatter', 'tracking'];
         if (!kinds.includes(tr.kind)) tlProblems.push(`shot '${s.id}' transitionIn kind '${tr.kind}' is not one of ${kinds.join(', ')}`);
         if (!(tr.dur >= 0) || tr.dur > s.dur) tlProblems.push(`shot '${s.id}' transitionIn dur ${tr.dur} must be between 0 and the shot length ${s.dur}`);
         if (tr.kind === 'whip' && !['left', 'right', 'up', 'down'].includes(tr.dir)) {

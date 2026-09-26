@@ -373,7 +373,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Carrier: the medium the film plays on (a CRT; later tape or film stock). It is applied once
+  // Carrier: the medium the film plays on (a CRT, a tape, a film print). It is applied once
   // per frame over the finished picture, after transitions and flashes, so it never slides with a
   // whip or doubles in a fade. Stateless: a function of T and the frame size. Unlike the grain it
   // stays on when a tool sets FILM.post = false, so the flash and canvas checks see it; only
@@ -503,6 +503,212 @@
     }
   });
 
+  // One scratch the size of the frame for carriers that move the picture (vhs, film). Allocated
+  // once per frame size, never per frame; each call copies the current frame into it.
+  let carrierScratchC = null;
+  function carrierScratch(ctx) {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    if (!carrierScratchC || carrierScratchC.width !== w || carrierScratchC.height !== h) {
+      if (window.__cvAudit) window.__cvNextKey = 'carrier-scratch';
+      carrierScratchC = makeCanvas(w, h);
+      if (window.__cvAudit) window.__cvNextKey = null;
+    }
+    const g = carrierScratchC.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'copy';
+    g.drawImage(ctx.canvas, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    return carrierScratchC;
+  }
+
+  // Draws rows [y, y + sh) of src shifted dx px sideways, the uncovered edge black.
+  function tornRow(ctx, src, sy, y, sh, dx, w) {
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, y, w, sh);
+    ctx.drawImage(src, 0, sy, w, sh, dx, y, w, sh);
+  }
+
+  // vhs: a tape played back. Tracking: a band of torn lines rolls slowly down the frame with snow
+  // streaks in it, and the head-switching strip at the bottom tears to the right; both jitter on the
+  // boil clock. Chroma: the red channel lags the picture by `chroma` px (split with multiply and
+  // lighter, no pixel reads). An on-screen display in the pixel font over it all: PLAY and a play
+  // mark at the top left, SP at the top right, the tape counter (H:MM:SS of T + clock) at the bottom.
+  //   chroma 3 (logical px, 0..12)   tracking 0.5 (0..1)   trackPeriod 7 (s)   head 1 (0..1)
+  //   timecode 1 (0 = no display)    clock 0 (s added to the counter)
+  const VHS_PLAY = ['#.....', '###...', '#####.', '######', '#####.', '###...', '#.....'];
+  FILM.defineCarrier('vhs', (ctx, T, o, S) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const bf = Math.floor(T * FILM.BOIL_FPS + EPS);
+    const track = carrierNum(o, 'tracking', 0.5, 0, 1);
+    const head = carrierNum(o, 'head', 1, 0, 1);
+    const sh = Math.max(1, Math.round(3 * S));
+    if (track > 0 || head > 0) {
+      const src = carrierScratch(ctx);
+      if (track > 0) {
+        const period = carrierNum(o, 'trackPeriod', 7, 1, 60);
+        const bh = Math.max(4 * sh, Math.round(h * 0.06));
+        const yb = Math.floor(((T / period) % 1) * (h + bh)) - bh;
+        for (let y = Math.max(0, yb - ((yb % sh) + sh) % sh); y < Math.min(h, yb + bh); y += sh) {
+          const env = Math.sin(Math.PI * clamp01((y - yb) / bh));
+          const dx = Math.round(track * env * S * (8 + 70 * ihash(Math.floor(y / sh), bf, 71)));
+          if (dx) tornRow(ctx, src, y, y, Math.min(sh, h - y), dx, w);
+        }
+        ctx.fillStyle = '#ffffff';
+        for (let k = 0; k < 28; k++) {
+          const y = yb + ihash(k, bf, 74) * bh;
+          if (y < 0 || y >= h) continue;
+          ctx.globalAlpha = track * (0.25 + 0.5 * ihash(k, bf, 75)) * Math.sin(Math.PI * clamp01((y - yb) / bh));
+          ctx.fillRect(ihash(k, bf, 73) * w, y, (0.01 + 0.1 * ihash(k, bf, 76)) * w, Math.max(1, Math.round(2 * S)));
+        }
+        ctx.globalAlpha = 1;
+      }
+      if (head > 0) {
+        const hz = Math.max(2 * sh, Math.round(h * 0.022));
+        for (let y = h - hz; y < h; y += sh) {
+          const q = (y - (h - hz)) / hz;
+          const dx = Math.round(head * S * (4 + 70 * q * q + 16 * ihash(Math.floor(y / sh), bf, 77)));
+          tornRow(ctx, src, y, y, Math.min(sh, h - y), dx, w);
+        }
+        ctx.fillStyle = '#ffffff';
+        for (let k = 0; k < 10; k++) {
+          ctx.globalAlpha = head * (0.2 + 0.4 * ihash(k, bf, 78));
+          ctx.fillRect(ihash(k, bf, 79) * w, h - hz + ihash(k, bf, 80) * hz, (0.02 + 0.15 * ihash(k, bf, 81)) * w, Math.max(1, Math.round(S)));
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+    const d = Math.round(carrierNum(o, 'chroma', 3, 0, 12) * S);
+    if (d >= 1) {
+      const red = carrierScratch(ctx);
+      const g = red.getContext('2d');
+      g.globalCompositeOperation = 'multiply';
+      g.fillStyle = '#ff0000';
+      g.fillRect(0, 0, w, h);
+      g.globalCompositeOperation = 'source-over';
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = '#00ffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(red, d, 0);
+      ctx.drawImage(red, 0, 0, 1, h, 0, 0, d, h);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    const tc = carrierNum(o, 'timecode', 1, 0, 1);
+    const lib = FILM.lib;
+    if (tc > 0 && lib && typeof lib.pixelText === 'function' && typeof lib.sprite === 'function') {
+      const m = Math.min(w, h);
+      const cell = Math.max(1, Math.round(m / 216));
+      const pad = Math.round(m * 0.07);
+      const secs = Math.floor(Math.max(0, T + carrierNum(o, 'clock', 0, 0, 359999)) + EPS);
+      const two = (n) => (n < 10 ? '0' : '') + n;
+      const count = Math.floor(secs / 3600) + ':' + two(Math.floor(secs / 60) % 60) + ':' + two(secs % 60);
+      const osd = (dx, color, alpha) => {
+        lib.pixelText(ctx, 'PLAY', pad + dx, pad + dx, cell, { color, alpha });
+        lib.sprite(ctx, VHS_PLAY, pad + 26 * cell + dx, pad + dx, cell, { color, alpha });
+        lib.pixelText(ctx, 'SP', w - pad + dx, pad + dx, cell, { color, alpha, align: 'right' });
+        lib.pixelText(ctx, count, pad + dx, h - pad - 7 * cell + dx, cell, { color, alpha });
+      };
+      osd(cell, '#000000', 0.6 * tc);
+      osd(0, '#f2f2f2', tc);
+    }
+  });
+
+  // film: a print running through a projector. The picture weaves by whole device px (at most
+  // `weave` px, a slow sway plus a per-frame jolt) with the perforations down both long edges, the
+  // exposure flickers per frame (at most 4%, under check 9's 10% step), the gate darkens the edges,
+  // and vertical scratches (each held 1 to 2 s, shimmering on the boil clock) and dust (new on every
+  // boil drawing) sit on the print.
+  //   perf 1 (0..1)   weave 1.2 (logical px, 0..2)   scratches 0.5 (0..1)   dust 0.5 (0..1)
+  //   flicker 0.02 (0..0.04)   gate 0.3 (edge darkening, 0..1)
+  FILM.defineCarrier('film', (ctx, T, o, S) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const m = Math.min(w, h);
+    const f = Math.floor(T * FILM.FPS + EPS);
+    const bf = Math.floor(T * FILM.BOIL_FPS + EPS);
+    const wv = carrierNum(o, 'weave', 1.2, 0, 2) * S;
+    const wx = Math.round(wv * (0.6 * Math.sin(T * 2.1 + 1) + 0.4 * (2 * ihash(f, 91, 5) - 1)));
+    const wy = Math.round(wv * (0.6 * Math.sin(T * 1.7) + 0.4 * (2 * ihash(f, 92, 5) - 1)));
+    if (wx || wy) ctx.drawImage(carrierScratch(ctx), wx, wy);
+    const fl = carrierNum(o, 'flicker', 0.02, 0, 0.04) * (2 * ihash(f, 93, 5) - 1);
+    if (fl > 0) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = fl;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (fl < 0) {
+      ctx.globalAlpha = -fl;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, w, h);
+    }
+    const gate = carrierNum(o, 'gate', 0.3, 0, 1);
+    if (gate > 0) {
+      ctx.globalAlpha = 1;
+      ctx.drawImage(crtMask(w, h, 0, gate), 0, 0);
+    }
+    const sc = carrierNum(o, 'scratches', 0.5, 0, 1);
+    for (let k = 0, n = Math.round(sc * 4); k < n; k++) {
+      const hold = 1 + ihash(k, 95, 5);
+      const seg = Math.floor(T / hold + ihash(k, 94, 5));
+      if (ihash(k, seg, 96) > 0.75) continue;
+      const x = (0.1 + 0.8 * ihash(k, seg, 97)) * w + wx + Math.sin(T * 0.7 + k) * 3 * S + (ihash(k, bf, 98) - 0.5) * 2 * S;
+      const part = ihash(k, seg, 99) < 0.4;
+      const y0 = part ? ihash(k, seg, 100) * h * 0.5 : 0;
+      const y1 = part ? y0 + h * (0.3 + 0.5 * ihash(k, seg, 101)) : h;
+      ctx.globalAlpha = sc * (0.3 + 0.4 * ihash(k, bf, 102));
+      ctx.fillStyle = ihash(k, seg, 103) < 0.7 ? '#f6f0e0' : '#1a140e';
+      ctx.fillRect(x, y0, Math.max(1, Math.round((0.8 + 1.4 * ihash(k, seg, 104)) * S)), y1 - y0);
+    }
+    const dust = carrierNum(o, 'dust', 0.5, 0, 1);
+    ctx.lineCap = 'round';
+    for (let k = 0, n = Math.round(dust * 8); k < n; k++) {
+      if (ihash(k, bf, 105) > 0.8) continue;
+      const x = ihash(k, bf, 106) * w;
+      const y = ihash(k, bf, 107) * h;
+      const light = ihash(k, bf, 108) < 0.25;
+      ctx.globalAlpha = dust * (0.8 + 0.4 * ihash(k, bf, 109));
+      ctx.fillStyle = ctx.strokeStyle = light ? '#f6f0e0' : '#1a140e';
+      ctx.beginPath();
+      if (ihash(k, bf, 110) < 0.6) {
+        ctx.ellipse(x, y, (1.5 + 4 * ihash(k, bf, 111)) * S, (1 + 3 * ihash(k, bf, 112)) * S, ihash(k, bf, 113) * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        const L = (14 + 40 * ihash(k, bf, 114)) * S;
+        const a = ihash(k, bf, 115) * Math.PI * 2;
+        const bend = (ihash(k, bf, 116) - 0.5) * L;
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + Math.cos(a) * L * 0.5 - Math.sin(a) * bend, y + Math.sin(a) * L * 0.5 + Math.cos(a) * bend, x + Math.cos(a) * L, y + Math.sin(a) * L);
+        ctx.lineWidth = Math.max(1, 1.3 * S);
+        ctx.stroke();
+      }
+    }
+    const perf = carrierNum(o, 'perf', 1, 0, 1);
+    if (perf > 0) {
+      const sw = Math.round(m * 0.055);
+      const pw = Math.round(m * 0.026);
+      const ph = Math.round(m * 0.036);
+      const pitch = m * 0.07;
+      const r = Math.max(1, m * 0.006);
+      ctx.globalAlpha = perf;
+      ctx.fillStyle = '#0c0907';
+      ctx.fillRect(0, 0, sw, h);
+      ctx.fillRect(w - sw, 0, sw, h);
+      ctx.fillStyle = '#f3ead6';
+      ctx.beginPath();
+      for (let y = (((wy - ph) % pitch) + pitch) % pitch - pitch; y < h; y += pitch) {
+        for (const x of [(sw - pw) / 2 + wx, w - sw + (sw - pw) / 2 + wx]) {
+          if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, pw, ph, r);
+          else ctx.rect(x, y, pw, ph);
+        }
+      }
+      ctx.fill();
+    }
+  });
+
   // ---------------------------------------------------------------------------
   // Shot grade: after the drawing, before the grain. difference / multiply / screen / overlay
   // and one radial gradient — never getImageData on the frame. A neutral grade
@@ -556,13 +762,13 @@
   }
 
   // Same p the picture uses, so the grade tracks the dissolve.
-  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash, morph, crtoff and shatter step by interior frame.
+  // fade, iris and wipe ease (k + 1) / (n + 1). whip, inkwash, morph, crtoff, shatter and tracking step by interior frame.
   function transitionMix(tr, inT) {
     const k = Math.max(0, inT * FILM.FPS);
     const n = tr.dur * FILM.FPS;
     if (!(n > 0)) return 1;
     if (tr.kind === 'flash') return clamp01(k / n);
-    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff' || tr.kind === 'shatter') {
+    if (tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff' || tr.kind === 'shatter' || tr.kind === 'tracking') {
       return clamp01(k / Math.max(1, interiorFrames(tr.dur)));
     }
     return easeInOutCubic(clamp01((k + 1) / (n + 1)));
@@ -1194,6 +1400,49 @@
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  // tracking: the tape loses tracking on the cut. The outgoing picture rolls up and out, a blanking
+  // bar with snow in it follows, and the incoming picture rolls in under the bar and locks. Lines
+  // tear sideways most near the bar, the tear peaking mid-transition. tr.color (a pal name, default
+  // black) is the bar. One pass of the picture over the frame, so check 9 counts at most one flash.
+  function trackingComposite(ctx, A, B, tr, p, w, h) {
+    const bar = palColor(tr.color) || '#000000';
+    ctx.fillStyle = bar;
+    ctx.fillRect(0, 0, w, h);
+    const S = w / FILM.W;
+    const bh = Math.round(h * 0.07);
+    const r = Math.round(easeInOutCubic(p) * (h + bh));
+    const top = h - r;
+    const amp = Math.sin(Math.PI * p) * 0.12 * w;
+    const sh = Math.max(2, Math.round(h / 160));
+    const seed = Math.round(p * 997);
+    for (let y = 0; y < h; y += sh) {
+      const rh = Math.min(sh, h - y);
+      const mid = y + rh / 2;
+      let src, sy;
+      if (mid < top) {
+        src = A;
+        sy = y + r;
+      } else if (mid >= top + bh) {
+        src = B;
+        sy = y - top - bh;
+      } else continue;
+      sy = Math.max(0, Math.min(h - rh, sy));
+      const dist = mid < top ? top - mid : mid - top - bh;
+      const dx = Math.round(amp * Math.exp(-dist / (0.16 * h)) * (0.3 + 0.7 * ihash(Math.floor(y / sh), seed, 83)));
+      ctx.fillStyle = bar;
+      ctx.fillRect(0, y, w, rh);
+      ctx.drawImage(src, 0, sy, w, rh, dx, y, w, rh);
+    }
+    ctx.fillStyle = '#ffffff';
+    for (let k = 0; k < 40; k++) {
+      const y = top + ihash(k, seed, 84) * bh;
+      if (y < 0 || y >= h) continue;
+      ctx.globalAlpha = 0.25 + 0.5 * ihash(k, seed, 85);
+      ctx.fillRect(ihash(k, seed, 86) * w, y, (0.02 + 0.2 * ihash(k, seed, 87)) * w, Math.max(1, Math.round(2 * S)));
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // shatter: the outgoing picture cracks from an impact point into Voronoi pieces (lib.voronoi)
   // that fly out, turn, fall and fade, uncovering the incoming picture beneath. Pieces nearer
   // the impact leave first. Each piece redraws only its own box of the outgoing frame.
@@ -1278,7 +1527,7 @@
   }
 
   // fade, iris and wipe: A is the outgoing shot, B the incoming one, p in (0, 1) exclusive.
-  // whip, inkwash, morph, crtoff and shatter include p = 0 (outgoing alone). Their p stays below 1 inside the window.
+  // whip, inkwash, morph, crtoff, shatter and tracking include p = 0 (outgoing alone). Their p stays below 1 inside the window.
   function composite(ctx, A, B, tr, p) {
     resetCtx(ctx, true);
     const w = ctx.canvas.width;
@@ -1288,6 +1537,7 @@
     else if (tr.kind === 'morph') morphComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'crtoff') crtoffComposite(ctx, A, B, tr, p, w, h);
     else if (tr.kind === 'shatter') shatterComposite(ctx, A, B, tr, p, w, h);
+    else if (tr.kind === 'tracking') trackingComposite(ctx, A, B, tr, p, w, h);
     else {
       const e = easeInOutCubic(p);
       ctx.drawImage(A, 0, 0);
@@ -1325,7 +1575,7 @@
     resetCtx(ctx, false);
   }
 
-  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1, crtoff: 1, shatter: 1 };
+  const KINDS = { cut: 1, fade: 1, flash: 1, iris: 1, wipe: 1, whip: 1, inkwash: 1, morph: 1, crtoff: 1, shatter: 1, tracking: 1 };
   FILM.TRANSITION_KINDS = Object.keys(KINDS);
 
   /** Draws global time T (seconds) to FILM.canvas, carrier included. Returns the active shot entry. */
@@ -1385,9 +1635,9 @@
     }
     // fade, iris and wipe: frame 0 is already 1/(n+1) of the way in, the last transition frame
     // (n-1) is n/(n+1), so neither shot's own frame is repeated.
-    // whip, inkwash, morph, crtoff and shatter: p = 0 on the first frame (outgoing shot alone). p stays below 1
+    // whip, inkwash, morph, crtoff, shatter and tracking: p = 0 on the first frame (outgoing shot alone). p stays below 1
     // until dur has elapsed, and that next frame is the incoming shot alone.
-    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff' || tr.kind === 'shatter';
+    const fresh = tr.kind === 'whip' || tr.kind === 'inkwash' || tr.kind === 'morph' || tr.kind === 'crtoff' || tr.kind === 'shatter' || tr.kind === 'tracking';
     const p = fresh
       ? clamp01(k / Math.max(1, interiorFrames(tr.dur)))
       : clamp01((k + 1) / (n + 1));
