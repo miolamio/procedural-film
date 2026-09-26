@@ -293,7 +293,7 @@ body{background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif;ma
 main{max-width:1100px;margin:0 auto}
 h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
-.card{background:var(--card);border:2px solid var(--line);border-radius:10px;padding:0;overflow:hidden;cursor:pointer;text-align:left;color:inherit;font:inherit}
+.card{display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;background:var(--card);border:2px solid var(--line);border-radius:10px;padding:0;overflow:hidden;cursor:pointer;text-align:left;color:inherit;font:inherit}
 .card[aria-pressed="true"]{border-color:var(--pick)}
 .card img{display:block;width:100%;aspect-ratio:9/8;object-fit:cover;background:#000}
 .card .t{padding:10px 12px}.card b{display:block}.card span{color:var(--muted);font-size:13px}
