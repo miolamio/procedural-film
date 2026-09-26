@@ -432,3 +432,25 @@ A shore of flat firs standing on one line: 3 or 4 stacked tiers and a short trun
 - Mistake: a fresh seed per frame, or `Math.random`, so the forest jumps. Drawing the firs in placement order, so a short fir covers a tall one. Tiers built without the notch at each step, which turns a fir into a triangle
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/35-fx-scallop.js`
 
+## 47. Spotlight pool
+
+One pool of light on a dark void: a beam from a lamp above the frame widening to the pool's tangents, the pool as a radial ramp from a hot heart to its edge with a glow halo past it, dust drifting in the beam, the subject's shadow on the pool, and silhouettes in the dark caught by a rim of the light.
+
+- Duration: 1.0 to 4.0 s; the pool holds for the shot and only the subject, the dust and the shadow move, on twos
+- Plate: flat void (`tealVoid` on the spotlight theme), `post: 0`; the pool, the beam and the halo are drawn by the scene
+- Camera: locked. A cut may move the pool; a shot never does
+- Leans on: `rampStops` for the pool's gradient stops (a `spot` row in the ramps table), `onTwos` for the dust, `noise1` for its twinkle, `inkPath` for the shadow (the figure's strokes again, offset away from the lamp, clipped to the pool), `rimLight` on silhouettes in the void with `dir` from the pool to the silhouette
+- Mistake: a flat disc (the pool is a ramp with its focus toward the lamp, and a halo outside the edge). A shadow that spills onto the void. A second light. Dust on 24 fps, or keyed to the previous frame. Must-read text on the pool
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/41-fx-spotlight.js`
+
+## 48. Bone figure
+
+A figure built from bones: each bone one brush stroke between two joints, thin in the shaft and swollen at both heads, stopped short of each joint so the joint is a break in the ink with an accent disc in it. Fingers fold toward the hand's axis on twos; the ink boils on its own 12 fps clock.
+
+- Duration: a pose a quarter note to a bar; a reach is one bar rising and one bar closing
+- Plate: a lit ground (the pool of recipe 47) under thick dark ink; the joints carry the one accent
+- Camera: locked, or a slow drift that keeps the joints inside the safe area
+- Leans on: `inkPath` with `pressure(u)` (a bone is `0.42 + 0.86·|2u − 1|⁴`, a fingertip a head at the joint and a small tuft at the tip), `taper: [3, 3]`, `onTwos` for the pose, filled `inkPath` ovals for pebble bones (carpals), plain discs for the joints
+- Mistake: one outline around the whole hand instead of a stroke per bone. Bones drawn through the joints, so the accent has no gap to sit in. Easing the pose every frame. A shared pressure function with the default `taper`, which turns every bone into a spindle. Copying a known skeleton drawing: give the film's figure its own proportions and gesture
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/41-fx-spotlight.js`
+
