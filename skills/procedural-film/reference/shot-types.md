@@ -432,3 +432,14 @@ A shore of flat firs standing on one line: 3 or 4 stacked tiers and a short trun
 - Mistake: a fresh seed per frame, or `Math.random`, so the forest jumps. Drawing the firs in placement order, so a short fir covers a tall one. Tiers built without the notch at each step, which turns a fir into a triangle
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/35-fx-scallop.js`
 
+
+## 45. Dry-brush wood
+
+A wood seen from inside, through a black passe-partout: three planes of dry-brush trunks in three greys of one ink on grey paper, a figure painted as a dry-brush silhouette with paper eyes walking the focus ground, one `layers` camera tracking sideways, everything on twos. Its plate B is the same frame in negative, cut inside a held drawing.
+
+- Duration: 1.0 to 4.0 s. The track and the walk run on one global clock, so a run of shots (and the cut into plate B) keeps them
+- Plate: grey paper (`ash` on the drybrush theme) in a flat `mount` with a brushed inner edge; plate B is the shot again with `grade: { invert: 1 }`
+- Camera: one `layers` camera, tracking 100 to 120 px a second at the focus plane; far plane at `z` 3, mid 1.7, focus 1, near 0.6. The mount does not move
+- Leans on: `dryBrushFill` (trunks, coats, heads, creatures; eye rings passed with the head ring so even-odd leaves paper holes), `dryBrush` (dendrites, limbs, ground lines, the mount's edge), `layers`, `paper`, `stickPose`, `poseMix`, `stickPoses`, `blinkAt`, `cached`; the drawing clock `d = floor(T·12 + 0.5)`, `tq = (d − 0.5) / 12`
+- Mistake: building dry-brush plates in frame space for a moving figure, so every frame builds new plates: draw it in its own space and `translate`. Letting the far and mid planes boil (`boil: false` there; the near plane takes `boil: d % 3`). A walk on `T` or a boil on `lib.boil(T)` next to a clock on twos, so the figure swims against the wood. A drawing that turns on the beat, so the cut into plate B moves as well as inverts. A dissolve into the negative (it passes through flat grey). Copying a known figure: the characters are the film's
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/40-fx-drybrush-theme.js` (plate A `fx-drybrush`, plate B `fx-drybrush-b`); the dry-brush engine alone is `29-fx-dry-brush.js`
