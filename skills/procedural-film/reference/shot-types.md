@@ -508,3 +508,14 @@ A surface (ground, or any quantity over a plane) as a false-colour mesh on black
 - Leans on: `heightfield` (`mode: 'mesh'`, `cut`, `lift`, `ramp`; `mode: 'contour'` for the map), `heightMesh` and `project3d` when the thread must hide behind ridges, `isolines` over the field's grid for the thread and the labels, `heightPoint` for pins, `pixelText` for every label, `ticks` for the rulers, `ramp` for level colours
 - Mistake: a thread drawn over the finished mesh, so the far side of the loop shows through the mountain (ride each segment in the quad it crosses, drawn right after that quad). Easing `persp` itself to 0, which jumps at the end (ease `1 / persp`). Leaving a yaw or an offset on the last frame, so the map does not land on the box. A `range` from the samples instead of a fixed one, so the colours shift between the plates. Thinning the wire with depth; the theme's wire is one width. Sampling a function field every frame: sample it once into a grid and pass the grid
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/43-fx-relief.js`
+
+## 53. Stencil poster through the copier
+
+A sheet of printed matter the camera never leaves: stencil type across the top, one stencil figure in a broken ring in the middle, a torn toner band across the foot, all cut to pure black and white and photocopied, the drawings stepping on threes under a copy that jitters on 12. Everything soft (a shadow, static, a grey scale) is drawn as a grey ramp and left to the threshold to cut.
+
+- Duration: 1.0 to 4.0 s; a drawing is 3 frames, so cuts land on multiples of 1/8 s
+- Plate: `sheet` under `grade: { threshold: 1 }` and the `xerox` carrier (contrast 0.8, toner 0.55, dropouts 0.7), `post: 0`; plate B is the same scene under `grade: { invert: 1, threshold: 1 }` with the carrier's toner at 0.3
+- Camera: locked. The sheet does not move; the copy does
+- Leans on: `strokeText` with `style: 'stencil'`, placed a letter at a time from `strokeFont` widths so letters can drop out and misfeed; `Path2D` parts stroked in `sheet` and then filled in toner for the keylines; white rects across bars for the bridges; `noisePlate` for static (a seed per drawing, soft so the threshold has greys to cut); `noise1` and `h3` for the torn band; a drawing index `floor((T − T0) · 8)` on the global clock
+- Mistake: an outline round a shape (a stencil has none; the white gap is a keyline laid over what is behind). A closed loop with no bridge. Motion on the 12 fps boil clock or on ones, which blurs into the copy's own jitter: hold drawings on threes. A hue anywhere (the threshold drops it), or a shadow drawn solid (draw a ramp from `smudge` to `glare` and let the cut end it). Drawing the negative by hand: plate B is the grade. `setTransform` for the flattened shadow, which drops the render scale: use `transform`
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/44-fx-xerox-theme.js`
