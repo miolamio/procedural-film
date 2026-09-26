@@ -2,7 +2,7 @@
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 84,
+  duration: 86,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -64,6 +64,8 @@ FILM.TIMELINE = {
     { id: 'fx-spotlight-b', file: '41-fx-spotlight.js', start: 81, end: 82, mode: 'schematic', post: 0, brief: 'Spotlight plate B: the same frame as a schematic, bones as wire, isolux rings, a dimension and labels in the thin stroke font; cut on the violet joints.' },
     { id: 'fx-firs', file: '42-fx-firs.js', start: 82, end: 83, mode: 'illustrated', post: 0, brief: 'Firs theme: an ember sky, one pitch fir edge without contour, cut-paper eyes drifting over it, lollipop figures on the snow on twos.' },
     { id: 'fx-firs-b', file: '42-fx-firs.js', start: 83, end: 84, mode: 'illustrated', post: 0, grade: { invert: 1 }, brief: 'Firs plate B: the same frame as its negative, night, cut on the fir edge silhouette.' },
+    { id: 'fx-relief', file: '43-fx-relief.js', start: 84, end: 85, mode: 'illustrated', post: 0, brief: 'Relief theme: a false-colour massif as a perspective mesh on black in wire of one width, an amber isoline drawing itself round the mountain, pixel labels and ruler brackets; the camera rises and looks straight down.' },
+    { id: 'fx-relief-b', file: '43-fx-relief.js', start: 85, end: 86, mode: 'schematic', post: 0, brief: 'Relief plate B: the same surface as an isoline map on black, levels in the ramp colours, cut on the amber isoline.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
