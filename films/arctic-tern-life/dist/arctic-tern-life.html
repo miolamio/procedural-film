@@ -7887,6 +7887,191 @@
   }
   lib.faces3d = faces3d;
 
+  /**
+   * isolines(field, box, level, opts) : contour lines of a scalar field (marching squares).
+   * field(x, y) returns a number (values above the level are inside); box is [x, y, w, h]; the
+   * field is sampled on a grid of about `cell` px. Returns [{ pts, closed }]: closed loops where
+   * the contour stays inside the box, open chains where it leaves it. Saddle cells are decided
+   * by the value at the cell's centre. Pass an array of levels to get one list per level from
+   * one sampling of the grid.
+   *   cell 12
+   */
+  function isolines(field, box, level, o = {}) {
+    const [bx, by, bw, bh] = box;
+    const cell = Math.max(1, o.cell || 12);
+    const nx = Math.max(1, Math.ceil(bw / cell));
+    const ny = Math.max(1, Math.ceil(bh / cell));
+    const cx = bw / nx, cy = bh / ny;
+    const stride = nx + 1;
+    const val = new Float64Array(stride * (ny + 1));
+    for (let j = 0; j <= ny; j++) {
+      for (let i = 0; i <= nx; i++) {
+        const f = +field(bx + i * cx, by + j * cy);
+        val[j * stride + i] = Number.isFinite(f) ? f : -Infinity;
+      }
+    }
+    const levels = Array.isArray(level) ? level : [level];
+    const out = levels.map((L) => contour(L));
+    return Array.isArray(level) ? out : out[0];
+
+    function contour(L) {
+      // edge ids: horizontal (i,j)-(i+1,j) is 2k, vertical (i,j)-(i,j+1) is 2k+1, k = j*stride+i
+      const pts = new Map();
+      const point = (e) => {
+        let p = pts.get(e);
+        if (p) return p;
+        const k = e >> 1;
+        const i = k % stride, j = (k - i) / stride;
+        const k2 = e & 1 ? k + stride : k + 1;
+        const va = val[k], vb = val[k2];
+        let t = va === vb ? 0.5 : (L - va) / (vb - va);
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        p = e & 1 ? [bx + i * cx, by + (j + t) * cy] : [bx + (i + t) * cx, by + j * cy];
+        pts.set(e, p);
+        return p;
+      };
+      const segs = [];
+      const adj = new Map();
+      const add = (e1, e2) => {
+        const s = segs.length;
+        segs.push([e1, e2]);
+        for (const e of [e1, e2]) {
+          const l = adj.get(e);
+          if (l) l.push(s);
+          else adj.set(e, [s]);
+        }
+      };
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          const k = j * stride + i;
+          const a = val[k], b = val[k + 1], c = val[k + stride + 1], d = val[k + stride];
+          const code = (a > L ? 8 : 0) | (b > L ? 4 : 0) | (c > L ? 2 : 0) | (d > L ? 1 : 0);
+          if (code === 0 || code === 15) continue;
+          const T = 2 * k, R = 2 * (k + 1) + 1, B = 2 * (k + stride), Lf = 2 * k + 1;
+          const mid = () => (a + b + c + d) / 4 > L;
+          switch (code) {
+            case 1: case 14: add(Lf, B); break;
+            case 2: case 13: add(B, R); break;
+            case 3: case 12: add(Lf, R); break;
+            case 4: case 11: add(T, R); break;
+            case 6: case 9: add(T, B); break;
+            case 7: case 8: add(Lf, T); break;
+            case 5: if (mid()) { add(Lf, T); add(R, B); } else { add(T, R); add(Lf, B); } break;
+            case 10: if (mid()) { add(T, R); add(Lf, B); } else { add(Lf, T); add(R, B); } break;
+          }
+        }
+      }
+      const used = new Uint8Array(segs.length);
+      const lines = [];
+      const walk = (s0, e0) => {
+        const line = [point(e0)];
+        let s = s0, from = e0, closed = false;
+        for (;;) {
+          used[s] = 1;
+          const e = segs[s][0] === from ? segs[s][1] : segs[s][0];
+          if (e === e0) {
+            closed = true;
+            break;
+          }
+          line.push(point(e));
+          const next = adj.get(e).find((q) => !used[q]);
+          if (next === undefined) break;
+          s = next;
+          from = e;
+        }
+        lines.push({ pts: line, closed });
+      };
+      for (const [e, l] of adj) if (l.length === 1 && !used[l[0]]) walk(l[0], e);
+      for (let s = 0; s < segs.length; s++) if (!used[s]) walk(s, segs[s][0]);
+      return lines;
+    }
+  }
+  lib.isolines = isolines;
+
+  /** blobField(balls) : metaball field of [[x, y, r], ...], the sum of r²/d². 1 is a lone ball's rim. */
+  function blobField(balls) {
+    return (x, y) => {
+      let s = 0;
+      for (let i = 0; i < balls.length; i++) {
+        const b = balls[i];
+        const dx = x - b[0], dy = y - b[1];
+        s += (b[2] * b[2]) / (dx * dx + dy * dy + 1e-6);
+      }
+      return s;
+    };
+  }
+  lib.blobField = blobField;
+
+  /**
+   * blob(ctx, balls, opts) : a liquid body, the rim (level 1) of the metaball field of
+   * [[x, y, r], ...]: balls merge where they meet and split as they part. Filled even-odd (so a
+   * hole stays a hole), outlined, and optionally marbled with contours at higher levels.
+   * Returns the rim loops.
+   *   fill pal.white (null for none)   stroke pal.ink (null for none)   width 3
+   *   marble 0          inner contours at levels 1.35, 1.9, 2.8, …
+   *   marbleColor stroke   marbleWidth width × 0.45   marbleAlpha 0.6
+   *   warp 0            px of domain warp (fbm2): the rim flows
+   *   phase 0           moves the warp (pass a time, or lib.boil(T) × 0.3 to boil)
+   *   seed 7   cell 10   pad 1.8 (the sampled box is the balls ± r × pad, plus warp)
+   */
+  function blob(ctx, balls, o = {}) {
+    if (!balls || !balls.length) return [];
+    const pad = o.pad != null ? o.pad : 1.8;
+    const warp = o.warp || 0;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const b of balls) {
+      const r = b[2] * pad + warp;
+      x0 = Math.min(x0, b[0] - r);
+      y0 = Math.min(y0, b[1] - r);
+      x1 = Math.max(x1, b[0] + r);
+      y1 = Math.max(y1, b[1] + r);
+    }
+    const base = blobField(balls);
+    const seed = seedInt(o.seed === undefined ? 7 : o.seed);
+    const ph = o.phase || 0;
+    const field = warp
+      ? (x, y) => base(x + warp * lib.fbm2(x * 0.006 + ph, y * 0.006, seed), y + warp * lib.fbm2(x * 0.006, y * 0.006 - ph, seed + 1))
+      : base;
+    const marble = Math.max(0, o.marble | 0);
+    const levels = [1];
+    for (let k = 0; k < marble; k++) levels.push(1 + 0.35 * Math.pow(1.3, k) * (k + 1));
+    const sets = isolines(field, [x0, y0, x1 - x0, y1 - y0], levels, { cell: o.cell || 10 });
+    const trace = (lines) => {
+      ctx.beginPath();
+      for (const l of lines) {
+        const p = l.closed && l.pts.length > 3 ? lib.smoothPts(l.pts, true, 5) : l.pts;
+        lib.tracePath(ctx, p, l.closed);
+      }
+    };
+    const width = o.width != null ? o.width : 3;
+    const stroke = o.stroke === undefined ? pal.ink : o.stroke;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    trace(sets[0]);
+    if (o.fill !== null) {
+      ctx.fillStyle = o.fill || pal.white;
+      ctx.fill('evenodd');
+    }
+    for (let k = 1; k < sets.length; k++) {
+      trace(sets[k]);
+      ctx.globalAlpha = o.marbleAlpha != null ? o.marbleAlpha : 0.6;
+      ctx.strokeStyle = o.marbleColor || stroke || pal.ink;
+      ctx.lineWidth = o.marbleWidth != null ? o.marbleWidth : width * 0.45;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (stroke && width > 0) {
+      trace(sets[0]);
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    }
+    ctx.restore();
+    return sets[0];
+  }
+  lib.blob = blob;
+
   // ===========================================================================
   // Maps and plots
   // ===========================================================================
