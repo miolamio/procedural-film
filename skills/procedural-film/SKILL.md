@@ -9,9 +9,9 @@ Turn a topic into a **film**: roughly 30 seconds at 24 fps, 1080×1920 vertical 
 
 This skill packages a proven pipeline. It ships four things:
 
-- `foundation/` — the engine and tools, copied into the new project: `src/core.js`, `src/lib.js`, `src/player.js`, `src/music.js` (engine plus a demo score), and `tools/` (build, check, snap, render, stubgen, audio analysis, fixtures). Everything is driven by `src/timeline.js`, so no tool code changes per film.
+- `foundation/` — the engine and tools, copied into the new project: `src/core.js`, `src/lib.js`, `src/player.js`, `src/music.js` (engine plus a demo score), and `tools/` (build, check, snap, render, stubgen, theme, audio analysis, fixtures). Everything is driven by `src/timeline.js`, so no tool code changes per film.
 - `templates/` — the four planning documents every film starts from.
-- `themes/` — finished looks (art bible sections 1–9, a palette, a `theme.json`), indexed in `themes/INDEX.md`; step 3 picks one.
+- `themes/` — finished looks (art bible sections 1–9, a palette, a `theme.json`), indexed in `themes/INDEX.md`; step 0 picks one and step 3 applies it with `tools/theme.cjs`.
 - `reference/` — read when a step below points at one; the three example images first.
 
 Look first: `reference/example-contact-sheet.jpg` (the whole example film, 24 labelled frames), `reference/example-paper-frame.jpg` and `reference/example-blueprint-frame.jpg` (one full frame of each plate). That density and that finish are the bar. A theme with its own `example-*.jpg` (see `themes/INDEX.md`) sets its own bar the same way.
@@ -30,9 +30,9 @@ A scene agent gates its own shot with `node tools/check.cjs --shot <id>`. That r
 
 ### 0. Brief
 
-Ask one round of questions: the subject, what the film must include about it, and the length if it differs from 30 seconds. Invent the rest and say what you invented.
+Ask one round of questions: the subject, what the film must include about it, the length if it differs from 30 seconds, and the style direction. For the style, give the user the lookbook: `node <skill>/foundation/tools/theme.cjs lookbook --out <scratch>/lookbook.html` writes one page with every theme's preview, where the user picks a theme and the axes a film may override (frame, carrier, accent, grain) and copies back one `Style:` line, e.g. `Style: negative; frame 1080x1920; accent #3AA0FF`. Publish or open the page; in a plain terminal show `node <skill>/foundation/tools/theme.cjs list` instead. No answer means `house` at its own defaults. Invent the rest and say what you invented.
 
-Done when: the subject is one written sentence the user has seen.
+Done when: the subject is one written sentence and the style one `Style:` line, both seen by the user.
 
 ### 1. Setup
 
@@ -48,12 +48,13 @@ Done when: every phase of the story traces to a captured source listed in `SUMMA
 
 ### 3. Art bible
 
-Pick a theme from `themes/INDEX.md`: `house` (paper and blueprint) unless the user names another look or the subject calls for one. Say which and why in one line; a `draft` theme only within what its `needs` allow. Then:
+Apply the brief's `Style:` line. With none, apply `house`, unless the subject calls for another theme: then say which and why in one line. A `draft` theme only within what its `needs` allow.
 
-- paste `themes/<id>/art-bible-1-9.md` into `docs/art-bible.md` as sections 1–9, verbatim — they are already decided;
-- copy `themes/<id>/theme.json` to `docs/theme.json` (the stub pass colours its stubs from it);
-- paste `themes/<id>/palette.js` between `// BEGIN 2.2` and `// END 2.2` in `src/lib.js`; the subject rows follow it inside the same markers;
-- take the theme's `frame` as the timeline's `width` and `height` in step 5 unless the brief says otherwise, and its `carrier`, if it has one, as the timeline's `carrier`.
+```bash
+node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt] [--accent #RRGGBB] [--grain 0..1]
+```
+
+It pastes the theme's sections 1–9 into `docs/art-bible.md` (headed by a Film overrides note when an axis changes), the theme's palette rows inside the 2.2 markers of `src/lib.js` (the accent rows recoloured) and the resolved `docs/theme.json`, and prints the timeline's `width`, `height` and `carrier` and each plate's `mode`, `post` and `grade`, which step 5 takes as they are. Rerun it to switch theme: sections 1–9 and the theme rows are swapped, the subject rows stay. `node tools/theme.cjs show` prints the applied style again. Line, tone and motion are not overrides: for another line, pick another theme or run a reference analysis.
 
 Only the marked subject sections change: 2.2 (the subject palette, every colour a named hex, mirrored between the 2.2 markers in `src/lib.js`) and 10 (the subject reference built from the captured sources — one subsection per drawable element with sizes, ratios, counts, poses, sequences and the few ratios a critic measures — ending in Mistakes to avoid, each mistake paired with the correct drawing).
 
@@ -69,7 +70,7 @@ Done when: the shots tile [0, duration] exactly, with no gaps or overlaps, every
 
 ### 5. Timeline
 
-Write `src/timeline.js` from the storyboard (shape in the storyboard template): title, bpm, duration, the shots array (id, file, start, end, mode, title, transitionIn, brief), and the flat cues list collected from the Sound sections. Write `src/geo.js` from the Shared geometry section, one entry per table (shape in `docs/CONTRACT.md`). The stub pass is this step's test — it fails loudly on a malformed timeline or geometry table.
+Write `src/timeline.js` from the storyboard (shape in the storyboard template): title, bpm, duration, the shots array (id, file, start, end, mode, title, transitionIn, brief), and the flat cues list collected from the Sound sections. Take width, height, carrier and each plate's mode, post and grade from `node tools/theme.cjs show`; check 4 warns when the timeline drifts from `docs/theme.json`. Write `src/geo.js` from the Shared geometry section, one entry per table (shape in `docs/CONTRACT.md`). The stub pass is this step's test — it fails loudly on a malformed timeline or geometry table.
 
 ### 6. Stub pass
 

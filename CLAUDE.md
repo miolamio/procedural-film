@@ -36,9 +36,12 @@ node examples/butterfly-life/tools/snap.cjs --times 11.458,11.5 --geo G3 --crop 
 node examples/butterfly-life/tools/render.cjs --scale 0.5 --out exports/draft.mp4
 node examples/butterfly-life/tools/build.cjs            # dist/<slug>.html
 node examples/butterfly-life/tools/ref/extract.cjs ref.mp4 --bpm 120  # a reference video: shot and per-second sheets, palette, cut rhythm, cadence into .tmp/ref/<name>/
+node examples/butterfly-life/tools/theme.cjs list                 # themes: frame, carrier, accent, look
+node examples/butterfly-life/tools/theme.cjs lookbook --out .tmp/lookbook.html  # pick a style and its overrides
+node --test examples/butterfly-life/tools/theme.test.cjs          # tools/theme.cjs on a throwaway film
 ```
 
-There is no unit-test suite. The gate (`check.cjs`) is the test: run it on the example and with `--fixtures` after any engine or tool change. The foundation has no timeline of its own, so test it via `--fixtures`. ffmpeg must be on `PATH` or set in `FFMPEG`.
+The gate (`check.cjs`) is the test, plus `tools/theme.test.cjs` for the theme tool: run the gate on the example and with `--fixtures` after any engine or tool change. The foundation has no timeline of its own, so test it via `--fixtures`. ffmpeg must be on `PATH` or set in `FFMPEG`.
 
 Check 6 on `examples/butterfly-life` warns and does not fail the gate. The slow frames are the reference film's own drawing: `scale-mosaic` peaks around 540 ms, `spring-egg` around 300 ms. That warning is a known property of the example, not a regression to chase on every engine change.
 

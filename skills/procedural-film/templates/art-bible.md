@@ -8,7 +8,7 @@ Theme: <theme id> (`themes/<id>/` in the skill; its `theme.json` is copied to `d
 
 Sections 1 to 9 are the theme, copied verbatim from `themes/<id>/art-bible-1-9.md` — change them only after a fresh reference analysis (the skill's `templates/reference-analysis.md` shows the method). Section 2.2, the identity tints the theme asks for, and 10 are rewritten per film from the captured research.
 
-<!-- PASTE themes/<id>/art-bible-1-9.md HERE (sections 1 to 9) -->
+<!-- PASTE themes/<id>/art-bible-1-9.md HERE (sections 1 to 9): node tools/theme.cjs apply does it -->
 
 ## 10. Subject reference
 
