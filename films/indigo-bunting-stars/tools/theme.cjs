@@ -248,9 +248,10 @@ function main() {
       if (!fs.existsSync(f)) throw new Error('no docs/theme.json yet: run node tools/theme.cjs apply <id>');
       console.log(summary(JSON.parse(fs.readFileSync(f, 'utf8'))));
     } else if (cmd === 'lookbook') {
+      const html = lookbook(dir);
       const out = typeof args.out === 'string' ? path.resolve(args.out) : path.join(root, '.tmp', 'lookbook.html');
       fs.mkdirSync(path.dirname(out), { recursive: true });
-      fs.writeFileSync(out, lookbook(dir));
+      fs.writeFileSync(out, html);
       console.log(`lookbook -> ${out}`);
     } else throw new Error("usage: node tools/theme.cjs list | apply <id> [--frame WxH] [--carrier none|crt] [--accent '#RRGGBB'] [--grain 0..1] | show | lookbook [--out path]");
   } catch (e) {
@@ -258,9 +259,115 @@ function main() {
   }
 }
 
-function lookbook() {
-  throw new Error('lookbook is not built yet');
+function lookbook(dir) {
+  const data = listThemes(dir).map((t) => {
+    const pal = fs.readFileSync(path.join(dir, t.id, t.palette || 'palette.js'), 'utf8');
+    const img = path.join(dir, t.id, 'preview.jpg');
+    const post = t.plates && t.plates.A && t.plates.A.post;
+    return {
+      id: t.id,
+      name: t.name,
+      look: t.look || '',
+      status: t.status,
+      frame: t.frame,
+      carrier: t.carrier ? t.carrier.kind : 'none',
+      accent: t.accent && t.accent.base ? rowHex(pal, t.accent.base) : null,
+      grain: typeof post === 'number' ? post : null,
+      swatches: (pal.match(/'#[0-9A-Fa-f]{6}'/g) || []).map((s) => s.slice(1, -1)).slice(0, 8),
+      axes: t.axes || {},
+      preview: fs.existsSync(img) ? `data:image/jpeg;base64,${fs.readFileSync(img).toString('base64')}` : null,
+    };
+  });
+  return LOOKBOOK.replace('/*THEMES*/null', () => JSON.stringify(data).replace(/</g, '\\u003c'));
 }
 
-module.exports = { findThemes, listThemes, parseOverrides, mixHex, apply, summary, lookbook: (...a) => lookbook(...a) };
+const LOOKBOOK = `<title>Style lookbook</title>
+<style>
+:root{--bg:#f6f4ef;--fg:#1d1d22;--muted:#6b6b75;--card:#fff;--line:#dedad2;--pick:#2f5bd8;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111216;--fg:#ecebe6;--muted:#9a9aa3;--card:#1b1c22;--line:#2c2d35;--pick:#7fa2ff;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111216;--fg:#ecebe6;--muted:#9a9aa3;--card:#1b1c22;--line:#2c2d35;--pick:#7fa2ff;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif;margin:0;padding:24px 16px 48px}
+main{max-width:1100px;margin:0 auto}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
+.card{background:var(--card);border:2px solid var(--line);border-radius:10px;padding:0;overflow:hidden;cursor:pointer;text-align:left;color:inherit;font:inherit}
+.card[aria-pressed="true"]{border-color:var(--pick)}
+.card img{display:block;width:100%;aspect-ratio:9/8;object-fit:cover;background:#000}
+.card .t{padding:10px 12px}.card b{display:block}.card span{color:var(--muted);font-size:13px}
+.sw{display:flex;gap:3px;margin-top:6px}.sw i{width:14px;height:14px;border-radius:3px;border:1px solid var(--line)}
+.panel{margin-top:22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+@media (max-width:760px){.panel{grid-template-columns:minmax(0,1fr)}}
+fieldset{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 12px}
+legend{font-weight:600;padding:0 4px}label{margin-right:14px;white-space:nowrap}
+dl{margin:8px 0 0;font-size:13px}dt{color:var(--muted)}dd{margin:0 0 6px}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-all;margin:6px 0}
+button.copy{font:inherit;font-size:13px;padding:3px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:inherit;cursor:pointer}
+</style>
+<main>
+<h1>Style lookbook</h1>
+<p class="sub">Pick a theme, then the axes a film may override. Line, tone and motion come whole from the theme. The brief line goes into the brief; the command applies it at step 3.</p>
+<div class="grid" id="cards"></div>
+<div class="panel">
+<div>
+<fieldset><legend>Frame</legend><div id="frame"></div></fieldset>
+<fieldset><legend>Carrier</legend><div id="carrier"></div></fieldset>
+<fieldset><legend>Accent</legend><label><input type="checkbox" id="accOn"> own accent</label><input type="color" id="acc"> <span id="accNote" class="sub"></span></fieldset>
+<fieldset><legend>Grain</legend><label><input type="checkbox" id="grOn"> own grain</label><input type="range" id="gr" min="0" max="1" step="0.05"> <output id="grV"></output></fieldset>
+</div>
+<div>
+<b id="name"></b><dl id="axes"></dl>
+<p>Brief line <button class="copy" type="button" data-for="brief">Copy</button></p><pre id="brief"></pre>
+<p>Step 3 command <button class="copy" type="button" data-for="cmd">Copy</button></p><pre id="cmd"></pre>
+</div>
+</div>
+</main>
+<script>
+const THEMES=/*THEMES*/null;
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>String(s).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const FRAMES=['1080x1920','1920x1080','1080x1080'];
+let sel=THEMES[0];
+const st={frame:null,carrier:null,accent:null,grain:null};
+const dim=(t)=>t.frame.width+'x'+t.frame.height;
+function radios(host,name,opts,def,cur){host.innerHTML=opts.map((o)=>'<label><input type="radio" name="'+name+'" value="'+o+'"'+((cur||def)===o?' checked':'')+'> '+o+(o===def?' (theme)':'')+'</label>').join('');}
+function cards(){$('cards').innerHTML=THEMES.map((t)=>'<button class="card" type="button" data-id="'+t.id+'" aria-pressed="'+(t===sel)+'">'+(t.preview?'<img alt="" src="'+t.preview+'">':'')+'<div class="t"><b>'+esc(t.name)+'</b><span>'+esc(t.id)+' · '+dim(t)+' · '+esc(t.status)+'</span><br><span>'+esc(t.look)+'</span><div class="sw">'+t.swatches.map((h)=>'<i style="background:'+h+'"></i>').join('')+'</div></div></button>').join('');}
+function controls(){
+  radios($('frame'),'frame',FRAMES,dim(sel),st.frame);
+  radios($('carrier'),'carrier',['none','crt'],sel.carrier,st.carrier);
+  $('accOn').disabled=!sel.accent;$('accOn').checked=!!st.accent;$('acc').disabled=!st.accent;$('acc').value=(st.accent||sel.accent||'#888888').toLowerCase();
+  $('accNote').textContent=sel.accent?'theme: '+sel.accent:'this theme keeps its accent in lib.pal';
+  $('grOn').checked=st.grain!==null;$('gr').disabled=st.grain===null;$('gr').value=st.grain!==null?st.grain:(sel.grain!==null?sel.grain:0.5);
+  $('grV').textContent=st.grain!==null?st.grain:(sel.grain!==null?'theme '+sel.grain:'engine default');
+  $('name').textContent=sel.name;
+  const over={carrier:st.carrier&&st.carrier!==sel.carrier,accent:!!st.accent};
+  $('axes').innerHTML=Object.entries(sel.axes).map(([k,v])=>'<dt>'+esc(k)+(over[k]?' · overridden':'')+'</dt><dd>'+esc(v)+'</dd>').join('');
+}
+function outputs(){
+  const parts=['Style: '+sel.id],flags=[];
+  if(st.frame&&st.frame!==dim(sel)){parts.push('frame '+st.frame);flags.push('--frame '+st.frame);}
+  if(st.carrier&&st.carrier!==sel.carrier){parts.push('carrier '+st.carrier);flags.push('--carrier '+st.carrier);}
+  if(st.accent){parts.push('accent '+st.accent);flags.push("--accent '"+st.accent+"'");}
+  if(st.grain!==null){parts.push('grain '+st.grain);flags.push('--grain '+st.grain);}
+  $('brief').textContent=parts.join('; ');
+  $('cmd').textContent='node tools/theme.cjs apply '+sel.id+(flags.length?' '+flags.join(' '):'');
+}
+function render(){cards();controls();outputs();}
+$('cards').addEventListener('click',(e)=>{const c=e.target.closest('.card');if(!c)return;sel=THEMES.find((t)=>t.id===c.dataset.id);st.frame=st.carrier=st.accent=st.grain=null;render();});
+document.addEventListener('change',(e)=>{
+  const t=e.target;
+  if(t.name==='frame')st.frame=t.value===dim(sel)?null:t.value;
+  else if(t.name==='carrier')st.carrier=t.value===sel.carrier?null:t.value;
+  else if(t.id==='accOn')st.accent=t.checked?$('acc').value.toUpperCase():null;
+  else if(t.id==='acc')st.accent=t.value.toUpperCase();
+  else if(t.id==='grOn')st.grain=t.checked?Number($('gr').value):null;
+  else return;
+  controls();outputs();
+});
+$('gr').addEventListener('input',(e)=>{st.grain=Number(e.target.value);$('grV').textContent=st.grain;outputs();});
+document.querySelectorAll('button.copy').forEach((b)=>b.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($(b.dataset.for).textContent);b.textContent='Copied';}catch(err){b.textContent='Select and copy';}setTimeout(()=>{b.textContent='Copy';},1500);}));
+render();
+</script>
+`;
+
+module.exports = { findThemes, listThemes, parseOverrides, mixHex, apply, summary, lookbook };
 if (require.main === module) main();

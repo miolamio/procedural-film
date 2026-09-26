@@ -271,3 +271,11 @@ test('--root and --themes reject a value-less flag', () => {
   assert.notStrictEqual(r2.status, 0);
   assert.match(r2.stderr, /--themes needs a path/);
 });
+
+test('lookbook embeds every theme and the brief line builder', { skip }, () => {
+  const html = T.lookbook(THEMES);
+  for (const t of T.listThemes(THEMES)) assert.ok(html.includes(`"id":"${t.id}"`), t.id);
+  assert.doesNotMatch(html, /\/\*THEMES\*\//);
+  assert.match(html, /<title>Style lookbook<\/title>/);
+  assert.match(html, /node tools\/theme\.cjs apply/);
+});
