@@ -1,0 +1,26 @@
+{
+  "id": "drybrush",
+  "name": "Dry brush / Passe-partout",
+  "status": "ready",
+  "look": "Dry-brush silhouettes of trees and figures in one blue-black ink on grey paper in a black mount, planes tracked on twos, no accent; plate B is the negative",
+  "accent": { "budget": { "row": "magenta", "frames": 1 } },
+  "frame": { "width": 1920, "height": 1080 },
+  "plates": {
+    "A": { "name": "paper", "mode": "illustrated", "post": 0, "base": "ash", "line": "brushInk", "text": "ashDim" },
+    "B": { "name": "negative", "mode": "illustrated", "post": 0, "grade": { "invert": 1 }, "base": "ash", "line": "brushInk", "text": "ashDim" }
+  },
+  "axes": {
+    "base": "flat grey paper (#D3D3D3) inside a black mount with a brushed inner edge; the tooth is in the brush",
+    "line": "no contour: every shape is a dry-brush silhouette (dryBrushFill) or a dry-brush stroke (dryBrush)",
+    "tone": "flat fills without tone: three greys of one ink by depth; no hatching, no gradient, no glow, no fog",
+    "planB": "the negative: the same frame under grade { invert: 1 }, cut inside a held drawing",
+    "motion": "on twos, each drawing landing one frame ahead of the beat; the near plane boils on the same clock; multiplane tracking",
+    "carrier": "clean: no grain, no post",
+    "accent": "none; the budget guards against the house magenta leaking in",
+    "font": "thin sans, lower case, tracked, on the mount only",
+    "match": "silhouette: the figure keeps its outline and place across the cut",
+    "overlays": "none"
+  },
+  "recipes": [17, 19, 27, 38, 45],
+  "palette": "palette.js"
+}

@@ -22,8 +22,9 @@ Each theme folder holds:
 | [`spotlight`](spotlight/) | 1080×1920 | Thick black brush ink with pressure on a pool of cyan light in a dark teal void, violet joints; plate B is the same frame as light wire with isolux rings | ready |
 | [`snow`](snow/) | 1920×1080 | Bare ink trees and stick figures in an overexposed white that eats the ground, stipple and snow on ones, one red drop for the whole film; plate B is the same frame as its negative, the drop still red | ready |
 | [`firs`](firs/) | 1920×1080 | A night collage: one pitch-black jagged fir edge without contour on a flat ember sky, a drifting swarm of cut-paper almond eyes, lollipop figures on the snow, one ice iris; plate B is the negative | ready |
+| [`drybrush`](drybrush/) | 1920×1080 | Dry-brush silhouettes of trees and figures in one blue-black ink on grey paper in a black passe-partout: three planes tracked on twos, paper eyes, no tone and no accent; plate B is the same frame in negative | ready |
 
-Planned, second wave: `drybrush`, `relief` (heat map).
+Planned, second wave: `relief` (heat map).
 
 ## Picking a style
 
