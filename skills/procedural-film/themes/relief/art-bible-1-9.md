@@ -31,13 +31,13 @@ Black, a four-colour height ramp, one pale wire, one amber thread.
 | amber | #FF9F1C | The accent: the thread |
 | amberHot | #FFE2A8 | The thread's head while it draws on |
 
-The ramp is blue to a hard sand coast at 0.3, then sand to red at 0.7, then red to yellow at the top. Add it as a row of the ramps table in `src/lib.js` (beside `heat` and `terrain`):
+The ramp is blue to a hard sand coast at 0.3, then sand to red at 0.7, then red to yellow at the top. `tools/theme.cjs apply` writes it as the row `relief` of the ramps table in `src/lib.js` (from `ramps` in `theme.json`):
 
 ```js
     relief: [[0, 'reliefBlue'], [0.3, 'reliefBlue'], [0.3, 'reliefSand'], [0.7, 'reliefRed'], [1, 'reliefSun']],
 ```
 
-and pass `ramp: 'relief'` to `lib.heightfield`, `lib.ramp('relief', v)` for a level's colour.
+Pass `ramp: 'relief'` to `lib.heightfield`, `lib.ramp('relief', v)` for a level's colour.
 
 ### 2.2 Subject palette
 

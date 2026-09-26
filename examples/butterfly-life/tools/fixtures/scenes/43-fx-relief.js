@@ -5,10 +5,9 @@
 // from above. Plate B is the same surface as an isoline map on black: the thread's isoline keeps
 // every pixel across the cut, the brackets and the legend hold.
 // Colours are the theme's rows (themes/relief/palette.js); the fixture film keeps the house
-// lib.pal, so the plate carries them here. lib.heightfield takes a ramp of lib.pal names, which
-// the fixture film does not have, so plate A fills the quads of lib.heightMesh itself (RL_RAMP
-// stands in for ramp: 'relief'); plate B strokes each level through lib.heightfield's contour
-// mode with that level's colour.
+// lib.pal, so the plate carries them here and RL_RAMP gives lib.rampRGB hex stops (a film:
+// ramp 'relief'). Plate A fills the quads of lib.heightMesh itself with a lambert shade; plate B
+// strokes each level through lib.heightfield's contour mode with that level's colour.
 const RL = {
   void: '#000000', blue: '#1E3F9A', sand: '#D8C48A', red: '#901B20', sun: '#DFC505',
   wire: '#E6E1D3', dim: '#6E7280', amber: '#FF9F1C', amberHot: '#FFE2A8',
@@ -24,21 +23,6 @@ const RL_LEVELS = [0.3, 0.34, 0.38, 0.42, 0.46, 0.5, 0.54, 0.58, 0.62, 0.66, 0.7
 const RL_METRES = 2600; // a height of 1 in metres, for the labels
 const RL_GRID = 96; // the field is sampled once on 97 × 97 nodes
 
-function rlHex(h) {
-  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
-}
-const RL_STOPS = RL_RAMP.map(([at, h]) => [at, rlHex(h)]);
-function rlRamp(v, out) {
-  const x = v < 0 ? 0 : v > 1 ? 1 : v;
-  let i = 1;
-  while (i < RL_STOPS.length - 1 && x > RL_STOPS[i][0]) i++;
-  const [a, A] = RL_STOPS[i - 1], [b, B] = RL_STOPS[i];
-  const k = b > a ? Math.min(1, Math.max(0, (x - a) / (b - a))) : 1;
-  out[0] = A[0] + (B[0] - A[0]) * k;
-  out[1] = A[1] + (B[1] - A[1]) * k;
-  out[2] = A[2] + (B[2] - A[2]) * k;
-  return out;
-}
 const rlCss = (c, s = 1) => `rgb(${Math.min(255, Math.round(c[0] * s))},${Math.min(255, Math.round(c[1] * s))},${Math.min(255, Math.round(c[2] * s))})`;
 
 // The massif: a warped mass with a main summit, two lower tops and sharp ridged crests, on a
@@ -178,7 +162,7 @@ function rlMeshOf(L) {
       const nl = Math.hypot(nxv, nyv, nzv) || 1;
       const lam = Math.max(0, (nxv * light[0] + nyv * light[1] + nzv * light[2]) / (nl * ll));
       const s = 0.74 + 0.36 * lam;
-      rlRamp(h, c);
+      L.rampRGB(RL_RAMP, h, c);
       quads.push({ a, b, d, e, fill: rlCss(c, Math.min(1.06, s)) });
     }
   }
@@ -319,7 +303,7 @@ function rlFurniture(ctx, info, sheet, readout) {
   const c = [0, 0, 0];
   const steps = 18;
   for (let k = 0; k < steps; k++) {
-    rlRamp(0.25 + ((k + 0.5) / steps) * 0.75, c);
+    L.rampRGB(RL_RAMP, 0.25 + ((k + 0.5) / steps) * 0.75, c);
     ctx.fillStyle = rlCss(c);
     ctx.fillRect(lx + (k * lw) / steps, ly, lw / steps - 3, lh);
   }
@@ -412,7 +396,7 @@ function drawReliefB(ctx, t, info) {
   const base = { mode: 'contour', box: RL_BOX, range: RL_RANGE, key: 'fx-relief', shade: 0, width: 2 };
   for (const h of RL_LEVELS) {
     if (Math.abs(h - RL_THREAD) < 1e-6) continue;
-    rlRamp(h, c);
+    L.rampRGB(RL_RAMP, h, c);
     L.heightfield(ctx, F, Object.assign({}, base, { levels: [h], color: rlCss(c) }));
   }
   L.heightfield(ctx, F, Object.assign({}, base, { levels: [RL_THREAD], color: RL.amber, width: 4 }));
@@ -434,7 +418,7 @@ function drawReliefB(ctx, t, info) {
     const x = Math.round(bx + best[0] * bw - w / 2), y = Math.round(by + best[1] * bh - 7);
     ctx.fillStyle = RL.void;
     ctx.fillRect(x - 5, y - 4, w + 10, 22);
-    rlRamp(h, c);
+    L.rampRGB(RL_RAMP, h, c);
     rlText(ctx, L, str, x, y, 2, rlCss(c));
   }
   // north arrow in the top right corner of the map

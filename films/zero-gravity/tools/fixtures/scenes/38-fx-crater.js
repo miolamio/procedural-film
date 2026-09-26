@@ -4,7 +4,7 @@
 // as they go. Plate B: the same frame as a heat map in stepped bands of the crater ramp with its
 // isotherms, cut on the hero's silhouette. Figures move on twos, line and grain boil at 12 fps.
 // Colours are the theme's rows (themes/crater/palette.js); the fixture film keeps the house lib.pal,
-// so the plate carries them here, and CR_RAMP stands in for lib.ramp(['craterDeep', ...], v).
+// so the plate carries them here and calls lib.ramp over hex stops (a film: lib.ramp('crater', v)).
 const CR = {
   craterDeep: '#6B070C',
   crater: '#B31214',
@@ -18,17 +18,6 @@ const CR_RAMP = [[0, CR.craterDeep], [0.3, CR.crater], [0.62, CR.craterHot], [0.
 const CR_THROAT = { x: 540, y: 1640, r: 600, sy: 1.15 }; // the glow: centre, radius, vertical stretch
 const CR_VP = [540, 1500]; // the point every figure falls toward
 const CR_BANDS = 8; // plate B steps
-
-// The crater ramp over hex stops (a film calls lib.ramp with the palette rows instead).
-function crRamp(v) {
-  v = Math.max(0, Math.min(1, v));
-  let i = 0;
-  while (i < CR_RAMP.length - 2 && v > CR_RAMP[i + 1][0]) i++;
-  const [a0, c0] = CR_RAMP[i], [a1, c1] = CR_RAMP[i + 1];
-  const u = (v - a0) / (a1 - a0);
-  const ch = (h, k) => parseInt(h.slice(1 + 2 * k, 3 + 2 * k), 16);
-  return '#' + [0, 1, 2].map((k) => Math.round(ch(c0, k) + (ch(c1, k) - ch(c0, k)) * u).toString(16).padStart(2, '0')).join('');
-}
 
 // Signed jitter in [-a, a] that changes only with the boil drawing.
 const crJit = (L, k, bf, seed, a) => a * (2 * L.h3(k, bf, seed) - 1);
@@ -159,7 +148,7 @@ function heatMap(ctx, L, W, H, bf, pulse) {
     }
   }
   paths.forEach((p, b) => {
-    ctx.fillStyle = crRamp((b + 0.5) / CR_BANDS);
+    ctx.fillStyle = L.ramp(CR_RAMP, (b + 0.5) / CR_BANDS);
     ctx.fill(p);
   });
   const levels = Array.from({ length: CR_BANDS - 1 }, (_, i) => (i + 1) / CR_BANDS);
@@ -184,7 +173,7 @@ function heatMap(ctx, L, W, H, bf, pulse) {
   // the scale: the ramp in its bands down the right edge, ticks at the isotherms
   const X = W - 96, Y0 = 520, SH = 760;
   for (let b = 0; b < CR_BANDS; b++) {
-    ctx.fillStyle = crRamp((b + 0.5) / CR_BANDS);
+    ctx.fillStyle = L.ramp(CR_RAMP, (b + 0.5) / CR_BANDS);
     ctx.fillRect(X, Y0 + SH - ((b + 1) * SH) / CR_BANDS, 36, SH / CR_BANDS);
   }
   ctx.strokeStyle = CR.scrawl;

@@ -450,7 +450,7 @@ One pool of light on a dark void: a beam from a lamp above the frame widening to
 - Duration: 1.0 to 4.0 s; the pool holds for the shot and only the subject, the dust and the shadow move, on twos
 - Plate: flat void (`tealVoid` on the spotlight theme), `post: 0`; the pool, the beam and the halo are drawn by the scene
 - Camera: locked. A cut may move the pool; a shot never does
-- Leans on: `rampStops` for the pool's gradient stops (a `spot` row in the ramps table), `onTwos` for the dust, `noise1` for its twinkle, `inkPath` for the shadow (the figure's strokes again, offset away from the lamp, clipped to the pool), `rimLight` on silhouettes in the void with `dir` from the pool to the silhouette
+- Leans on: `rampStops` for the pool's gradient stops (the `spot` row `theme.cjs apply` writes into the ramps table), `onTwos` for the dust, `noise1` for its twinkle, `inkPath` for the shadow (the figure's strokes again, offset away from the lamp, clipped to the pool), `rimLight` on silhouettes in the void with `dir` from the pool to the silhouette
 - Mistake: a flat disc (the pool is a ramp with its focus toward the lamp, and a halo outside the edge). A shadow that spills onto the void. A second light. Dust on 24 fps, or keyed to the previous frame. Must-read text on the pool
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/41-fx-spotlight.js`
 

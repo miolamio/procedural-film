@@ -4,6 +4,7 @@
   "status": "ready",
   "look": "Red paper with grain, a throat glowing from red through orange to yolk at the bottom of a well, a rim of hanging hair loops, scrawled stick figures falling into it; plate B is the same frame as a stepped heat map",
   "accent": { "base": "yolk", "hot": "yolkHot", "budget": { "area": 0.08 } },
+  "ramps": { "crater": [[0, "craterDeep"], [0.3, "crater"], [0.62, "craterHot"], [0.84, "yolk"], [1, "yolkHot"]] },
   "frame": { "width": 1080, "height": 1920 },
   "plates": {
     "A": { "name": "red paper", "mode": "illustrated", "post": 0.8, "base": "crater", "line": "scrawl", "text": "scratch" },

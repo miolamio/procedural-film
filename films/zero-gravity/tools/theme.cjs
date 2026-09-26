@@ -3,7 +3,8 @@
 //
 //   node tools/theme.cjs list                     the themes: frame, carrier, accent, status, look
 //   node tools/theme.cjs apply <id> [overrides]   sections 1-9 into docs/art-bible.md, the theme's palette
-//                                                 inside the 2.2 markers of src/lib.js, the resolved docs/theme.json
+//                                                 inside the 2.2 markers of src/lib.js, its ramps inside the
+//                                                 ramps markers, the resolved docs/theme.json
 //   node tools/theme.cjs show                     the applied theme and the film's overrides (docs/theme.json)
 //   node tools/theme.cjs lookbook [--out path]    one self-contained page to pick a theme and its overrides
 //
@@ -48,7 +49,28 @@ function loadTheme(dir, id) {
   }
   const budgetErr = accentBudgetProblem(theme.accent);
   if (budgetErr) throw new Error(`theme '${id}' has an invalid accent.budget in theme.json: ${budgetErr}`);
+  const rampErr = rampsProblem(theme.ramps);
+  if (rampErr) throw new Error(`theme '${id}' has invalid ramps in theme.json: ${rampErr}`);
   return theme;
+}
+
+/** ramps: { name: [stop, ...] }, a stop a lib.pal row name or [at, name]. Returns what is wrong, or null. */
+function rampsProblem(ramps) {
+  if (ramps === undefined) return null;
+  if (!ramps || typeof ramps !== 'object' || Array.isArray(ramps)) return 'it must be an object: { name: [stops] }';
+  for (const [name, list] of Object.entries(ramps)) {
+    if (!ROW_NAME.test(name)) return `'${name}' is not a ramp name`;
+    if (!Array.isArray(list) || list.length < 2) return `${name} needs at least two stops`;
+    let prev = 0;
+    for (const [i, st] of list.entries()) {
+      const at = typeof st === 'string' ? i / (list.length - 1) : Array.isArray(st) && st.length === 2 ? st[0] : NaN;
+      const row = typeof st === 'string' ? st : Array.isArray(st) ? st[1] : undefined;
+      if (!(typeof at === 'number' && at >= prev && at <= 1)) return `${name} stop ${i} needs a position in 0..1, not below the stop before it`;
+      if (!(typeof row === 'string' && ROW_NAME.test(row))) return `${name} stop ${i} is not a lib.pal row name (a theme's ramps name its palette rows, never a hex)`;
+      prev = at;
+    }
+  }
+  return null;
 }
 
 /** accent.budget (check 12): { frames, share, area, row }. Returns what is wrong with it, or null. */
@@ -173,6 +195,47 @@ function applyPalette(lib, rows) {
   return lines.join('\n');
 }
 
+function rampRows(theme) {
+  const ramps = theme.ramps || {};
+  if (!Object.keys(ramps).length) return [];
+  const stop = (st) => (typeof st === 'string' ? `'${st}'` : `[${st[0]}, '${st[1]}']`);
+  return [
+    `    // BEGIN theme ${theme.id} ramps (tools/theme.cjs rewrites these rows; the film's own go below)`,
+    ...Object.entries(ramps).map(([name, list]) => `    ${name}: [${list.map(stop).join(', ')}],`),
+    `    // END theme ${theme.id} ramps`,
+  ];
+}
+
+/** The theme's ramps between the ramps markers of src/lib.js; a theme without ramps clears the region. */
+function applyRamps(lib, theme) {
+  const rows = rampRows(theme);
+  const lines = lib.split('\n');
+  const b = lines.findIndex((l) => /\/\/ BEGIN ramps/.test(l));
+  const e = lines.findIndex((l) => /\/\/ END ramps/.test(l));
+  if (b < 0 || !(e > b)) {
+    if (!rows.length) return lib;
+    throw new Error(`theme '${theme.id}' has ramps, and src/lib.js has no // BEGIN ramps ... // END ramps markers in its ramps table: update the engine copy from the skill's foundation`);
+  }
+  const tb = lines.findIndex((l, i) => i > b && i < e && /\/\/ BEGIN theme [\w-]+ ramps/.test(l));
+  const te = lines.findIndex((l, i) => i > tb && i < e && /\/\/ END theme [\w-]+ ramps/.test(l));
+  if ((tb >= 0) !== (te >= 0)) throw new Error('src/lib.js has a theme ramps marker inside the ramps markers without its pair');
+  // Every stop names a row the palette now carries, and no ramp name is taken in the table outside
+  // the theme's region (the engine's rows above the markers, the film's own below the region).
+  const t0 = lines.findIndex((l) => /const ramps = \{/.test(l));
+  const from = t0 >= 0 && t0 < b ? t0 : b;
+  const table = lines.filter((_, i) => i >= from && i < e && !(tb >= 0 && i >= tb && i <= te));
+  for (const [name, list] of Object.entries(theme.ramps || {})) {
+    for (const st of list) {
+      const row = typeof st === 'string' ? st : st[1];
+      if (!lines.some((l) => new RegExp(`^\\s*${row}\\s*:\\s*'#[0-9A-Fa-f]{6}'`).test(l))) throw new Error(`ramp '${name}' of theme '${theme.id}' names '${row}', which is not a lib.pal row`);
+    }
+    if (table.some((l) => new RegExp(`^\\s*${name}\\s*:`).test(l))) throw new Error(`src/lib.js already has a ramp '${name}' in its ramps table: pasted by hand. Remove it, then run apply again`);
+  }
+  if (tb >= 0) lines.splice(tb, te - tb + 1, ...rows);
+  else lines.splice(b + 1, 0, ...rows);
+  return lines.join('\n');
+}
+
 function overrideNote(theme, o, original) {
   const parts = [];
   if (o.frame) {
@@ -242,7 +305,7 @@ function apply(root, dir, id, o) {
   if (!fs.existsSync(libFile)) throw new Error('src/lib.js is missing: copy the skill foundation into src/ first (step 1)');
   const values = o.accent ? accentValues(theme, o.accent) : {};
   const sections = fs.readFileSync(path.join(dir, id, 'art-bible-1-9.md'), 'utf8');
-  const lib = applyPalette(fs.readFileSync(libFile, 'utf8'), paletteBlock(theme, pal, values));
+  const lib = applyRamps(applyPalette(fs.readFileSync(libFile, 'utf8'), paletteBlock(theme, pal, values)), theme);
   const original = o.accent ? originalAccentValues(theme, pal) : {};
   const ab = applyArtBible(fs.readFileSync(abFile, 'utf8'), theme, sections, overrideNote(theme, o, original));
   const resolved = resolveTheme(theme, o);
@@ -413,5 +476,5 @@ render();
 </script>
 `;
 
-module.exports = { findThemes, listThemes, parseOverrides, mixHex, apply, summary, lookbook, accentBudgetProblem };
+module.exports = { findThemes, listThemes, parseOverrides, mixHex, apply, summary, lookbook, accentBudgetProblem, rampsProblem };
 if (require.main === module) main();

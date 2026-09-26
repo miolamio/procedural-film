@@ -6,7 +6,7 @@
 // wire on their centre lines, isolux rings for the pool, a dimension and labels in the thin stroke
 // font; the violet joints keep their place, so the cut holds on the hand. Colours are the theme's
 // rows (themes/spotlight/palette.js); the fixture film keeps the house lib.pal, so the plate
-// carries them here and builds the beam ramp as local gradient stops.
+// carries them here and passes the spot ramp to lib.rampStops as hex stops.
 const SP = {
   tealVoid: '#192A2C',
   beamDeep: '#2A6F6D',
@@ -18,8 +18,8 @@ const SP = {
 // The pool of light (a round spot on the back wall) and the beam that feeds it.
 const SP_POOL = { x: 540, y: 880, r: 430, halo: 150 };
 const SP_SRC = { x: 612, y: -60, w: 70 };
-// The beam ramp from the pool's edge to its heart: lib.ramp(['beam', 'beamHot']) in a film.
-const SP_RAMP = [[0, SP.beamHot], [0.28, SP.beamHot], [0.93, SP.beam]];
+// The theme's spot ramp from the pool's heart to its edge (a film: lib.rampStops('spot')).
+const SP_RAMP = [[0, SP.beamHot], [0.28, SP.beamHot], [0.93, SP.beam], [1, SP.beam]];
 
 const spRGBA = (hex, a) => FILM.lib.rgba(hex, a);
 
@@ -262,8 +262,7 @@ function drawSpotlight(ctx, info, plan) {
     // the pool: the beam ramp from its heart to its edge, then a glow halo into the void
     const R = O.r + O.halo, e = O.r / R;
     const pg = ctx.createRadialGradient(O.x - 40, O.y - 70, 0, O.x, O.y, R);
-    for (const [at, c] of SP_RAMP) pg.addColorStop(at * e, c);
-    pg.addColorStop(e, SP.beam);
+    for (const [at, c] of FILM.lib.rampStops(SP_RAMP)) pg.addColorStop(at * e, c);
     pg.addColorStop(e + 0.012, spRGBA(SP.beamDeep, 0.95));
     pg.addColorStop(e + (1 - e) * 0.45, spRGBA(SP.beamDeep, 0.3));
     pg.addColorStop(1, spRGBA(SP.beamDeep, 0));

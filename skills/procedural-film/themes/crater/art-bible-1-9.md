@@ -28,7 +28,7 @@ Red paper, one black line, and the heat of the throat. The only colour that move
 | scrawl | #170605 | Every line: hair, lip, figures, isotherms |
 | scratch | #F2D2BA | The wordmark and any text, scratched through the red |
 
-The crater ramp is `['craterDeep', 'crater', 'craterHot', 'yolk', 'yolkHot']` at stops `0, 0.3, 0.62, 0.84, 1`. Call it as an inline list, `lib.ramp(CRATER, v)` with `const CRATER = [[0, 'craterDeep'], [0.3, 'crater'], [0.62, 'craterHot'], [0.84, 'yolk'], [1, 'yolkHot']]`, or add it as a row of the `ramps` table in `lib.js` next to the 2.2 rows.
+The crater ramp is `['craterDeep', 'crater', 'craterHot', 'yolk', 'yolkHot']` at stops `0, 0.3, 0.62, 0.84, 1`. `tools/theme.cjs apply` writes it as the row `crater` of the ramps table in `src/lib.js` (from `ramps` in `theme.json`): call `lib.ramp('crater', v)`, and `lib.rampStops('crater')` for a gradient.
 
 ### 2.2 Subject palette
 
