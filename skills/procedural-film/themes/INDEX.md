@@ -22,6 +22,7 @@ Each theme folder holds:
 | [`spotlight`](spotlight/) | 1080×1920 | Thick black brush ink with pressure on a pool of cyan light in a dark teal void, violet joints; plate B is the same frame as light wire with isolux rings | ready |
 | [`snow`](snow/) | 1920×1080 | Bare ink trees and stick figures in an overexposed white that eats the ground, stipple and snow on ones, one red drop for the whole film; plate B is the same frame as its negative, the drop still red | ready |
 | [`firs`](firs/) | 1920×1080 | A night collage: one pitch-black jagged fir edge without contour on a flat ember sky, a drifting swarm of cut-paper almond eyes, lollipop figures on the snow, one ice iris; plate B is the negative | ready |
+| [`xerox`](xerox/) | 1080×1920 | A stencil poster through a photocopier: bold black stencil with bridges and keylines on white paper, cut to pure black and white, stencil type that drops letters, on threes under a copy that jitters, on the `xerox` carrier; plate B is the negative | ready |
 
 Planned, second wave: `drybrush`, `relief` (heat map).
 
@@ -31,7 +32,7 @@ Planned, second wave: `drybrush`, `relief` (heat map).
 - At step 0, with no answer, pick `house` unless the subject calls for another theme; say which and why in one line.
 - Step 3 applies it: `node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt|vhs|film|xerox] [--accent '#RRGGBB'] [--grain 0..1]`.
 - A theme fixes line, tone, motion, plate B, font, match cuts and overlays. Frame, carrier, accent and grain hold across themes and may be overridden per film; `docs/theme.json` records the overrides, and check 4 warns when the timeline's frame or carrier differs from it.
-- Carriers (`--carrier`): `crt` (a tube: scanlines, a rounded screen, a hum bar; the phosphor theme's) and `vhs` (a tape: chroma lag, a rolling tracking band, head-switching noise, a pixel-font counter; pair it with `transitionIn: { kind: 'tracking' }` for cuts that lose tracking) and `film` (a print: perforations down both edges, scratches, dust, a weave of at most 2 px, a faint exposure flicker) and `xerox` (a photocopy: colour dropped, tones crushed and blown out, mid-tones broken into toner grain, toner skips, pale vertical dropout bands, dark streaks, each boil drawing a new copy a few px off).
+- Carriers (`--carrier`): `crt` (a tube: scanlines, a rounded screen, a hum bar; the phosphor theme's) and `vhs` (a tape: chroma lag, a rolling tracking band, head-switching noise, a pixel-font counter; pair it with `transitionIn: { kind: 'tracking' }` for cuts that lose tracking) and `film` (a print: perforations down both edges, scratches, dust, a weave of at most 2 px, a faint exposure flicker) and `xerox` (a photocopy: colour dropped, tones crushed and blown out, mid-tones broken into toner grain, toner skips, pale vertical dropout bands, dark streaks, each boil drawing a new copy a few px off; the xerox theme's).
 - A `draft` theme is usable only within what its `status` and `needs` allow. Tell the user what is missing.
 - If no theme fits, run a reference analysis (`templates/reference-analysis.md`) and write sections 1 to 9 by hand; a look that proves itself on a finished film becomes a new theme folder with its own `preview.jpg`.
 
@@ -54,5 +55,6 @@ A frame shows the accent when pixels within 24 of the row's colour on every chan
 | `shards` | `{ area: 0.05 }` | flare red on one facet or one solid |
 | `blob` | `{ area: 0.02 }` | yolk yellow on one small thing |
 | `crater` | `{ area: 0.08 }` | yolk only in the throat's core, at the bottom of the well |
+| `xerox` | `{ row: 'magenta', frames: 1 }` | no accent: the copy drops every colour, so the engine's magenta shows for a frame at most |
 
 A one-point look (`snow`, one drop for the whole film) budgets `{ area: 0.002 }`.

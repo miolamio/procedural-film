@@ -1,0 +1,27 @@
+{
+  "id": "xerox",
+  "name": "Xerox / Dead air",
+  "status": "ready",
+  "look": "A stencil poster run through a photocopier: bold black stencil shapes with bridges and keylines on white paper, cut to pure black and white, stencil type that drops letters, drawings on threes under a copy that jitters on 12; plate B is the negative of the same frame",
+  "accent": { "budget": { "row": "magenta", "frames": 1 } },
+  "frame": { "width": 1080, "height": 1920 },
+  "carrier": { "kind": "xerox", "contrast": 0.8, "exposure": 0.4, "speckle": 0.5, "toner": 0.55, "dropouts": 0.7, "streaks": 0.6, "jitter": 3 },
+  "plates": {
+    "A": { "name": "copy", "mode": "illustrated", "post": 0, "grade": { "threshold": 1 }, "base": "sheet", "line": "toner", "text": "toner" },
+    "B": { "name": "negative", "mode": "illustrated", "post": 0, "grade": { "invert": 1, "threshold": 1 }, "base": "sheet", "line": "toner", "text": "toner" }
+  },
+  "axes": {
+    "base": "white copier paper; a torn toner band may take the foot of the sheet",
+    "line": "stencil: flat toner fills and bars with white bridges where a loop would close and a white keyline where two shapes overlap; no stroke, no pressure",
+    "tone": "threshold: grade { threshold: 1 } cuts every grey to toner or paper; greys are drawn only for the cut to decide (a shadow ramp, static, a grey scale)",
+    "planB": "the negative: the same frame under grade { invert: 1, threshold: 1 }, paper turned to toner",
+    "motion": "on threes (8 drawings a second, one global clock) under the copy jitter of the carrier on 12",
+    "carrier": "xerox: contrast 0.8, exposure 0.4, toner 0.55, dropouts 0.7, streaks 0.6, jitter 3; plate B lowers toner to 0.3 and dropouts to 0.5",
+    "accent": "none: the copy drops every colour",
+    "font": "stencil: strokeText style 'stencil', letters placed one by one so the copy can drop or misfeed them",
+    "match": "silhouette: the figure keeps every pixel across the cut to the negative",
+    "overlays": "none; a counter or a grey scale is printed matter on the sheet, not an overlay"
+  },
+  "recipes": [15, 16, 28, 29, 53],
+  "palette": "palette.js"
+}
