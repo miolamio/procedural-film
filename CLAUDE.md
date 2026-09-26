@@ -35,6 +35,7 @@ node examples/butterfly-life/tools/snap.cjs --shot <id> --samples 6 --sheet   # 
 node examples/butterfly-life/tools/snap.cjs --times 11.458,11.5 --geo G3 --crop 380,300,320,640  # match cut with the table overlaid
 node examples/butterfly-life/tools/render.cjs --scale 0.5 --out exports/draft.mp4
 node examples/butterfly-life/tools/build.cjs            # dist/<slug>.html
+node examples/butterfly-life/tools/ref/extract.cjs ref.mp4 --bpm 120  # a reference video: shot and per-second sheets, palette, cut rhythm, cadence into .tmp/ref/<name>/
 ```
 
 There is no unit-test suite. The gate (`check.cjs`) is the test: run it on the example and with `--fixtures` after any engine or tool change. The foundation has no timeline of its own, so test it via `--fixtures`. ffmpeg must be on `PATH` or set in `FFMPEG`.

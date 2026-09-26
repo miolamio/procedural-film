@@ -1,5 +1,5 @@
 > **EXAMPLE — the analysis that fixed the house style** (paper plate vs blueprint plate, hard cuts, synthesised sound landing on cuts). A new film in the house style skips this document entirely.
-> Run the same method only when the user names a different look: step through the reference video in a browser at roughly 1-second intervals, take written notes only (no saved frames), and finish with a numbered "Style rules to carry over" list. That list then rewrites art-bible sections 1–9 before planning continues.
+> Run the same method only when the user names a different look. First measure the reference: `node tools/ref/extract.cjs <video>` writes into `.tmp/ref/<name>/` a sheet with one frame per detected shot, a sheet with one frame per second, the dominant palette, and `report.md` with the cut rhythm, the drawing cadence and each shot's plate and colours. Then step through the video at roughly 1-second intervals with the per-second sheet open, write the notes in your own words, check them against the report's numbers, and finish with a numbered "Style rules to carry over" list. The frames are notes and stay in `.tmp/`: never copy them into the film and never trace them. That list then rewrites art-bible sections 1–9 before planning continues.
 
 # Reference analysis: Kevin Ngo, "The life of a fruit fly"
 

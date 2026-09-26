@@ -57,7 +57,7 @@ Pick a theme from `themes/INDEX.md`: `house` (paper and blueprint) unless the us
 
 Only the marked subject sections change: 2.2 (the subject palette, every colour a named hex, mirrored between the 2.2 markers in `src/lib.js`) and 10 (the subject reference built from the captured sources — one subsection per drawable element with sizes, ratios, counts, poses, sequences and the few ratios a critic measures — ending in Mistakes to avoid, each mistake paired with the correct drawing).
 
-If no theme fits the look the user wants, run a reference analysis first — `templates/reference-analysis.md` shows the method (step through one reference video, written notes only, end with numbered style rules) — then write art-bible sections 1–9 to match before continuing.
+If no theme fits the look the user wants, run a reference analysis first — `templates/reference-analysis.md` shows the method (measure one reference video with `tools/ref/extract.cjs`, step through it, write notes in your own words, end with numbered style rules) — then write art-bible sections 1–9 to match before continuing.
 
 Done when: every element the storyboard will draw has a drawing rule and a palette name, `src/lib.js` holds the same values as section 2.2, the mistakes list exists, and `node tools/snap.cjs --fixtures --shot palette --samples 5 --sheet` has been looked at: every swatch named, each colour judged against its neighbours on every plate the theme uses. Every scene agent copies this palette, so a wrong hue costs every scene file.
 
