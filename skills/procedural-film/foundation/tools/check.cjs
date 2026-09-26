@@ -809,7 +809,7 @@ async function main() {
     if (!TL.hasDuration) tlProblems.push('timeline has no "duration"');
     if (!(TL.duration > 0)) tlProblems.push(`duration is not positive (${TL.duration})`);
     const ids = new Set();
-    const GRADE_RANGE = { invert: [0, 1], warmth: [-1, 1], fade: [0, 1], vignette: [0, 1], paperAge: [0, 1], tintAmount: [0, 1], duotoneAmount: [0, 1] };
+    const GRADE_RANGE = { invert: [0, 1], warmth: [-1, 1], fade: [0, 1], vignette: [0, 1], paperAge: [0, 1], tintAmount: [0, 1], duotoneAmount: [0, 1], threshold: [0, 1] };
     const palNames = readPalNames();
     if (!palNames.size) tlProblems.push('could not read colour names from lib.pal');
     // carrier kinds and their numeric fields; keep in step with FILM.defineCarrier in src/core.js

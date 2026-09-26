@@ -2,7 +2,7 @@
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 52,
+  duration: 54,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -38,6 +38,9 @@ FILM.TIMELINE = {
     { id: 'fx-duotone-plain', file: '31-fx-duotone.js', start: 50, end: 50.5, mode: 'illustrated', brief: 'Ungraded tonal plate.' },
     { id: 'fx-duotone', file: '31-fx-duotone.js', start: 50.5, end: 51.5, mode: 'illustrated', grade: { duotone: ['ink', 'paleBlue'] }, brief: 'Cut into ink on pale blue.' },
     { id: 'fx-duotone-dusk', file: '31-fx-duotone.js', start: 51.5, end: 52, mode: 'illustrated', transitionIn: { kind: 'fade', dur: 0.5 }, grade: { duotone: ['night', 'sun'], duotoneAmount: 0.7 }, brief: 'Fade to night on sun at 0.7.' },
+    { id: 'fx-threshold-soft', file: '32-fx-threshold.js', start: 52, end: 52.5, mode: 'illustrated', transitionIn: { kind: 'fade', dur: 0.5 }, grade: { threshold: 0.5 }, brief: 'Fade from the duotone into threshold 0.5: greys pushed toward black and white.' },
+    { id: 'fx-threshold', file: '32-fx-threshold.js', start: 52.5, end: 53.5, mode: 'illustrated', grade: { threshold: 1 }, brief: 'Threshold 1: black and white.' },
+    { id: 'fx-threshold-ink', file: '32-fx-threshold.js', start: 53.5, end: 54, mode: 'illustrated', grade: { threshold: 1, duotone: ['ink', 'paper'] }, brief: 'Cut to the same black and white printed in ink on paper.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
