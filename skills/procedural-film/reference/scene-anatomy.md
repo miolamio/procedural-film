@@ -39,6 +39,7 @@ Expect 1000+ lines for a dense shot — density is part of the look (hundreds of
 - Caches only for t-independent data. Anything time-varying derives from `t` alone.
 - Particle fields are `lib.particles` (sparks, dust, pollen, smoke): position is a closed function of time, never stored between frames. `loop` repeats background dust; `onTwos` holds the drawing on the 12 fps grid.
 - Watercolour tone is `lib.wash(ctx, clip, opts)`, cached like paper and blitted each frame; hatch sits on top of it.
+- Dry-brush silhouettes are `lib.dryBrushFill(ctx, outlines, opts)` and loose strokes (branches, ground) `lib.dryBrush`; pass a whole plane of trunks as one outline list so it is one cached plate, and hold far planes with `boil: false`.
 
 ## Text
 

@@ -2,7 +2,7 @@
 FILM.TIMELINE = {
   title: 'fixture',
   bpm: 120,
-  duration: 50,
+  duration: 58,
   shots: [
     { id: 'lib-showcase', file: '01-lib-showcase.js', start: 0, end: 2.5, mode: 'illustrated', brief: 'Every lib helper on one plate: paper, stripes, ink, hatching, stipple, blueprint, lattice, glows, guides.' },
     { id: 'fx-egg', file: '02-fx-egg.js', start: 2.5, end: 4.5, mode: 'schematic', brief: 'Blueprint egg with a cell lattice; two nuclei divide; magenta burst at the end.' },
@@ -35,6 +35,7 @@ FILM.TIMELINE = {
     { id: 'fx-shards', file: '24-fx-shards.js', start: 46, end: 47, mode: 'schematic', brief: 'Shards theme: a Voronoi field of flat shards parting on the beat, a lit box among them.' },
     { id: 'fx-polygon', file: '24-fx-shards.js', start: 47, end: 48, mode: 'schematic', transitionIn: { kind: 'shatter', dur: 0.75, x: 540, y: 910, seed: 3 }, brief: 'The field shatters from the box into a flight down a polygon tunnel.' },
     { id: 'fx-blob', file: '25-fx-blob.js', start: 48, end: 50, mode: 'illustrated', post: 0.5, brief: 'Blob theme: a melting marbled blob creature, a pair merging and splitting, a relief of isolines.' },
+    { id: 'fx-dry-brush', file: '29-fx-dry-brush.js', start: 56, end: 58, mode: 'illustrated', brief: 'Dry brush theme: a forest in three planes of dry-brush silhouettes on grey paper in a black mount, branches and ground strokes, the camera tracking right.' },
   ],
   cues: [
     { t: 0, kind: 'open' },

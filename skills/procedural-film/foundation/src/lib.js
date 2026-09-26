@@ -7220,6 +7220,485 @@
   lib.plot = plot;
 
   // ===========================================================================
+  // Dry brush
+  // ===========================================================================
+
+  /**
+   * dryBrush(ctx, pts, opts) : a dry-brush stroke. The hairs leave parallel streaks that break up
+   * in clumps as the brush runs dry, the paper tooth skips the ink, the edges are ragged, stray
+   * hairs split the tail, and the width follows the pressure. pts is one polyline, or an array of
+   * polylines that share one plate (a tree's branches). The plate is rendered once per points,
+   * options, seed, boil variant and FILM.S, then blitted; it is never keyed by raw time.
+   *   width     28       brush width at full pressure (px)
+   *   color     pal.ink
+   *   alpha     1
+   *   seed      1
+   *   dry       0.45     0 loaded (solid, streaks only toward the tail) .. 1 starved (scratchy from the start)
+   *   tooth     0.6      how hard the paper grain breaks the ink, 0..1
+   *   splay     0.5      stray hairs past the edge and a fanned, split tail, 0..1
+   *   pressure  null     fn(u 0..1) => width multiplier; default a blunt landing and a lift-off
+   *                      over the last third. Low pressure also lifts the outer hairs off the paper.
+   *   bristles  auto     hairs across the width (width / 2.4, 6..64)
+   *   wobble    1.5      hand drift of the centreline (px)
+   *   smooth    true     Catmull-Rom through the points
+   *   boil      true     three drawings on the 12 fps clock; false holds drawing 0, a number picks one
+   *   key                stable id for a pressure function whose source text does not determine it
+   */
+  const DB_LAND = 0.06;
+  function dbPressure(u) {
+    return (0.74 + 0.26 * smoothstep(0, DB_LAND, u)) * (1 - 0.62 * smoothstep(0.64, 1, u));
+  }
+  function dbFillPressure(u) {
+    return (0.86 + 0.14 * smoothstep(0, DB_LAND, u)) * (1 - 0.4 * smoothstep(0.84, 1, u));
+  }
+
+  function dbVariant(o) {
+    if (o.boil === false) return 0;
+    if (typeof o.boil === 'number') return Math.abs(o.boil | 0) % 3;
+    const b = lib.boil(lib.T);
+    return isFinite(b) ? ((b % 3) + 3) % 3 : 0;
+  }
+
+  // Paper tooth: a 256 px periodic tile per boil variant (never per time), shared by every plate.
+  // Fine 2 px value noise, a pixel hash and an 8 px mottle so dry ink breaks in patches, not salt.
+  const DB_TILE = 256;
+  const dbTeeth = [];
+  function dbToothTile(variant) {
+    if (dbTeeth[variant]) return dbTeeth[variant];
+    const T = new Float32Array(DB_TILE * DB_TILE);
+    const s = 7717 + variant * 131;
+    const vnoise = (x, y, cell, seed) => {
+      const n = DB_TILE / cell;
+      const gx = x / cell, gy = y / cell;
+      const ix = Math.floor(gx), iy = Math.floor(gy);
+      const fx = gx - ix, fy = gy - iy;
+      const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+      const x0 = ix % n, y0 = iy % n, x1 = (ix + 1) % n, y1 = (iy + 1) % n;
+      const a = h3(x0, y0, seed), b = h3(x1, y0, seed), c = h3(x0, y1, seed), d = h3(x1, y1, seed);
+      return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+    };
+    for (let y = 0; y < DB_TILE; y++) {
+      for (let x = 0; x < DB_TILE; x++) {
+        T[y * DB_TILE + x] = 0.46 * vnoise(x, y, 2, s) + 0.3 * h3(x, y, s + 1) + 0.24 * vnoise(x, y, 8, s + 2);
+      }
+    }
+    return (dbTeeth[variant] = T);
+  }
+
+  function dbPlate(b, S) {
+    const x0 = Math.floor(b.x), y0 = Math.floor(b.y);
+    const lw = Math.max(1, Math.ceil(b.x + b.w) - x0);
+    const lh = Math.max(1, Math.ceil(b.y + b.h) - y0);
+    const cw = Math.max(1, Math.round(lw * S));
+    const ch = Math.max(1, Math.round(lh * S));
+    return { x0, y0, lw, lh, cw, ch, sx: cw / lw, sy: ch / lh, buf: new Float32Array(cw * ch) };
+  }
+
+  // Deposits one stroke's ink into the plate buffer (max, not sum: ink does not pile up).
+  // Each hair is walked along the centreline and written as a short span across it.
+  function dbStroke(P, pts, q) {
+    const C = centreline(pts, false, 3, q.smooth, 0, 0);
+    if (C.m < 2) return;
+    const L = C.S[C.m - 1];
+    if (!(L > 0.5)) return;
+    const m = C.m;
+    const r = rng(q.seed);
+    // per-sample centreline drift, pressure and load
+    const D = new Float64Array(m), Pw = new Float64Array(m), Ld = new Float64Array(m);
+    const dry = q.dry;
+    const load0 = lerp(1.3, 0.66, dry);
+    const drain = 0.28 + 0.7 * dry;
+    for (let k = 0; k < m; k++) {
+      const s = C.S[k], u = s / L;
+      D[k] = q.wobble * (0.7 * noise1(s / 170, q.seed + 3) + 0.3 * noise1(s / 45, q.seed + 4));
+      Pw[k] = Math.max(0.05, q.pressure(u));
+      Ld[k] = load0 - drain * Math.pow(u, 1.5) + 0.08 * noise1(s / 90, q.seed + 5);
+    }
+    const N = q.bristles;
+    const sp = q.width / N;
+    const hairR = Math.max(0.55, 0.5 * sp * P.sx * 1.15);
+    const land = Math.min(L * 0.3, q.width * 0.45);
+    const clumps = Math.max(2, Math.round(N / 5));
+    const hairs = [];
+    for (let j = 0; j < N; j++) {
+      const v = -1 + (2 * (j + 0.5)) / N + (r() - 0.5) * (1.1 / N);
+      const av = Math.abs(v);
+      hairs.push({
+        v,
+        cap: 1 - 0.32 * av * av * av - 0.24 * r(),
+        thick: 0.72 + 0.6 * r(),
+        len: 30 + 120 * r(),
+        seed: (hash(q.seed, j) & 0x7fffffff) | 0,
+        clump: (hash(q.seed, 'clump', Math.floor((j * clumps) / N)) & 0x7fffffff) | 0,
+        a: r() * land * (0.25 + 0.75 * av), // outer hairs touch down later: a ragged landing
+        b: L,
+      });
+    }
+    const stray = Math.round(q.splay * N * 0.16);
+    for (let j = 0; j < stray; j++) {
+      const a = r() * L * 0.85;
+      hairs.push({
+        v: (r() < 0.5 ? -1 : 1) * (1.04 + 0.24 * r()),
+        cap: 0.55 + 0.3 * r(),
+        thick: 0.55 + 0.35 * r(),
+        len: 18 + 50 * r(),
+        seed: (hash(q.seed, 'stray', j) & 0x7fffffff) | 0,
+        clump: (hash(q.seed, 'stray-clump', j) & 0x7fffffff) | 0,
+        a,
+        b: Math.min(L, a + L * (0.06 + 0.26 * r())),
+      });
+    }
+    const streakAmp = 0.16 + 0.34 * dry;
+    const clumpAmp = 0.12 + 0.4 * dry;
+    const buf = P.buf, cw = P.cw, ch = P.ch, sx = P.sx, sy = P.sy;
+    // One grid of spans along the stroke, shared by every hair: centre (device px), normal,
+    // pressure, load, half-width with the tail fan, and the landing boost.
+    const ds = 1 / sx; // one device pixel between spans: the spans overlap, so a hair has no holes
+    const n = Math.max(2, Math.floor(L / ds) + 1);
+    const GX = new Float64Array(n), GY = new Float64Array(n), GNX = new Float64Array(n), GNY = new Float64Array(n);
+    const GP = new Float64Array(n), GL = new Float64Array(n), GH = new Float64Array(n), GU = new Float64Array(n);
+    for (let i = 0, k = 0; i < n; i++) {
+      const s = Math.min(L, i * ds);
+      while (k < m - 2 && C.S[k + 1] < s) k++;
+      const s0 = C.S[k], s1 = C.S[k + 1];
+      const f = s1 > s0 ? clamp((s - s0) / (s1 - s0)) : 0;
+      const nx = C.NX[k] + (C.NX[k + 1] - C.NX[k]) * f;
+      const ny = C.NY[k] + (C.NY[k + 1] - C.NY[k]) * f;
+      const nl = Math.hypot(nx, ny) || 1;
+      const d = D[k] + (D[k + 1] - D[k]) * f;
+      const p = Pw[k] + (Pw[k + 1] - Pw[k]) * f;
+      const u = s / L;
+      GNX[i] = nx / nl;
+      GNY[i] = ny / nl;
+      GX[i] = (C.X[k] + (C.X[k + 1] - C.X[k]) * f + GNX[i] * d - P.x0) * sx;
+      GY[i] = (C.Y[k] + (C.Y[k + 1] - C.Y[k]) * f + GNY[i] * d - P.y0) * sy;
+      GP[i] = p;
+      GL[i] = (Ld[k] + (Ld[k + 1] - Ld[k]) * f) + (s < land ? 0.3 * (1 - s / land) : 0);
+      GH[i] = (1 + q.splay * 0.5 * smoothstep(0.7, 1, u)) * q.width * 0.5 * p * sx;
+      GU[i] = 0.7 + 0.6 * u;
+    }
+    const NS = 10; // hair noise is evaluated every NS spans and interpolated
+    const wander = sp * 0.45 * sx;
+    for (let h = 0; h < hairs.length; h++) {
+      const hr = hairs[h];
+      const hv = hr.v, cap = hr.cap, hseed = hr.seed, hclump = hr.clump;
+      const k1 = 1 / hr.len, k2 = 1 / (hr.len * 0.4);
+      const inkAt = (s) => (0.62 * noise1(s * k1, hseed) + 0.22 * noise1(s * k2, hseed + 1)) * streakAmp + noise1(s / 70, hclump) * clumpAmp;
+      const lift = Math.abs(hv) - 0.3; // touch = (0.78 p - lift) / 0.16 + 0.5
+      const rr = hairR * hr.thick;
+      const i0 = Math.max(0, Math.ceil(hr.a / ds)), i1 = Math.min(n - 1, Math.floor(hr.b / ds));
+      // noise blocks of NS spans from i0; each block starts where the last one ended
+      let iA = i0;
+      let nA = inkAt(i0 * ds), wA = noise1((i0 * ds) / 26, hseed + 2);
+      let nB = inkAt((i0 + NS) * ds), wB = noise1(((i0 + NS) * ds) / 26, hseed + 2);
+      for (let i = i0; i <= i1; i++) {
+        if (i - iA >= NS) {
+          iA += NS;
+          nA = nB;
+          wA = wB;
+          const sB = (iA + NS) * ds;
+          nB = inkAt(sB);
+          wB = noise1(sB / 26, hseed + 2);
+        }
+        const p = GP[i];
+        // outer hairs lift off first as the pressure drops
+        let touch = (0.78 * p - lift) * 6.25 + 0.5;
+        if (touch <= 0) continue;
+        if (touch > 1) touch = 1;
+        const g = (i - iA) / NS;
+        const e = (GL[i] * cap + (nA + (nB - nA) * g) * GU[i]) * touch;
+        if (e <= 0.03) continue;
+        const nx = GNX[i], ny = GNY[i];
+        const off = hv * GH[i] + wander * (wA + (wB - wA) * g);
+        const px = GX[i] + nx * off;
+        const py = GY[i] + ny * off;
+        const R = rr * (0.72 + 0.28 * p) + 0.5;
+        for (let tt = 0.5 - R; tt < R; tt += 1) {
+          const x = px + nx * tt, y = py + ny * tt;
+          if (x < 0 || y < 0) continue;
+          const xi = x | 0, yi = y | 0;
+          if (xi >= cw || yi >= ch) continue;
+          const c = R - (tt < 0 ? -tt : tt);
+          const v = c >= 1 ? e : e * c;
+          const j = yi * cw + xi;
+          if (v > buf[j]) buf[j] = v;
+        }
+      }
+    }
+  }
+
+  // Ink buffer -> RGBA. The paper tooth sets a threshold per pixel: a loaded brush clears it
+  // everywhere, a dry one only on the grain's peaks. keep(i, x, y) (optional) scales the ink.
+  function dbFinish(P, img, q, variant, keep) {
+    const d = img.data;
+    const buf = P.buf, cw = P.cw, ch = P.ch;
+    const rgb = parseColor(q.color);
+    const T = dbToothTile(variant);
+    const tx = q.seed & 255, ty = (q.seed >>> 8) & 255;
+    const tooth = q.tooth;
+    const A = q.alpha * 255;
+    const col = new Int32Array(cw);
+    for (let xx = 0; xx < cw; xx++) col[xx] = (Math.floor(P.x0 + (xx + 0.5) / P.sx) + tx) & 255;
+    for (let yy = 0; yy < ch; yy++) {
+      const row = ((Math.floor(P.y0 + (yy + 0.5) / P.sy) + ty) & 255) * DB_TILE;
+      for (let xx = 0; xx < cw; xx++) {
+        const i = yy * cw + xx;
+        let e = buf[i];
+        if (!(e > 0.02)) continue;
+        if (keep) {
+          e *= keep(i, xx, yy);
+          if (!(e > 0.02)) continue;
+        }
+        const grain = T[row + col[xx]];
+        let a = (e - (0.2 + tooth * 0.72 * grain) + 0.07) / 0.14;
+        if (a <= 0) continue;
+        if (a > 1) a = 1;
+        a = a * a * (3 - 2 * a) * (0.8 + 0.2 * (e > 1 ? 1 : e));
+        const k = i * 4;
+        d[k] = rgb[0];
+        d[k + 1] = rgb[1];
+        d[k + 2] = rgb[2];
+        d[k + 3] = (a * A + 0.5) | 0;
+      }
+    }
+  }
+
+  function dbParams(o, seed, variant, width, defPressure, hairGap) {
+    const n = o.bristles != null ? o.bristles | 0 : Math.round(width / hairGap);
+    return {
+      seed: (hash(seed, variant) & 0x7fffffff) | 0,
+      width,
+      color: o.color || pal.ink,
+      alpha: clamp(o.alpha != null ? +o.alpha : 1, 0, 1),
+      dry: clamp(o.dry != null ? +o.dry : 0.45, 0, 1),
+      tooth: clamp(o.tooth != null ? +o.tooth : 0.6, 0, 1),
+      splay: clamp(o.splay != null ? +o.splay : 0.5, 0, 1),
+      pressure: typeof o.pressure === 'function' ? o.pressure : defPressure,
+      bristles: Math.max(6, Math.min(64, n)),
+      wobble: o.wobble != null ? +o.wobble : 1.5,
+      smooth: o.smooth !== false,
+    };
+  }
+  function dbKey(q, o) {
+    return [q.seed, q.width, q.color, q.alpha, q.dry, q.tooth, q.splay, q.bristles, q.wobble, q.smooth,
+      typeof o.pressure === 'function' ? hash(String(o.pressure)) : 0, o.key != null ? String(o.key) : ''].join('|');
+  }
+  function dbBlit(ctx, plate) {
+    if (!plate || !plate.length) return;
+    ctx.save();
+    if (Math.abs(renderScale() - 1) < 1e-6) ctx.imageSmoothingEnabled = false;
+    for (const p of plate) ctx.drawImage(p.c, p.x, p.y, p.w, p.h);
+    ctx.restore();
+  }
+  // The finished plate as canvases: one per run of inked columns (trunks side by side keep only
+  // their own strips, not the empty paper between them), each trimmed to its inked rows.
+  function dbCanvas(P, q, variant, keep) {
+    const cw = P.cw, ch = P.ch;
+    const img = new ImageData(cw, ch);
+    dbFinish(P, img, q, variant, keep);
+    const d = img.data;
+    const top = new Int32Array(cw).fill(ch), bottom = new Int32Array(cw).fill(-1);
+    for (let yy = 0; yy < ch; yy++) {
+      for (let xx = 0, k = yy * cw * 4 + 3; xx < cw; xx++, k += 4) {
+        if (d[k]) {
+          if (yy < top[xx]) top[xx] = yy;
+          bottom[xx] = yy;
+        }
+      }
+    }
+    const parts = [];
+    const gap = 4;
+    for (let xx = 0; xx < cw; ) {
+      if (bottom[xx] < 0) {
+        xx++;
+        continue;
+      }
+      let x1 = xx, r0 = top[xx], r1 = bottom[xx];
+      for (let e = xx + 1; e < cw && e <= x1 + gap; e++) {
+        if (bottom[e] < 0) continue;
+        x1 = e;
+        if (top[e] < r0) r0 = top[e];
+        if (bottom[e] > r1) r1 = bottom[e];
+      }
+      const w = x1 - xx + 1, h = r1 - r0 + 1;
+      const c = newCanvas(w, h);
+      c.getContext('2d').putImageData(img, -xx, -r0, xx, r0, w, h);
+      parts.push({ c, x: P.x0 + xx / P.sx, y: P.y0 + r0 / P.sy, w: w / P.sx, h: h / P.sy });
+      xx = x1 + 1;
+    }
+    return parts;
+  }
+
+  function dryBrush(ctx, pts, o = {}) {
+    const lines = toPolys(pts);
+    if (!lines) return;
+    const strokes = lines.filter((l) => l.length >= 2);
+    if (!strokes.length) return;
+    const S = renderScale();
+    const width = Math.max(1, o.width != null ? +o.width : 28);
+    const variant = dbVariant(o);
+    const q = dbParams(o, seedInt(o.seed === undefined ? 1 : o.seed), variant, width, dbPressure, 2.4);
+    const key = ['dryBrush', hashClip(strokes), S, dbKey(q, o)].join('|');
+    const plate = cached(key, () => {
+      const b = polysBounds(strokes);
+      const pad = width * (0.5 + 0.5 * q.splay) + Math.abs(q.wobble) * 1.5 + 4;
+      const P = dbPlate({ x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad }, S);
+      strokes.forEach((line, i) => dbStroke(P, line, Object.assign({}, q, { seed: (hash(q.seed, i) & 0x7fffffff) | 0 })));
+      return dbCanvas(P, q, variant, null);
+    });
+    dbBlit(ctx, plate);
+  }
+  lib.dryBrush = dryBrush;
+
+  // Even-odd coverage of rings on the plate grid, anti-aliased along each row.
+  function dbInside(P, rings) {
+    const cw = P.cw, ch = P.ch;
+    const M = new Uint8Array(cw * ch);
+    const xs = [];
+    for (let yy = 0; yy < ch; yy++) {
+      const ly = P.y0 + (yy + 0.5) / P.sy;
+      xs.length = 0;
+      for (const ring of rings) {
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const a = ring[j], c = ring[i];
+          if ((a[1] > ly) === (c[1] > ly)) continue;
+          xs.push((a[0] + ((ly - a[1]) * (c[0] - a[0])) / (c[1] - a[1]) - P.x0) * P.sx);
+        }
+      }
+      xs.sort((p, s) => p - s);
+      const row = yy * cw;
+      for (let i = 0; i + 1 < xs.length; i += 2) {
+        const xa = xs[i], xb = xs[i + 1];
+        const i0 = Math.max(0, Math.floor(xa)), i1 = Math.min(cw - 1, Math.floor(xb));
+        for (let xx = i0; xx <= i1; xx++) {
+          const pc = xx + 0.5;
+          const cov = clamp(Math.min(pc - xa, xb - pc) + 0.5);
+          const v = (cov * 255 + 0.5) | 0;
+          if (v > M[row + xx]) M[row + xx] = v;
+        }
+      }
+    }
+    return M;
+  }
+
+  /**
+   * dryBrushFill(ctx, shape, opts) : a silhouette painted in parallel dry-brush strokes (trees,
+   * figures). shape is a closed outline, a list of outlines (even-odd, several trunks on one
+   * plate) or a lib.geo entry. The core stays dense, the stroke ends dry out and split, and the
+   * edge frays into hairs along the stroke direction. Cached like dryBrush.
+   *   angle     auto     stroke direction (radians); auto runs along the longer side of the outlines'
+   *                      bounds (summed over the outlines), upward when they are tall: strokes
+   *                      start loaded at the base
+   *   width     26       brush width (px)
+   *   spacing   0.7·width  distance between stroke centrelines
+   *   reach     460      longest single stroke; longer chords are painted in overlapping reloads
+   *   fringe    0.35·width  how far hairs may run past the outline along the strokes (px)
+   *   dry       0.3
+   *   bristles  auto     width / 3: the core is covered by several strokes, so fewer hairs each
+   *   tooth, splay, color, alpha, seed, wobble, pressure, boil, key: as dryBrush
+   */
+  function dryBrushFill(ctx, shape, o = {}) {
+    let src = shape;
+    if (src && typeof src.outline === 'function') src = src.outline();
+    const polys = toPolys(src);
+    if (!polys) return;
+    const rings = polys.filter((p) => p.length >= 3);
+    if (!rings.length) return;
+    const S = renderScale();
+    const b = polysBounds(rings);
+    const width = Math.max(2, o.width != null ? +o.width : 26);
+    const spacing = Math.max(1, o.spacing != null ? +o.spacing : width * 0.7);
+    const reach = Math.max(width * 2, o.reach != null ? +o.reach : 460);
+    const fringe = Math.max(0, o.fringe != null ? +o.fringe : width * 0.35);
+    let tall = 0;
+    for (const ring of rings) {
+      const rb = polysBounds([ring]);
+      tall += rb.h - rb.w;
+    }
+    const angle = o.angle != null ? +o.angle : tall >= 0 ? -Math.PI / 2 : 0;
+    const variant = dbVariant(o);
+    const q = dbParams(Object.assign({ dry: 0.3 }, o), seedInt(o.seed === undefined ? 1 : o.seed), variant, width, dbFillPressure, 3);
+    const key = ['dryBrushFill', hashClip(rings), S, angle, spacing, reach, fringe, dbKey(q, o)].join('|');
+    const plate = cached(key, () => {
+      const pad = fringe + width * 0.6 + 4;
+      const P = dbPlate({ x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad }, S);
+      const dx = Math.cos(angle), dy = Math.sin(angle);
+      const nx = -dy, ny = dx;
+      let n0 = Infinity, n1 = -Infinity;
+      for (const ring of rings) {
+        for (const p of ring) {
+          const v = p[0] * nx + p[1] * ny;
+          if (v < n0) n0 = v;
+          if (v > n1) n1 = v;
+        }
+      }
+      const r = rng(hash(q.seed, 'fill'));
+      let si = 0;
+      for (let off = n0 + spacing * (0.2 + 0.3 * r()); off < n1 + spacing * 0.3; off += spacing * (0.85 + 0.3 * r())) {
+        const cut = Math.min(n1 - 0.5, Math.max(n0 + 0.5, off));
+        // where the line {p·n = cut} crosses the outline, as positions along d
+        const ts = [];
+        for (const ring of rings) {
+          for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const a = ring[j], c = ring[i];
+            const va = a[0] * nx + a[1] * ny - cut, vc = c[0] * nx + c[1] * ny - cut;
+            if ((va > 0) === (vc > 0)) continue;
+            const f = va / (va - vc);
+            ts.push((a[0] + (c[0] - a[0]) * f) * dx + (a[1] + (c[1] - a[1]) * f) * dy);
+          }
+        }
+        ts.sort((p, s) => p - s);
+        for (let i = 0; i + 1 < ts.length; i += 2) {
+          const t0 = ts[i] - width * 0.2 * r(), t1 = ts[i + 1] + fringe * (0.4 + 0.6 * r());
+          const len = t1 - t0;
+          const n = Math.max(1, Math.ceil(len / reach));
+          const seg = len / n;
+          const stagger = (r() - 0.5) * seg * 0.5; // reloads do not line up across strokes
+          for (let k = 0; k < n; k++) {
+            const a = k ? t0 + seg * k + stagger - seg * 0.12 : t0;
+            const e = k < n - 1 ? t0 + seg * (k + 1) + stagger + seg * 0.06 : t1;
+            const lean = (r() - 0.5) * spacing * 0.4;
+            const line = [
+              [a * dx + cut * nx, a * dy + cut * ny],
+              [e * dx + (cut + lean) * nx, e * dy + (cut + lean) * ny],
+            ];
+            dbStroke(P, line, Object.assign({}, q, { seed: (hash(q.seed, si++) & 0x7fffffff) | 0 }));
+          }
+        }
+      }
+      // Trim to the outline. A pixel outside it survives where a hair ran on past the edge: the
+      // outline lies behind it along the stroke (within fringe) or just beside it.
+      const M = dbInside(P, rings);
+      const cw = P.cw, ch = P.ch;
+      const fr = fringe * P.sx;
+      const hs = q.seed + 907;
+      const at = (x, y) => {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        return xi < 0 || yi < 0 || xi >= cw || yi >= ch ? 0 : M[yi * cw + xi];
+      };
+      const keep = (i, xx, yy) => {
+        const m = M[i];
+        if (m >= 255) return 1;
+        const lx = P.x0 + (xx + 0.5) / P.sx, ly = P.y0 + (yy + 0.5) / P.sy;
+        const hair = clamp(0.4 + 0.9 * noise2((lx * dx + ly * dy) * 0.025, (lx * nx + ly * ny) * 0.5, hs));
+        const f = fr * hair;
+        const px = xx + 0.5, py = yy + 0.5;
+        let best = m;
+        if (f > 0.5) {
+          const w = 0.3 * f;
+          best = Math.max(best, at(px - dx * f, py - dy * f), at(px + dx * f, py + dy * f),
+            at(px - dx * f * 0.5, py - dy * f * 0.5), at(px + dx * f * 0.5, py + dy * f * 0.5),
+            at(px + nx * w, py + ny * w), at(px - nx * w, py - ny * w));
+        }
+        return best / 255;
+      };
+      return dbCanvas(P, q, variant, keep);
+    });
+    dbBlit(ctx, plate);
+  }
+  lib.dryBrushFill = dryBrushFill;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
