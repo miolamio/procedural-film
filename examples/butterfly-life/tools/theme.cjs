@@ -56,9 +56,11 @@ function listThemes(dir) {
     .sort((a, b) => (a.id === 'house' ? -1 : b.id === 'house' ? 1 : a.id.localeCompare(b.id)));
 }
 
-// A bare `--flag` (no value) parses to `true`; `--flag=` parses to ''. Neither is a value.
+// A bare `--flag` (no value) parses to `true`; `--flag=` parses to ''; `--flag ' '` parses to a
+// whitespace-only string (and Number(' ') is 0, so left unchecked it would silently pass as a
+// real value). None of these is a value.
 function needValue(name, v) {
-  if (v === true || v === '') throw new Error(`--${name} needs a value`);
+  if (v === true || String(v).trim() === '') throw new Error(`--${name} needs a value`);
 }
 
 function parseOverrides(args) {
@@ -127,6 +129,7 @@ function applyPalette(lib, rows) {
   const tb = lines.findIndex((l, i) => i > b && i < e && /\/\/ BEGIN theme /.test(l));
   const te = lines.findIndex((l, i) => i > tb && i < e && /\/\/ END theme /.test(l));
   if (tb >= 0 && te < 0) throw new Error('src/lib.js has a // BEGIN theme marker inside the 2.2 markers without a matching // END theme');
+  if (tb < 0 && te >= 0) throw new Error('src/lib.js has a // END theme marker inside the 2.2 markers without a matching // BEGIN theme');
   // The clash check runs on every apply, over the 2.2 lines outside the existing theme region
   // [tb, te] (that region is about to be replaced wholesale, so its own rows never clash).
   const names = rows.join('\n').match(/^\s*\w+(?=\s*:)/gm) || [];

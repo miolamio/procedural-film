@@ -120,6 +120,12 @@ test('bad input is refused before anything is written', { skip }, () => {
   assert.throws(() => T.parseOverrides({ accent: '' }), /--accent/);
   assert.throws(() => T.parseOverrides({ grain: true }), /--grain/);
   assert.throws(() => T.parseOverrides({ grain: '' }), /--grain/);
+  // a whitespace-only value (e.g. --grain ' ') is not a value either: Number(' ') is 0, so this must
+  // be caught before the numeric/hex checks run, not left to silently parse as a real override.
+  assert.throws(() => T.parseOverrides({ frame: ' ' }), /--frame/);
+  assert.throws(() => T.parseOverrides({ carrier: ' ' }), /--carrier/);
+  assert.throws(() => T.parseOverrides({ accent: ' ' }), /--accent/);
+  assert.throws(() => T.parseOverrides({ grain: ' ' }), /--grain/);
   const dir = film();
   const before = read(dir, 'src/lib.js');
   assert.throws(() => T.apply(dir, THEMES, 'house', T.parseOverrides({ accent: '#FF0000' })), /no accent rows/);
@@ -159,6 +165,18 @@ test('a lone // BEGIN theme without a matching // END theme is refused', { skip 
   );
   const before = read(dir, 'src/lib.js');
   assert.throws(() => T.apply(dir, THEMES, 'negative', {}), /without a matching/);
+  assert.strictEqual(read(dir, 'src/lib.js'), before);
+});
+
+test('a lone // END theme without a matching // BEGIN theme is refused', { skip }, () => {
+  const dir = film();
+  const libFile = path.join(dir, 'src', 'lib.js');
+  fs.writeFileSync(
+    libFile,
+    read(dir, 'src/lib.js').replace(/(\n\s*\/\/ END 2\.2)/, "\n    // END theme ghost (stray)\n    ghost: '#000000',$1")
+  );
+  const before = read(dir, 'src/lib.js');
+  assert.throws(() => T.apply(dir, THEMES, 'negative', {}), /without a matching \/\/ BEGIN theme/);
   assert.strictEqual(read(dir, 'src/lib.js'), before);
 });
 
