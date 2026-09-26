@@ -20,8 +20,9 @@ Each theme folder holds:
 | [`scallop`](scallop/) | 1920×1080 | A flat print in three inks (white, scarlet, soot) and one lagoon cyan: even heavy contours, scallop waves in three offset rows, fir rows, on threes; plate B is the same frame as a white-wire schematic on scarlet | ready — no wordmark until the engine has a stroke font |
 | [`crater`](crater/) | 1080×1920 | Red paper with grain; a throat glowing from red to yolk at the bottom of a well, a rim of hanging hair loops, scrawled stick figures falling in, on twos; plate B is the same frame as a stepped heat map | ready |
 | [`spotlight`](spotlight/) | 1080×1920 | Thick black brush ink with pressure on a pool of cyan light in a dark teal void, violet joints; plate B is the same frame as light wire with isolux rings | ready |
+| [`snow`](snow/) | 1920×1080 | Bare ink trees and stick figures in an overexposed white that eats the ground, stipple and snow on ones, one red drop for the whole film; plate B is the same frame as its negative, the drop still red | ready |
 
-Planned, second wave: `snow` (snow and one drop), `drybrush`, `relief` (heat map).
+Planned, second wave: `drybrush`, `relief` (heat map).
 
 ## Picking a style
 

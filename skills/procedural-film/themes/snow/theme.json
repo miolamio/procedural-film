@@ -1,0 +1,26 @@
+{
+  "id": "snow",
+  "name": "Snow / One drop",
+  "status": "ready",
+  "look": "Bare ink trees and stick figures in an overexposed white, snow on ones, one red drop for the whole film; plate B is the negative of the same frame, the drop still red",
+  "accent": { "base": "drop", "budget": { "share": 0.2, "area": 0.002 } },
+  "frame": { "width": 1920, "height": 1080 },
+  "plates": {
+    "A": { "name": "snow", "mode": "illustrated", "post": 0, "base": "snow", "line": "crow", "text": "crow" },
+    "B": { "name": "negative", "mode": "illustrated", "post": 0, "base": "crow", "line": "snow", "text": "snow" }
+  },
+  "axes": {
+    "base": "snow overexposure: a white that eats the ground and the foot of every trunk, fog grey only at the top of the sky",
+    "line": "crow ink through inkPath with pressure and taper on trunks, limbs and scarves; twigs as hairlines",
+    "tone": "stipple snow: a fine ink speckle over the whole frame, boiling on 12; no hatching, no fill but the drop",
+    "planB": "the negative: the scene draws the same frame with every colour inverted except the drop, which stays red",
+    "motion": "weightless 24: snow and the drop fall on ones, figures hold poses on twos, lines boil on 12",
+    "carrier": "clean: no grain, no post",
+    "accent": "one red drop for the whole film",
+    "font": "thin hand capitals: strokeText hand, upright, a hairline weight",
+    "match": "silhouette: the figure keeps its outline and place across the cut to the negative",
+    "overlays": "none"
+  },
+  "recipes": [17, 19, 22, 23, 38, 43],
+  "palette": "palette.js"
+}

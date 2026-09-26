@@ -57,6 +57,8 @@ FILM.TIMELINE = {
     { id: 'fx-spotlight-b', file: '41-fx-spotlight.js', start: 81, end: 82, mode: 'schematic', post: 0, brief: 'Spotlight plate B: the same frame as a schematic, bones as wire, isolux rings, a dimension and labels in the thin stroke font; cut on the violet joints.' },
     { id: 'fx-crater', file: '38-fx-crater.js', start: 74, end: 75, mode: 'illustrated', post: 0.8, brief: 'Crater theme: red paper, a throat glowing to yolk at the bottom of a well, a rim of hanging hair loops, scrawled figures falling toward the throat, on twos.' },
     { id: 'fx-crater-b', file: '38-fx-crater.js', start: 75, end: 76, mode: 'schematic', post: 0, brief: 'Crater plate B: the same frame as a heat map in stepped bands with isotherms, cut on the hero silhouette.' },
+    { id: 'fx-snow', file: '39-fx-snow.js', start: 76, end: 77, mode: 'illustrated', post: 0, brief: 'Snow theme: bare ink trees in an overexposed white, snow on ones, a walker leaning into the wind; one red drop forms on a bough and falls.' },
+    { id: 'fx-snow-b', file: '39-fx-snow.js', start: 77, end: 78, mode: 'illustrated', post: 0, brief: 'Snow plate B: the same frame as its negative, the drop still red, cut on the walker silhouette.' },
   ],
   cues: [
     { t: 0, kind: 'open' },
