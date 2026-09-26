@@ -22,6 +22,6 @@
     "match": "silhouette: the figure keeps every pixel across the cut to the negative",
     "overlays": "none; a counter or a grey scale is printed matter on the sheet, not an overlay"
   },
-  "recipes": [15, 16, 28, 29, 53],
+  "recipes": [15, 16, 28, 29, 48],
   "palette": "palette.js"
 }

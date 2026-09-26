@@ -65,7 +65,7 @@ Trunks and limbs boil on the 12 fps clock (`inkPath`'s default); twigs hold stil
 
 ## 5. Plate language
 
-- **Bare trees** (recipe 43). A tree is a seeded recursion: a trunk 2 to 2.6 times as long as its first limbs, each limb 5 segments that bend a little and curl toward the sky (×0.93 per segment), splitting in two (one time in three, three) with a side twig from the middle. Six levels for a near tree, four for the far row. Heights and splits come from `lib.rng(lib.hash(...))`, so the tree is the same in every frame; keep the polylines in a Map keyed by the tree's parameters.
+- **Bare trees** (recipe 44). A tree is a seeded recursion: a trunk 2 to 2.6 times as long as its first limbs, each limb 5 segments that bend a little and curl toward the sky (×0.93 per segment), splitting in two (one time in three, three) with a side twig from the middle. Six levels for a near tree, four for the far row. Heights and splits come from `lib.rng(lib.hash(...))`, so the tree is the same in every frame; keep the polylines in a Map keyed by the tree's parameters.
 - **The bough.** One heavy limb hangs in from a top corner with its twigs curling up, across 30 to 60 percent of the width. The drop forms on one of its tips.
 - **The far row.** Eight or nine small trees in ash along 0.7 of the height, half gone in the overexposure.
 - **Figures** (recipe 38). `stickFigure` with `head: 'scribble'`: a crow disc with snow scribbles inside, straight limbs with joint dots. Give each film's people their own act and one attribute of their own (here, a scarf blown back by the wind); do not copy a known figure. Walks are `stickPoses` walk1–walk4 mixed on twos, one stride a second; lean into the wind (`lean` 0.2).

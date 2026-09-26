@@ -21,6 +21,6 @@
     "match": "isoline: the camera lands straight down on the last frame of plate A and the amber thread lies on plate B's isoline",
     "overlays": "ruler brackets round the map, a ruler under the title, callouts on leaders, a stepped legend"
   },
-  "recipes": [10, 11, 20, 21, 51],
+  "recipes": [10, 11, 20, 21, 47],
   "palette": "palette.js"
 }

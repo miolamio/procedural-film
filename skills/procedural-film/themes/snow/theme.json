@@ -21,6 +21,6 @@
     "match": "silhouette: the figure keeps its outline and place across the cut to the negative",
     "overlays": "none"
   },
-  "recipes": [17, 19, 22, 23, 38, 43],
+  "recipes": [17, 19, 22, 23, 38, 44],
   "palette": "palette.js"
 }

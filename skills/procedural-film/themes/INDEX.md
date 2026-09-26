@@ -55,7 +55,10 @@ A frame shows the accent when pixels within 24 of the row's colour on every chan
 | `shards` | `{ area: 0.05 }` | flare red on one facet or one solid |
 | `blob` | `{ area: 0.02 }` | yolk yellow on one small thing |
 | `crater` | `{ area: 0.08 }` | yolk only in the throat's core, at the bottom of the well |
+| `spotlight` | `{ area: 0.01 }` | violet only on the joints of one figure |
+| `snow` | `{ share: 0.2, area: 0.002 }` | one red drop for the whole film |
+| `firs` | `{ area: 0.01 }` | ice blue in one iris, the one eye that looks at the viewer |
+| `drybrush` | `{ row: 'magenta', frames: 1 }` | no accent: one ink in three greys, so the engine's magenta shows for one frame at most |
 | `relief` | `{ area: 0.01 }` | amber on one isoline, the thread, and nothing else |
 | `xerox` | `{ row: 'magenta', frames: 1 }` | no accent: the copy drops every colour, so the engine's magenta shows for a frame at most |
 
-A one-point look (`snow`, one drop for the whole film) budgets `{ area: 0.002 }`.

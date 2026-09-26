@@ -9,7 +9,7 @@ Every pixel value in this file assumes 1080×1920. The origin is the top-left co
 - One pool of light per shot, a disc of radius 380 to 460 px, centred on x 480 to 600 and y 760 to 980. It is the only lit thing in the frame, and the subject lives in it.
 - The beam comes from a lamp above the frame, a little off the centre line (x 560 to 680), and widens to the pool's tangents.
 - The subject enters the pool from outside it: from below (a hand, a head), from the dark at a side, or down the beam. Its far end stays in the void, where black ink on dark teal barely reads.
-- The foot of the frame may hold a row of heads and shoulders, the audience, in silhouette with a rim of light on top (recipe 47). They sit in the Shorts interface band, so they are scenery, never must-read.
+- The foot of the frame may hold a row of heads and shoulders, the audience, in silhouette with a rim of light on top (recipe 42). They sit in the Shorts interface band, so they are scenery, never must-read.
 
 ## 2. Palettes
 
@@ -73,8 +73,8 @@ Bones stop 9 px short of each joint on both sides, so every joint is a break in 
 
 ## 5. Plate language
 
-- **The pool** (recipe 47) is the set: beam, pool, halo, dust, and the subject inside it. One pool per shot; a cut may move it, a shot never does.
-- **Bone figures** (recipe 48) are built from bones, not outlines: each bone one pressure stroke between two joints, pebble carpals as filled ovals, violet joints in the breaks. A hand has four fingers of a metacarpal and three phalanges and a thumb of three; a skull is a long filled oval with two sumi eye holes that hold `beamHot` pupils; ribs are horizontal bone strokes, curved 10 degrees at the ends. Proportions are the film's own: long, thin, a little too many joints is fine, never an anatomy plate.
+- **The pool** (recipe 42) is the set: beam, pool, halo, dust, and the subject inside it. One pool per shot; a cut may move it, a shot never does.
+- **Bone figures** (recipe 43) are built from bones, not outlines: each bone one pressure stroke between two joints, pebble carpals as filled ovals, violet joints in the breaks. A hand has four fingers of a metacarpal and three phalanges and a thumb of three; a skull is a long filled oval with two sumi eye holes that hold `beamHot` pupils; ribs are horizontal bone strokes, curved 10 degrees at the ends. Proportions are the film's own: long, thin, a little too many joints is fine, never an anatomy plate.
 - **A moth or a small flyer** gives the light something to look at: four filled sumi wings that open and close once a beat, a `beamHot` eye on each upper wing, a thick body stroke, two thin antennae.
 - **The audience**: 5 to 7 heads and shoulders in one or two rows along the foot of the frame, the front row larger, filled sumi, rimmed in `beam`.
 - The frame outside the pool stays empty. No second light, no texture in the void.

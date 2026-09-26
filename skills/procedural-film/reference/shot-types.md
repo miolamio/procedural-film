@@ -443,7 +443,7 @@ Figures falling into depth: each one shrinks toward one vanishing point at the b
 - Mistake: a fall clock on the shot's `t`, so the figures jump on the cut; keep it a closed form of global `T`: `p = (onTwos(T) · speed + phase) mod 1`, `s = exp(−k p)`, place `vp + (start − vp) · s`, height `H0 · s`, with a fade at both ends of `p`. Shrinking the figure but not its line width, so the far ones turn into blots; scale the width with the height. Large joint jitter on the extra passes, which splits the face into several; tremble the segments, not the joints. Yellow outside the throat: the accent is the core only
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/38-fx-crater.js`
 
-## 47. Spotlight pool
+## 42. Spotlight pool
 
 One pool of light on a dark void: a beam from a lamp above the frame widening to the pool's tangents, the pool as a radial ramp from a hot heart to its edge with a glow halo past it, dust drifting in the beam, the subject's shadow on the pool, and silhouettes in the dark caught by a rim of the light.
 
@@ -454,18 +454,18 @@ One pool of light on a dark void: a beam from a lamp above the frame widening to
 - Mistake: a flat disc (the pool is a ramp with its focus toward the lamp, and a halo outside the edge). A shadow that spills onto the void. A second light. Dust on 24 fps, or keyed to the previous frame. Must-read text on the pool
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/41-fx-spotlight.js`
 
-## 48. Bone figure
+## 43. Bone figure
 
 A figure built from bones: each bone one brush stroke between two joints, thin in the shaft and swollen at both heads, stopped short of each joint so the joint is a break in the ink with an accent disc in it. Fingers fold toward the hand's axis on twos; the ink boils on its own 12 fps clock.
 
 - Duration: a pose a quarter note to a bar; a reach is one bar rising and one bar closing
-- Plate: a lit ground (the pool of recipe 47) under thick dark ink; the joints carry the one accent
+- Plate: a lit ground (the pool of recipe 42) under thick dark ink; the joints carry the one accent
 - Camera: locked, or a slow drift that keeps the joints inside the safe area
 - Leans on: `inkPath` with `pressure(u)` (a bone is `0.42 + 0.86·|2u − 1|⁴`, a fingertip a head at the joint and a small tuft at the tip), `taper: [3, 3]`, `onTwos` for the pose, filled `inkPath` ovals for pebble bones (carpals), plain discs for the joints
 - Mistake: one outline around the whole hand instead of a stroke per bone. Bones drawn through the joints, so the accent has no gap to sit in. Easing the pose every frame. A shared pressure function with the default `taper`, which turns every bone into a spindle. Copying a known skeleton drawing: give the film's figure its own proportions and gesture
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/41-fx-spotlight.js`
 
-## 43. Snow and one drop
+## 44. Snow and one drop
 
 Bare ink trees in an overexposed white that eats their feet, snow falling on ones, a stick figure walking into the wind, and one red drop that forms on a twig, falls and lands in the snow. Plate B is the same frame drawn as its negative with the drop left red, cut on the figure's silhouette.
 
@@ -476,7 +476,7 @@ Bare ink trees in an overexposed white that eats their feet, snow falling on one
 - Mistake: overexposing the figure (draw the white plates before it). A second red, or a red tint anywhere. Plate B through `grade: { invert: 1 }`, which turns the drop cyan: draw the negative in the scene through one colour function and skip the drop. Twigs through `inkPath` (hundreds of calls; stroke them in one path per width). Snow on the boil clock instead of ones. Keeping the drop or the snow in state between frames
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/39-fx-snow.js`
 
-## 49. Night collage: eyes over a fir edge
+## 45. Night collage: eyes over a fir edge
 
 A cut-paper nightpiece: one black jagged fir edge across a flat sky, with no contour, a swarm of almond eyes drifting over it, and a row of lollipop figures on the snow below that the eyes watch. One eye looks at the viewer instead. It is not the fir row of recipe 40: there the firs are separate tiered shapes with a contour; here the forest is one silhouette of packed spires with drooping branch tips, and the only outline is where two inks meet.
 
@@ -487,7 +487,7 @@ A cut-paper nightpiece: one black jagged fir edge across a flat sky, with no con
 - Mistake: firs spaced like a row of trees, so sky shows through the forest (pack them to a quarter of a spire's width and fill a mass under the tiers). A contour round the edge or the eyes. Every eye blinking on the default schedule, so the sky fills with slivers. Eyes spread evenly over the whole sky: scatter them in a lopsided cloud, most small, and clear a space round the lead eye. `advect` from a scatter point over global `T`: integrate over the plate clock with a fixed step count. The lead eye's gaze following the figures like the rest
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/42-fx-firs.js`
 
-## 45. Dry-brush wood
+## 46. Dry-brush wood
 
 A wood seen from inside, through a black passe-partout: three planes of dry-brush trunks in three greys of one ink on grey paper, a figure painted as a dry-brush silhouette with paper eyes walking the focus ground, one `layers` camera tracking sideways, everything on twos. Its plate B is the same frame in negative, cut inside a held drawing.
 
@@ -498,7 +498,7 @@ A wood seen from inside, through a black passe-partout: three planes of dry-brus
 - Mistake: building dry-brush plates in frame space for a moving figure, so every frame builds new plates: draw it in its own space and `translate`. Letting the far and mid planes boil (`boil: false` there; the near plane takes `boil: d % 3`). A walk on `T` or a boil on `lib.boil(T)` next to a clock on twos, so the figure swims against the wood. A drawing that turns on the beat, so the cut into plate B moves as well as inverts. A dissolve into the negative (it passes through flat grey). Copying a known figure: the characters are the film's
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/40-fx-drybrush-theme.js` (plate A `fx-drybrush`, plate B `fx-drybrush-b`); the dry-brush engine alone is `29-fx-dry-brush.js`
 
-## 51. Relief descending to its isoline map
+## 47. Relief descending to its isoline map
 
 A surface (ground, or any quantity over a plane) as a false-colour mesh on black in wire of one width, one isoline threaded round it in the accent colour, pixel labels pinned to the surface; then the camera rises and looks straight down, and the cut to the same surface as an isoline map holds on that isoline. It is not the turntable of recipe 20: the mesh is a filled, ramp-coloured surface, and the move ends on a map.
 
@@ -509,7 +509,7 @@ A surface (ground, or any quantity over a plane) as a false-colour mesh on black
 - Mistake: a thread drawn over the finished mesh, so the far side of the loop shows through the mountain (ride each segment in the quad it crosses, drawn right after that quad). Easing `persp` itself to 0, which jumps at the end (ease `1 / persp`). Leaving a yaw or an offset on the last frame, so the map does not land on the box. A `range` from the samples instead of a fixed one, so the colours shift between the plates. Thinning the wire with depth; the theme's wire is one width. Sampling a function field every frame: sample it once into a grid and pass the grid
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/43-fx-relief.js`
 
-## 53. Stencil poster through the copier
+## 48. Stencil poster through the copier
 
 A sheet of printed matter the camera never leaves: stencil type across the top, one stencil figure in a broken ring in the middle, a torn toner band across the foot, all cut to pure black and white and photocopied, the drawings stepping on threes under a copy that jitters on 12. Everything soft (a shadow, static, a grey scale) is drawn as a grey ramp and left to the threshold to cut.
 

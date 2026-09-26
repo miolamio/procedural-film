@@ -21,6 +21,6 @@
     "match": "silhouette: the joints keep their place and colour across the cut",
     "overlays": "a trailing reticle; plate B adds rings, a dimension and labels"
   },
-  "recipes": [1, 24, 29, 30, 47, 48],
+  "recipes": [1, 24, 29, 30, 42, 43],
   "palette": "palette.js"
 }
