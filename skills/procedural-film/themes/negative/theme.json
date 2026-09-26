@@ -2,6 +2,12 @@
   "id": "negative",
   "name": "Negative / Constellation",
   "status": "ready",
+  "look": "Light lines on a near-black void; figures as constellations; one warm accent; plate B is the inverted frame",
+  "accent": {
+    "base": "accent",
+    "hot": "accentHot",
+    "deep": "accentGlow"
+  },
   "frame": {
     "width": 1920,
     "height": 1080

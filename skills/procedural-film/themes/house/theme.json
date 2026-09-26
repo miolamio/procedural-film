@@ -2,6 +2,7 @@
   "id": "house",
   "name": "Paper and blueprint",
   "status": "ready",
+  "look": "Hand-inked paper plates cut against navy blueprint plates",
   "frame": { "width": 1080, "height": 1920 },
   "plates": {
     "A": { "name": "paper", "mode": "illustrated", "base": "paper", "line": "ink", "text": "inkSoft" },
