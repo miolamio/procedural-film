@@ -37,6 +37,7 @@ FILM.TIMELINE = {
     { id: 'fx-blob', file: '25-fx-blob.js', start: 48, end: 50, mode: 'illustrated', post: 0.5, brief: 'Blob theme: a melting marbled blob creature, a pair merging and splitting, a relief of isolines.' },
     { id: 'fx-vhs', file: '33-fx-vhs.js', start: 64, end: 65, mode: 'illustrated', carrier: { kind: 'vhs' }, brief: 'VHS carrier: colour bars and a sunset kite on tape, a tracking band rolling down, head noise and the counter.' },
     { id: 'fx-vhs-tracking', file: '33-fx-vhs.js', start: 65, end: 66, mode: 'illustrated', carrier: { kind: 'vhs', tracking: 0.8, clock: 3725 }, transitionIn: { kind: 'tracking', dur: 0.5 }, brief: 'Tracking is lost on the cut: the sunset rolls up and out, the night plate rolls in and locks.' },
+    { id: 'fx-film', file: '34-fx-film.js', start: 66, end: 68, mode: 'illustrated', post: 0.4, carrier: { kind: 'film' }, brief: 'Film carrier: a windmill at dusk on a print, perforations down both edges, scratches, dust, weave and a faint exposure flicker.' },
   ],
   cues: [
     { t: 0, kind: 'open' },

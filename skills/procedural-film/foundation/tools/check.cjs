@@ -816,6 +816,7 @@ async function main() {
     const CARRIER_FIELDS = {
       crt: ['scanlines', 'period', 'mask', 'radius', 'edge', 'hum', 'humPeriod', 'flicker'],
       vhs: ['chroma', 'tracking', 'trackPeriod', 'head', 'timecode', 'clock'],
+      film: ['perf', 'weave', 'scratches', 'dust', 'flicker', 'gate'],
     };
     const carrierProblems = (c, at) => {
       if (c === undefined || c === null || c === false) return;

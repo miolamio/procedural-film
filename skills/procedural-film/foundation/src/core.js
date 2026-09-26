@@ -373,7 +373,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Carrier: the medium the film plays on (a CRT; later tape or film stock). It is applied once
+  // Carrier: the medium the film plays on (a CRT, a tape, a film print). It is applied once
   // per frame over the finished picture, after transitions and flashes, so it never slides with a
   // whip or doubles in a fade. Stateless: a function of T and the frame size. Unlike the grain it
   // stays on when a tool sets FILM.post = false, so the flash and canvas checks see it; only
@@ -613,6 +613,99 @@
       };
       osd(cell, '#000000', 0.6 * tc);
       osd(0, '#f2f2f2', tc);
+    }
+  });
+
+  // film: a print running through a projector. The picture weaves by whole device px (at most
+  // `weave` px, a slow sway plus a per-frame jolt) with the perforations down both long edges, the
+  // exposure flickers per frame (at most 4%, under check 9's 10% step), the gate darkens the edges,
+  // and vertical scratches (each held 1 to 2 s, shimmering on the boil clock) and dust (new on every
+  // boil drawing) sit on the print.
+  //   perf 1 (0..1)   weave 1.2 (logical px, 0..2)   scratches 0.5 (0..1)   dust 0.5 (0..1)
+  //   flicker 0.02 (0..0.04)   gate 0.3 (edge darkening, 0..1)
+  FILM.defineCarrier('film', (ctx, T, o, S) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const m = Math.min(w, h);
+    const f = Math.floor(T * FILM.FPS + EPS);
+    const bf = Math.floor(T * FILM.BOIL_FPS + EPS);
+    const wv = carrierNum(o, 'weave', 1.2, 0, 2) * S;
+    const wx = Math.round(wv * (0.6 * Math.sin(T * 2.1 + 1) + 0.4 * (2 * ihash(f, 91, 5) - 1)));
+    const wy = Math.round(wv * (0.6 * Math.sin(T * 1.7) + 0.4 * (2 * ihash(f, 92, 5) - 1)));
+    if (wx || wy) ctx.drawImage(carrierScratch(ctx), wx, wy);
+    const fl = carrierNum(o, 'flicker', 0.02, 0, 0.04) * (2 * ihash(f, 93, 5) - 1);
+    if (fl > 0) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = fl;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (fl < 0) {
+      ctx.globalAlpha = -fl;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, w, h);
+    }
+    const gate = carrierNum(o, 'gate', 0.3, 0, 1);
+    if (gate > 0) {
+      ctx.globalAlpha = 1;
+      ctx.drawImage(crtMask(w, h, 0, gate), 0, 0);
+    }
+    const sc = carrierNum(o, 'scratches', 0.5, 0, 1);
+    for (let k = 0, n = Math.round(sc * 4); k < n; k++) {
+      const hold = 1 + ihash(k, 95, 5);
+      const seg = Math.floor(T / hold + ihash(k, 94, 5));
+      if (ihash(k, seg, 96) > 0.75) continue;
+      const x = (0.1 + 0.8 * ihash(k, seg, 97)) * w + wx + Math.sin(T * 0.7 + k) * 3 * S + (ihash(k, bf, 98) - 0.5) * 2 * S;
+      const part = ihash(k, seg, 99) < 0.4;
+      const y0 = part ? ihash(k, seg, 100) * h * 0.5 : 0;
+      const y1 = part ? y0 + h * (0.3 + 0.5 * ihash(k, seg, 101)) : h;
+      ctx.globalAlpha = sc * (0.3 + 0.4 * ihash(k, bf, 102));
+      ctx.fillStyle = ihash(k, seg, 103) < 0.7 ? '#f6f0e0' : '#1a140e';
+      ctx.fillRect(x, y0, Math.max(1, Math.round((0.8 + 1.4 * ihash(k, seg, 104)) * S)), y1 - y0);
+    }
+    const dust = carrierNum(o, 'dust', 0.5, 0, 1);
+    ctx.lineCap = 'round';
+    for (let k = 0, n = Math.round(dust * 8); k < n; k++) {
+      if (ihash(k, bf, 105) > 0.8) continue;
+      const x = ihash(k, bf, 106) * w;
+      const y = ihash(k, bf, 107) * h;
+      const light = ihash(k, bf, 108) < 0.25;
+      ctx.globalAlpha = dust * (0.8 + 0.4 * ihash(k, bf, 109));
+      ctx.fillStyle = ctx.strokeStyle = light ? '#f6f0e0' : '#1a140e';
+      ctx.beginPath();
+      if (ihash(k, bf, 110) < 0.6) {
+        ctx.ellipse(x, y, (1.5 + 4 * ihash(k, bf, 111)) * S, (1 + 3 * ihash(k, bf, 112)) * S, ihash(k, bf, 113) * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        const L = (14 + 40 * ihash(k, bf, 114)) * S;
+        const a = ihash(k, bf, 115) * Math.PI * 2;
+        const bend = (ihash(k, bf, 116) - 0.5) * L;
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + Math.cos(a) * L * 0.5 - Math.sin(a) * bend, y + Math.sin(a) * L * 0.5 + Math.cos(a) * bend, x + Math.cos(a) * L, y + Math.sin(a) * L);
+        ctx.lineWidth = Math.max(1, 1.3 * S);
+        ctx.stroke();
+      }
+    }
+    const perf = carrierNum(o, 'perf', 1, 0, 1);
+    if (perf > 0) {
+      const sw = Math.round(m * 0.055);
+      const pw = Math.round(m * 0.026);
+      const ph = Math.round(m * 0.036);
+      const pitch = m * 0.07;
+      const r = Math.max(1, m * 0.006);
+      ctx.globalAlpha = perf;
+      ctx.fillStyle = '#0c0907';
+      ctx.fillRect(0, 0, sw, h);
+      ctx.fillRect(w - sw, 0, sw, h);
+      ctx.fillStyle = '#f3ead6';
+      ctx.beginPath();
+      for (let y = (((wy - ph) % pitch) + pitch) % pitch - pitch; y < h; y += pitch) {
+        for (const x of [(sw - pw) / 2 + wx, w - sw + (sw - pw) / 2 + wx]) {
+          if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, pw, ph, r);
+          else ctx.rect(x, y, pw, ph);
+        }
+      }
+      ctx.fill();
     }
   });
 

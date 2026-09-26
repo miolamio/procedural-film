@@ -113,6 +113,12 @@ test('--carrier vhs puts the vhs carrier on the timeline', { skip }, () => {
   assert.match(T.summary(t), /carrier: \{"kind":"vhs"\}/);
 });
 
+test('--carrier film puts the film carrier on the timeline, over a theme\'s own carrier', { skip }, () => {
+  const t = T.apply(film(), THEMES, 'phosphor', T.parseOverrides({ carrier: 'film' }));
+  assert.deepStrictEqual(t.carrier, { kind: 'film' });
+  assert.strictEqual(t.overrides.carrier, 'film');
+});
+
 test('bad input is refused before anything is written', { skip }, () => {
   assert.throws(() => T.parseOverrides({ frame: '800x600' }), /--frame/);
   assert.throws(() => T.parseOverrides({ accent: 'red' }), /--accent/);
@@ -364,7 +370,7 @@ test('lookbook embeds every theme and the brief line builder', { skip }, () => {
   assert.match(html, /<title>Style lookbook<\/title>/);
   assert.match(html, /node tools\/theme\.cjs apply/);
   assert.doesNotMatch(html, /\/\*CARRIERS\*\//);
-  assert.match(html, /const CARRIERS=\["none","crt","vhs"/);
+  assert.match(html, /const CARRIERS=\["none","crt","vhs","film"\]/);
 });
 
 test('lookbook only emits accent/grain flags that differ from the theme\'s own value', { skip }, () => {

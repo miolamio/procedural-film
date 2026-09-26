@@ -9,7 +9,7 @@
 //
 // Overrides are the axes that hold across themes. Line, tone and motion come whole from the theme.
 //   --frame 1080x1920 | 1920x1080 | 1080x1080     the canvas: the timeline's width and height
-//   --carrier none | crt | vhs                    the medium over the whole film: the timeline's carrier
+//   --carrier none | crt | vhs | film             the medium over the whole film: the timeline's carrier
 //   --accent '#RRGGBB'                            the theme's accent rows; the # is optional, but quote the
 //                                                 value so the shell doesn't read '#...' as a comment; hot
 //                                                 and deep steps are derived from it
@@ -23,7 +23,7 @@ const path = require('path');
 const C = require('./common.cjs');
 
 const FRAMES = ['1080x1920', '1920x1080', '1080x1080'];
-const CARRIERS = ['none', 'crt', 'vhs'];
+const CARRIERS = ['none', 'crt', 'vhs', 'film'];
 const HEX = /^#?[0-9a-fA-F]{6}$/;
 const ROW_NAME = /^[A-Za-z_]\w*$/;
 
@@ -279,7 +279,7 @@ function main() {
       fs.mkdirSync(path.dirname(out), { recursive: true });
       fs.writeFileSync(out, html);
       console.log(`lookbook -> ${out}`);
-    } else throw new Error("usage: node tools/theme.cjs list | apply <id> [--frame WxH] [--carrier none|crt|vhs] [--accent '#RRGGBB'] [--grain 0..1] | show | lookbook [--out path]");
+    } else throw new Error("usage: node tools/theme.cjs list | apply <id> [--frame WxH] [--carrier none|crt|vhs|film] [--accent '#RRGGBB'] [--grain 0..1] | show | lookbook [--out path]");
   } catch (e) {
     C.die(e.message);
   }
