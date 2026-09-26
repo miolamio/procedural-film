@@ -3,6 +3,7 @@
   "name": "Paper and blueprint",
   "status": "ready",
   "look": "Hand-inked paper plates cut against navy blueprint plates",
+  "accent": { "budget": { "row": "magenta", "frames": 12 } },
   "frame": { "width": 1080, "height": 1920 },
   "plates": {
     "A": { "name": "paper", "mode": "illustrated", "base": "paper", "line": "ink", "text": "inkSoft" },

@@ -6,7 +6,10 @@
   "accent": {
     "base": "accent",
     "hot": "accentHot",
-    "deep": "accentGlow"
+    "deep": "accentGlow",
+    "budget": {
+      "area": 0.01
+    }
   },
   "frame": {
     "width": 1920,

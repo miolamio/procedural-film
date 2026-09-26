@@ -3,7 +3,7 @@
   "name": "Phosphor / Terminal",
   "status": "ready",
   "look": "Green vector strokes and a typing pixel-font terminal on a CRT carrier; plate B is an oscilloscope",
-  "accent": { "base": "amber", "hot": "amberHot" },
+  "accent": { "base": "amber", "hot": "amberHot", "budget": { "frames": 48 } },
   "frame": { "width": 1920, "height": 1080 },
   "carrier": { "kind": "crt" },
   "plates": {
