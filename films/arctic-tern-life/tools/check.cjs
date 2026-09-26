@@ -19,7 +19,8 @@
 //                  1080×1920, the centred 90% box otherwise; an expression is not read);
 //                  warns on a literal colour outside lib.js (colours come from lib.pal)
 //   4 timeline     coverage, ids, transitions, grade ranges and tint names; warns on off-grid hits
-//                  and cuts, a bpm whose 16ths miss the frame grid, and a duration that is not whole bars
+//                  and cuts, a bpm whose 16ths miss the frame grid, a duration that is not whole bars,
+//                  and a frame or carrier that differs from docs/theme.json
 //   5 draw         every checked frame draws without throwing and is not one flat colour
 //   6 cost         frame times from a sweep across the film; slowest frames listed; warns when a repeat of the
 //                  sweep creates canvases again (a cache keyed by time, or one too small to hold the film)
@@ -826,6 +827,22 @@ async function main() {
       }
     };
     carrierProblems(TL.raw.carrier, 'timeline carrier');
+    // the style picked at step 3 (docs/theme.json, written by tools/theme.cjs) sets the frame and the carrier
+    const themeFile = path.join(C.ROOT, 'docs', 'theme.json');
+    if (!fixtures && fs.existsSync(themeFile)) {
+      let th = null;
+      try {
+        th = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
+      } catch (e) {
+        tlWarnings.push(`docs/theme.json: ${e.message}`);
+      }
+      if (th && th.frame && (th.frame.width !== TL.width || th.frame.height !== TL.height)) {
+        tlWarnings.push(`frame ${TL.width}×${TL.height} differs from docs/theme.json (${th.frame.width}×${th.frame.height}): rerun tools/theme.cjs apply with --frame, or set the timeline's width and height`);
+      }
+      const want = th && th.carrier ? th.carrier.kind : 'none';
+      const have = TL.raw.carrier && TL.raw.carrier.kind ? TL.raw.carrier.kind : 'none';
+      if (th && want !== have) tlWarnings.push(`timeline carrier ${have} differs from docs/theme.json (${want})`);
+    }
     shots.forEach((s, i) => {
       if (typeof s.id !== 'string' || !s.id) tlProblems.push(`shot #${i} has no id`);
       else if (ids.has(s.id)) tlProblems.push(`duplicate shot id '${s.id}'`);
