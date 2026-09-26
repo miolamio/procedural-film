@@ -432,3 +432,13 @@ A shore of flat firs standing on one line: 3 or 4 stacked tiers and a short trun
 - Mistake: a fresh seed per frame, or `Math.random`, so the forest jumps. Drawing the firs in placement order, so a short fir covers a tall one. Tiers built without the notch at each step, which turns a fir into a triangle
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/35-fx-scallop.js`
 
+## 49. Night collage: eyes over a fir edge
+
+A cut-paper nightpiece: one black jagged fir edge across a flat sky, with no contour, a swarm of almond eyes drifting over it, and a row of lollipop figures on the snow below that the eyes watch. One eye looks at the viewer instead. It is not the fir row of recipe 40: there the firs are separate tiered shapes with a contour; here the forest is one silhouette of packed spires with drooping branch tips, and the only outline is where two inks meet.
+
+- Duration: 1.0 to 4.0 s. The edge holds; the swarm drifts the whole shot
+- Plate: flat `ember` sky over flat `snow` (the firs theme); plate B is the same frame under `grade: { invert: 1 }`
+- Camera: locked. The swarm moves; the edge is the fixed thing the cut holds on
+- Leans on: `rng`, `hash`, `noise1` (the edge, built once per frame size and seed into a `Path2D`), `scatter` once inside the swarm's cloud, `advect` on one `flow` from a clock that runs across the cut, `blinkAt` with long gaps, `stickFigure` (`head: 'solid'`, `joint: 0`, a short `body`) posed on `onTwos`
+- Mistake: firs spaced like a row of trees, so sky shows through the forest (pack them to a quarter of a spire's width and fill a mass under the tiers). A contour round the edge or the eyes. Every eye blinking on the default schedule, so the sky fills with slivers. Eyes spread evenly over the whole sky: scatter them in a lopsided cloud, most small, and clear a space round the lead eye. `advect` from a scatter point over global `T`: integrate over the plate clock with a fixed step count. The lead eye's gaze following the figures like the rest
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/42-fx-firs.js`

@@ -1,0 +1,26 @@
+{
+  "id": "firs",
+  "name": "Night collage / Firs",
+  "status": "ready",
+  "look": "Cut paper on a flat ember sky: one pitch-black jagged fir edge without contour, a drifting swarm of almond sepia eyes, lollipop figures on the snow; plate B is the negative, night",
+  "accent": { "base": "ice", "budget": { "area": 0.01 } },
+  "frame": { "width": 1920, "height": 1080 },
+  "plates": {
+    "A": { "name": "dusk", "mode": "illustrated", "post": 0, "base": "ember", "line": "pitch", "text": "pitch" },
+    "B": { "name": "night", "mode": "illustrated", "post": 0, "grade": { "invert": 1 }, "base": "ember", "line": "pitch", "text": "pitch" }
+  },
+  "axes": {
+    "base": "a flat ember sky over a flat snow field; no texture",
+    "line": "none: black silhouettes and cut shapes without a contour; the only strokes are the figures' sticks",
+    "tone": "flat fills, no tone; depth is a second, rust fir row behind the pitch one",
+    "planB": "negative: the same frame under grade { invert: 1 }, dusk turned to night",
+    "motion": "the swarm drifts at 24 fps on one current; the figures move on twos; the edge holds",
+    "carrier": "clean: no grain, no post",
+    "accent": "ice on one iris, the eye that looks at the viewer",
+    "font": "none",
+    "match": "silhouette: the fir edge keeps every pixel across the cut",
+    "overlays": "none"
+  },
+  "recipes": [12, 19, 22, 38, 49],
+  "palette": "palette.js"
+}

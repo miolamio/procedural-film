@@ -18,6 +18,7 @@ Each theme folder holds:
 | [`shards`](shards/) | 1920×1080 | Flat Voronoi facets in four blue steps that part on the beat; plate B is low-poly space and tunnels; cuts shatter | ready |
 | [`blob`](blob/) | 1920×1080 | White metaball bodies with tar rims and marble contours on a flat blue pool; they merge, drip and melt; plate B is a relief map of the same field | ready |
 | [`scallop`](scallop/) | 1920×1080 | A flat print in three inks (white, scarlet, soot) and one lagoon cyan: even heavy contours, scallop waves in three offset rows, fir rows, on threes; plate B is the same frame as a white-wire schematic on scarlet | ready — no wordmark until the engine has a stroke font |
+| [`firs`](firs/) | 1920×1080 | A night collage: one pitch-black jagged fir edge without contour on a flat ember sky, a drifting swarm of cut-paper almond eyes, lollipop figures on the snow, one ice iris; plate B is the negative | ready |
 
 Planned, second wave: `snow` (snow and one drop), `drybrush`, `relief` (heat map), `crater` (red paper).
 
