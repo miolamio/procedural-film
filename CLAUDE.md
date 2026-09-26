@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An agent skill, not an app. `skills/procedural-film/SKILL.md` is the pipeline an agent follows to turn a subject into a ~30 s vertical film (1080×1920, 24 fps) drawn on canvas and scored in Web Audio, with zero media assets. `examples/butterfly-life/` is a finished film the skill produced, and it doubles as the regression target for the engine and tools.
 
-`skills/procedural-film/themes/` holds the swappable looks (art bible sections 1–9, a `palette.js` pasted between the `// BEGIN 2.2` / `// END 2.2` markers of `lib.js`, a `theme.json` a film copies to `docs/theme.json`); `themes/INDEX.md` lists them and step 3 of SKILL.md picks one. `house` is the default.
+`skills/procedural-film/themes/` holds the swappable looks (art bible sections 1–9, a `palette.js` for the `// BEGIN 2.2` / `// END 2.2` markers of `lib.js`, a `theme.json`); `themes/INDEX.md` lists them, step 0 of SKILL.md picks one and `tools/theme.cjs apply` writes it into the film at step 3. `house` is the default.
 
 `docs/CONTRACT.md` (template at `skills/procedural-film/templates/CONTRACT.md`) is the source of truth for the runtime architecture: load order, the `FILM.scene` / `FILM.lib` / `FILM.audio` APIs, file ownership and the hard rules (no media, deterministic, stateless per frame). Read it before touching `src/`.
 

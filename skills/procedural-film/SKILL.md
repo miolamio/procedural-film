@@ -30,7 +30,7 @@ A scene agent gates its own shot with `node tools/check.cjs --shot <id>`. That r
 
 ### 0. Brief
 
-Ask one round of questions: the subject, what the film must include about it, the length if it differs from 30 seconds, and the style direction. For the style, give the user the lookbook: `node <skill>/foundation/tools/theme.cjs lookbook --out <scratch>/lookbook.html` writes one page with every theme's preview, where the user picks a theme and the axes a film may override (frame, carrier, accent, grain) and copies back one `Style:` line, e.g. `Style: negative; frame 1080x1920; accent #3AA0FF`. Publish or open the page; in a plain terminal show `node <skill>/foundation/tools/theme.cjs list` instead. No answer means `house` at its own defaults. Invent the rest and say what you invented.
+Ask one round of questions: the subject, what the film must include about it, the length if it differs from 30 seconds, and the style direction. For the style, give the user the lookbook: `node <skill>/foundation/tools/theme.cjs lookbook --out <scratch>/lookbook.html` (`<skill>` is this skill's folder) writes one page with every theme's preview, where the user picks a theme and the axes a film may override (frame, carrier, accent, grain) and copies back one `Style:` line, e.g. `Style: negative; frame 1080x1920; accent #3AA0FF`. Publish or open the page; in a plain terminal show `node <skill>/foundation/tools/theme.cjs list` instead. No answer means `house`, or another theme the subject calls for, named with one reason. Invent the rest and say what you invented.
 
 Done when: the subject is one written sentence and the style one `Style:` line, both seen by the user.
 
@@ -48,13 +48,13 @@ Done when: every phase of the story traces to a captured source listed in `SUMMA
 
 ### 3. Art bible
 
-Apply the brief's `Style:` line. With none, apply `house`, unless the subject calls for another theme: then say which and why in one line. A `draft` theme only within what its `needs` allow.
+Apply the brief's `Style:` line: its theme id and one flag per axis it names (`accent #3AA0FF` becomes `--accent '#3AA0FF'`). A `draft` theme only within what its `needs` allow.
 
 ```bash
 node tools/theme.cjs apply <id> [--frame WxH] [--carrier none|crt] [--accent '#RRGGBB'] [--grain 0..1]
 ```
 
-It pastes the theme's sections 1–9 into `docs/art-bible.md` (headed by a Film overrides note when an axis changes), the theme's palette rows inside the 2.2 markers of `src/lib.js` (the accent rows recoloured) and the resolved `docs/theme.json`, and prints the timeline's `width`, `height` and `carrier` and each plate's `mode`, `post` and `grade`, which step 5 takes as they are. Rerun it to switch theme: sections 1–9 and the theme rows are swapped, the subject rows stay. `node tools/theme.cjs show` prints the applied style again. Line, tone and motion are not overrides: for another line, pick another theme or run a reference analysis.
+Outside the skill's repo, add `--themes <skill>/themes` (or set `PF_THEMES` once) so the tool finds the themes. It pastes the theme's sections 1–9 into `docs/art-bible.md` (headed by a Film overrides note when an axis changes), the theme's palette rows inside the 2.2 markers of `src/lib.js` (the accent rows recoloured) and the resolved `docs/theme.json`, and prints the timeline's `width`, `height` and `carrier` and each plate's `mode`, `post` and `grade`, which step 5 takes as they are. Rerun it to switch theme: sections 1–9 and the theme rows are swapped, the subject rows stay. `node tools/theme.cjs show` prints the applied style again. Line, tone and motion are not overrides: for another line, pick another theme or run a reference analysis.
 
 Only the marked subject sections change: 2.2 (the subject palette, every colour a named hex, mirrored between the 2.2 markers in `src/lib.js`) and 10 (the subject reference built from the captured sources — one subsection per drawable element with sizes, ratios, counts, poses, sequences and the few ratios a critic measures — ending in Mistakes to avoid, each mistake paired with the correct drawing).
 
