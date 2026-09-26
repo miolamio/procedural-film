@@ -432,3 +432,14 @@ A shore of flat firs standing on one line: 3 or 4 stacked tiers and a short trun
 - Mistake: a fresh seed per frame, or `Math.random`, so the forest jumps. Drawing the firs in placement order, so a short fir covers a tall one. Tiers built without the notch at each step, which turns a fir into a triangle
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/35-fx-scallop.js`
 
+## 43. Snow and one drop
+
+Bare ink trees in an overexposed white that eats their feet, snow falling on ones, a stick figure walking into the wind, and one red drop that forms on a twig, falls and lands in the snow. Plate B is the same frame drawn as its negative with the drop left red, cut on the figure's silhouette.
+
+- Duration: 1.0 to 4.0 s; the drop's fall (about 0.7 s) lands on a beat, and its mark stays for the rest of the scene
+- Plate: `snow` with a `fog` gradient at the top of the sky, a white `noisePlate` over the trees, a fine crow stipple over everything; `post: 0`
+- Camera: locked. The snow, the walker and the drop move; the trees only boil
+- Leans on: `rng` and `hash` for a seeded recursive tree (kept in a Map by its parameters), `inkPath` for trunks and limbs, plain hairline strokes for twigs, `noisePlate` (overexposure, stipple), `stickFigure` with `head: 'scribble'` on `onTwos`, `rng(hash('snow', info.frame))` for the scatter that is new every frame
+- Mistake: overexposing the figure (draw the white plates before it). A second red, or a red tint anywhere. Plate B through `grade: { invert: 1 }`, which turns the drop cyan: draw the negative in the scene through one colour function and skip the drop. Twigs through `inkPath` (hundreds of calls; stroke them in one path per width). Snow on the boil clock instead of ones. Keeping the drop or the snow in state between frames
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/39-fx-snow.js`
+
