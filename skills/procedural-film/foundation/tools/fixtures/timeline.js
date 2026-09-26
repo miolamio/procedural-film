@@ -55,6 +55,8 @@ FILM.TIMELINE = {
     { id: 'fx-xerox-b', file: '37-fx-xerox.js', start: 73, end: 74, mode: 'illustrated', post: 0, carrier: { kind: 'xerox', contrast: 0.9, exposure: 0.4, toner: 1, dropouts: 1, streaks: 1, jitter: 6 }, brief: 'The same flyer as a copy of a copy: everything at full.' },
     { id: 'fx-spotlight', file: '41-fx-spotlight.js', start: 80, end: 81, mode: 'illustrated', post: 0, brief: 'Spotlight theme: a bone hand in brush ink rises out of a dark teal void into a pool of cyan light, reaching for a moth; violet joints, a trailing reticle, on twos.' },
     { id: 'fx-spotlight-b', file: '41-fx-spotlight.js', start: 81, end: 82, mode: 'schematic', post: 0, brief: 'Spotlight plate B: the same frame as a schematic, bones as wire, isolux rings, a dimension and labels in the thin stroke font; cut on the violet joints.' },
+    { id: 'fx-crater', file: '38-fx-crater.js', start: 74, end: 75, mode: 'illustrated', post: 0.8, brief: 'Crater theme: red paper, a throat glowing to yolk at the bottom of a well, a rim of hanging hair loops, scrawled figures falling toward the throat, on twos.' },
+    { id: 'fx-crater-b', file: '38-fx-crater.js', start: 75, end: 76, mode: 'schematic', post: 0, brief: 'Crater plate B: the same frame as a heat map in stepped bands with isotherms, cut on the hero silhouette.' },
   ],
   cues: [
     { t: 0, kind: 'open' },

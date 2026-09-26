@@ -18,9 +18,10 @@ Each theme folder holds:
 | [`shards`](shards/) | 1920×1080 | Flat Voronoi facets in four blue steps that part on the beat; plate B is low-poly space and tunnels; cuts shatter | ready |
 | [`blob`](blob/) | 1920×1080 | White metaball bodies with tar rims and marble contours on a flat blue pool; they merge, drip and melt; plate B is a relief map of the same field | ready |
 | [`scallop`](scallop/) | 1920×1080 | A flat print in three inks (white, scarlet, soot) and one lagoon cyan: even heavy contours, scallop waves in three offset rows, fir rows, on threes; plate B is the same frame as a white-wire schematic on scarlet | ready — no wordmark until the engine has a stroke font |
+| [`crater`](crater/) | 1080×1920 | Red paper with grain; a throat glowing from red to yolk at the bottom of a well, a rim of hanging hair loops, scrawled stick figures falling in, on twos; plate B is the same frame as a stepped heat map | ready |
 | [`spotlight`](spotlight/) | 1080×1920 | Thick black brush ink with pressure on a pool of cyan light in a dark teal void, violet joints; plate B is the same frame as light wire with isolux rings | ready |
 
-Planned, second wave: `snow` (snow and one drop), `drybrush`, `relief` (heat map), `crater` (red paper).
+Planned, second wave: `snow` (snow and one drop), `drybrush`, `relief` (heat map).
 
 ## Picking a style
 
@@ -50,5 +51,6 @@ A frame shows the accent when pixels within 24 of the row's colour on every chan
 | `phosphor` | `{ frames: 48 }` | amber for one alert per act, two seconds at most |
 | `shards` | `{ area: 0.05 }` | flare red on one facet or one solid |
 | `blob` | `{ area: 0.02 }` | yolk yellow on one small thing |
+| `crater` | `{ area: 0.08 }` | yolk only in the throat's core, at the bottom of the well |
 
 A one-point look (`snow`, one drop for the whole film) budgets `{ area: 0.002 }`.
