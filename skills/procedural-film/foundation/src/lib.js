@@ -7220,6 +7220,122 @@
   lib.plot = plot;
 
   // ===========================================================================
+  // Noise plate
+  // ===========================================================================
+
+  /**
+   * noisePlate(ctx, opts) : an fbm2 field cut at a threshold, one colour, over a rectangle.
+   * Snow overexposure (paper-white blotches over the drawing), stipple (grain, small scale),
+   * toner dropouts (paper colour over ink, or 'destination-out'), streaks (scale [sx, sy]).
+   * The field is rastered once at `res` of the frame and cached by every option below plus the
+   * boil variant (never by raw time), stretched once to the render size; a frame only blits it.
+   *   x, y, w, h   0, 0, frame width, frame height
+   *   seed         7
+   *   scale        60      feature size in frame px; [sx, sy] stretches it (sy ≫ sx: vertical streaks)
+   *   threshold    0.7     fraction of the plate left empty: 0.7 covers about 30% (rank, not level)
+   *   soft         0.04    rank width of the edge ramp (0 is a hard mask)
+   *   grain        0       0..1 white noise mixed into the field before the cut: speckle, stipple
+   *                        (1 is pure per-pixel noise, no fbm: the cheapest plate)
+   *   octaves      4
+   *   color        pal.ink (a lib.pal name or a colour)
+   *   alpha        1       applied at the blit
+   *   res          0.25    raster size relative to the frame (0.05..1)
+   *   boil         false   true: three variants on the 12 fps clock; a number picks a variant
+   */
+  function noisePlate(ctx, o = {}) {
+    const x = o.x || 0, y = o.y || 0;
+    const w = o.w || W(), h = o.h || H();
+    const S = renderScale();
+    const seed = seedInt(o.seed === undefined ? 7 : o.seed);
+    const sc = Array.isArray(o.scale) ? o.scale : [o.scale, o.scale];
+    const sx = Math.max(0.5, +sc[0] || 60), sy = Math.max(0.5, +(sc[1] != null ? sc[1] : sc[0]) || 60);
+    const threshold = clamp(o.threshold != null ? +o.threshold : 0.7, 0, 1);
+    const soft = clamp(o.soft != null ? +o.soft : 0.04, 0, 1);
+    const grain = clamp(o.grain != null ? +o.grain : 0, 0, 1);
+    const oct = Math.max(1, Math.min(6, o.octaves == null ? 4 : o.octaves | 0));
+    const color = (typeof o.color === 'string' && pal[o.color]) || o.color || pal.ink;
+    const alpha = clamp(o.alpha != null ? +o.alpha : 1, 0, 1);
+    const res = clamp(o.res != null ? +o.res : 0.25, 0.05, 1);
+    let variant = 0;
+    if (o.boil === true) variant = lib.boil(lib.T) % 3;
+    else if (typeof o.boil === 'number') variant = Math.abs(o.boil | 0) % 3;
+    if (!(alpha > 0) || threshold >= 1 || !(w > 0) || !(h > 0)) return;
+    const ow = Math.max(1, Math.round(w * S)), oh = Math.max(1, Math.round(h * S));
+    const cw = Math.max(1, Math.round(ow * res)), ch = Math.max(1, Math.round(oh * res));
+    const key = ['noisePlate', w, h, ow, oh, cw, ch, seed, sx, sy, threshold, soft, grain, oct, color, variant].join('|');
+    const c = cached(key, () => makeNoisePlate(ow, oh, cw, ch, w / cw, h / ch, seed, sx, sy, threshold, soft, grain, oct, color, variant));
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.drawImage(c, x, y, w, h);
+    ctx.restore();
+  }
+
+  // The field is computed at cw × ch, then stretched once (smoothed) to the render size ow × oh:
+  // a 1:1 blit per frame costs a tenth of a stretching one on a software canvas.
+  function makeNoisePlate(ow, oh, cw, ch, px, py, seed, sx, sy, threshold, soft, grain, oct, color, variant) {
+    const n = cw * ch;
+    const f = new Float32Array(n);
+    // A boil variant nudges the domain by a third of a feature and reseeds the grain, so the
+    // plate shimmers in place instead of jumping to a new pattern.
+    const ox = variant * 0.37, oy = variant * 0.29;
+    const gs = seed + 131 + variant * 17;
+    let lo = Infinity, hi = -Infinity;
+    for (let j = 0; j < ch; j++) {
+      const ny = ((j + 0.5) * py) / sy + oy;
+      for (let i = 0; i < cw; i++) {
+        let v = grain < 1 ? lib.fbm2(((i + 0.5) * px) / sx + ox, ny, seed, oct) : 0;
+        if (grain > 0) v = v * (1 - grain) + (h3(i, j, gs) * 2 - 1) * 0.6 * grain;
+        f[j * cw + i] = v;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    // Cut by rank: a histogram of the field gives the level below which `threshold` of it lies,
+    // so the covered fraction does not depend on the seed, the scale or the octaves.
+    const B = 2048;
+    const span = hi - lo || 1;
+    const hist = new Uint32Array(B);
+    for (let k = 0; k < n; k++) hist[Math.min(B - 1, (((f[k] - lo) / span) * B) | 0)]++;
+    const level = (q) => {
+      if (q <= 0) return lo - 1e-6;
+      if (q >= 1) return hi + 1e-6;
+      const target = q * n;
+      let acc = 0;
+      for (let b = 0; b < B; b++) {
+        const next = acc + hist[b];
+        if (next >= target) return lo + ((b + (hist[b] ? (target - acc) / hist[b] : 0)) / B) * span;
+        acc = next;
+      }
+      return hi;
+    };
+    const e0 = level(threshold - soft / 2), e1 = level(threshold + soft / 2);
+    const c = newCanvas(cw, ch);
+    const g = c.getContext('2d');
+    const img = g.createImageData(cw, ch);
+    const d = img.data;
+    const [r, gg, b] = parseColor(color);
+    for (let k = 0; k < n; k++) {
+      const v = f[k];
+      const a = e1 > e0 ? smoothstep(e0, e1, v) : v > e0 ? 1 : 0;
+      if (!(a > 0)) continue;
+      const q = k * 4;
+      d[q] = r;
+      d[q + 1] = gg;
+      d[q + 2] = b;
+      d[q + 3] = Math.round(a * 255);
+    }
+    g.putImageData(img, 0, 0);
+    if (ow === cw && oh === ch) return c;
+    const out = newCanvas(ow, oh);
+    const og = out.getContext('2d');
+    og.imageSmoothingEnabled = true;
+    og.imageSmoothingQuality = 'high';
+    og.drawImage(c, 0, 0, ow, oh);
+    return out;
+  }
+  lib.noisePlate = noisePlate;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
