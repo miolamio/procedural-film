@@ -186,10 +186,21 @@ function applyArtBible(ab, theme, sections, note) {
 }
 
 /** Drop overrides that match the theme's own value: not worth a note or an overrides.* record. */
-function dropRedundantOverrides(theme, o) {
+function dropRedundantOverrides(theme, o, palText) {
   const out = Object.assign({}, o);
   if (out.frame && theme.frame && out.frame.width === theme.frame.width && out.frame.height === theme.frame.height) delete out.frame;
-  if (out.carrier && out.carrier !== 'none' && theme.carrier && theme.carrier.kind === out.carrier) delete out.carrier;
+  if (out.carrier === 'none') {
+    if (!theme.carrier) delete out.carrier;
+  } else if (out.carrier && theme.carrier && theme.carrier.kind === out.carrier) {
+    delete out.carrier;
+  }
+  if (out.grain !== undefined) {
+    const posts = Object.values(theme.plates || {})
+      .filter(Boolean)
+      .map((pl) => pl.post);
+    if (posts.length && posts.every((p) => p === out.grain)) delete out.grain;
+  }
+  if (out.accent && theme.accent && theme.accent.base && rowHex(palText, theme.accent.base) === out.accent) delete out.accent;
   return out;
 }
 
@@ -206,13 +217,13 @@ function resolveTheme(theme, o) {
 function apply(root, dir, id, o) {
   const theme = loadTheme(dir, id);
   if (o.accent && !(theme.accent && theme.accent.base)) throw new Error(`theme '${id}' has no accent rows in its theme.json; --accent is not available for it`);
-  o = dropRedundantOverrides(theme, o);
+  const pal = fs.readFileSync(path.join(dir, id, theme.palette || 'palette.js'), 'utf8');
+  o = dropRedundantOverrides(theme, o, pal);
   const abFile = path.join(root, 'docs', 'art-bible.md');
   const libFile = path.join(root, 'src', 'lib.js');
   if (!fs.existsSync(abFile)) throw new Error('docs/art-bible.md is missing: copy the skill templates into docs/ first (step 1)');
   if (!fs.existsSync(libFile)) throw new Error('src/lib.js is missing: copy the skill foundation into src/ first (step 1)');
   const values = o.accent ? accentValues(theme, o.accent) : {};
-  const pal = fs.readFileSync(path.join(dir, id, theme.palette || 'palette.js'), 'utf8');
   const sections = fs.readFileSync(path.join(dir, id, 'art-bible-1-9.md'), 'utf8');
   const lib = applyPalette(fs.readFileSync(libFile, 'utf8'), paletteBlock(theme, pal, values));
   const original = o.accent ? originalAccentValues(theme, pal) : {};
@@ -228,7 +239,7 @@ function summary(t) {
   const o = t.overrides || {};
   const lines = [
     `theme ${t.id} (${t.name})${Object.keys(o).length ? `, overrides: ${Object.keys(o).join(', ')}` : ''}`,
-    `  timeline: width: ${t.frame.width}, height: ${t.frame.height}${t.carrier ? `, carrier: ${JSON.stringify(t.carrier)}` : ''}`,
+    `  timeline: width: ${t.frame.width}, height: ${t.frame.height}, carrier: ${t.carrier ? JSON.stringify(t.carrier) : 'none'}`,
   ];
   for (const [k, pl] of Object.entries(t.plates || {})) {
     if (pl) lines.push(`  plate ${k} '${pl.name}': mode '${pl.mode}'${pl.post !== undefined ? `, post ${pl.post}` : ''}${pl.grade ? `, grade ${JSON.stringify(pl.grade)}` : ''}`);

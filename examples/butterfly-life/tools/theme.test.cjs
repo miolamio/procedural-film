@@ -243,6 +243,50 @@ test('an override equal to the theme\'s own value is not recorded as an override
   assert.doesNotMatch(read(dir, 'docs/art-bible.md'), /Film overrides/);
 });
 
+test('--carrier none is not recorded as an override when the theme already has no carrier', { skip }, () => {
+  const dir = film();
+  const t = T.apply(dir, THEMES, 'house', T.parseOverrides({ carrier: 'none' }));
+  assert.strictEqual(t.overrides.carrier, undefined);
+  assert.strictEqual(t.carrier, undefined);
+  assert.doesNotMatch(read(dir, 'docs/art-bible.md'), /Film overrides/);
+});
+
+test('--grain equal to every plate\'s existing post is not recorded as an override', { skip }, () => {
+  const dir = film();
+  // negative's theme.json gives plates A and B both post: 0.55
+  const t = T.apply(dir, THEMES, 'negative', T.parseOverrides({ grain: '0.55' }));
+  assert.strictEqual(t.overrides.grain, undefined);
+  assert.strictEqual(t.plates.A.post, 0.55);
+  assert.strictEqual(t.plates.B.post, 0.55);
+  assert.doesNotMatch(read(dir, 'docs/art-bible.md'), /Film overrides/);
+});
+
+test('--grain is kept as an override when the theme\'s plates have no post to compare against', { skip }, () => {
+  const dir = film();
+  // house's plates have no post field at all, so there is no shared baseline to match
+  const t = T.apply(dir, THEMES, 'house', T.parseOverrides({ grain: '0.4' }));
+  assert.strictEqual(t.overrides.grain, 0.4);
+  assert.match(read(dir, 'docs/art-bible.md'), /Film overrides/);
+});
+
+test('--accent equal to the theme\'s own base accent hex is not recorded as an override', { skip }, () => {
+  const dir = film();
+  // negative's palette.js has accent: '#FF9442'
+  const t = T.apply(dir, THEMES, 'negative', T.parseOverrides({ accent: '#FF9442' }));
+  assert.strictEqual(t.overrides.accent, undefined);
+  assert.doesNotMatch(read(dir, 'docs/art-bible.md'), /Film overrides/);
+  const b = block22(read(dir, 'src/lib.js'));
+  assert.match(b, /accent: '#FF9442'/);
+});
+
+test('summary always prints the timeline carrier, "none" when the theme has none', { skip }, () => {
+  const dir = film();
+  const withCarrier = T.apply(dir, THEMES, 'phosphor', {});
+  assert.match(T.summary(withCarrier), /carrier: \{"kind":"crt"\}/);
+  const noCarrier = T.apply(dir, THEMES, 'house', {});
+  assert.match(T.summary(noCarrier), /carrier: none/);
+});
+
 test('a theme.json whose id does not match its folder name is refused', () => {
   const dir = fakeThemes('foo', {
     id: 'bar',

@@ -70,7 +70,7 @@ Done when: the shots tile [0, duration] exactly, with no gaps or overlaps, every
 
 ### 5. Timeline
 
-Write `src/timeline.js` from the storyboard (shape in the storyboard template): title, bpm, duration, the shots array (id, file, start, end, mode, title, transitionIn, brief), and the flat cues list collected from the Sound sections. Take width, height, carrier and each plate's mode, post and grade from `node tools/theme.cjs show`; check 4 warns when the timeline drifts from `docs/theme.json`. Write `src/geo.js` from the Shared geometry section, one entry per table (shape in `docs/CONTRACT.md`). The stub pass is this step's test — it fails loudly on a malformed timeline or geometry table.
+Write `src/timeline.js` from the storyboard (shape in the storyboard template): title, bpm, duration, the shots array (id, file, start, end, mode, title, transitionIn, brief), and the flat cues list collected from the Sound sections. Take width, height, carrier and each plate's mode, post and grade from `node tools/theme.cjs show`; check 4 warns when the timeline's frame or carrier differs from `docs/theme.json`. Write `src/geo.js` from the Shared geometry section, one entry per table (shape in `docs/CONTRACT.md`). The stub pass is this step's test — it fails loudly on a malformed timeline or geometry table.
 
 ### 6. Stub pass
 
