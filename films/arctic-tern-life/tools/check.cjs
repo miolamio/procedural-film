@@ -827,21 +827,37 @@ async function main() {
       }
     };
     carrierProblems(TL.raw.carrier, 'timeline carrier');
-    // the style picked at step 3 (docs/theme.json, written by tools/theme.cjs) sets the frame and the carrier
+    // the style picked at step 3 (docs/theme.json, written by tools/theme.cjs) sets the frame and the carrier.
+    // skipped for --shot: a scene agent loading one shot alone can't fix a film-wide drift.
     const themeFile = path.join(C.ROOT, 'docs', 'theme.json');
-    if (!fixtures && fs.existsSync(themeFile)) {
-      let th = null;
+    if (!fixtures && !shotId && fs.existsSync(themeFile)) {
+      let th;
+      let themeErr = null;
       try {
         th = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
       } catch (e) {
-        tlWarnings.push(`docs/theme.json: ${e.message}`);
+        themeErr = e;
       }
-      if (th && th.frame && (th.frame.width !== TL.width || th.frame.height !== TL.height)) {
-        tlWarnings.push(`frame ${TL.width}×${TL.height} differs from docs/theme.json (${th.frame.width}×${th.frame.height}): rerun tools/theme.cjs apply with --frame, or set the timeline's width and height`);
+      if (themeErr) {
+        tlWarnings.push(`docs/theme.json: ${themeErr.message}`);
+      } else if (th === null || typeof th !== 'object' || Array.isArray(th)) {
+        tlWarnings.push('docs/theme.json is not an object');
+      } else {
+        if (th.frame) {
+          if (typeof th.frame.width === 'number' && typeof th.frame.height === 'number') {
+            if (th.frame.width !== TL.width || th.frame.height !== TL.height) {
+              tlWarnings.push(`frame ${TL.width}×${TL.height} differs from docs/theme.json (${th.frame.width}×${th.frame.height}): rerun tools/theme.cjs apply with --frame, or set the timeline's width and height`);
+            }
+          } else {
+            tlWarnings.push('docs/theme.json frame needs width and height');
+          }
+        }
+        const want = th.carrier && th.carrier.kind ? th.carrier.kind : 'none';
+        const have = TL.raw.carrier && TL.raw.carrier.kind ? TL.raw.carrier.kind : 'none';
+        if (want !== have) {
+          tlWarnings.push(`timeline carrier ${have} differs from docs/theme.json (${want}): rerun tools/theme.cjs apply with --carrier, or set the timeline's carrier`);
+        }
       }
-      const want = th && th.carrier ? th.carrier.kind : 'none';
-      const have = TL.raw.carrier && TL.raw.carrier.kind ? TL.raw.carrier.kind : 'none';
-      if (th && want !== have) tlWarnings.push(`timeline carrier ${have} differs from docs/theme.json (${want})`);
     }
     shots.forEach((s, i) => {
       if (typeof s.id !== 'string' || !s.id) tlProblems.push(`shot #${i} has no id`);
