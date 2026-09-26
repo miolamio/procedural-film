@@ -10,7 +10,9 @@
 // Overrides are the axes that hold across themes. Line, tone and motion come whole from the theme.
 //   --frame 1080x1920 | 1920x1080 | 1080x1080     the canvas: the timeline's width and height
 //   --carrier none | crt                          the medium over the whole film: the timeline's carrier
-//   --accent #RRGGBB                              the theme's accent rows; hot and deep steps are derived
+//   --accent '#RRGGBB'                            the theme's accent rows; the # is optional, but quote the
+//                                                 value so the shell doesn't read '#...' as a comment; hot
+//                                                 and deep steps are derived from it
 //   --grain 0..1                                  post (grain or noise) on every plate
 //
 // --themes <dir> is the skill's themes/ folder. Default: $PF_THEMES, then ../themes (the foundation),
@@ -22,7 +24,8 @@ const C = require('./common.cjs');
 
 const FRAMES = ['1080x1920', '1920x1080', '1080x1080'];
 const CARRIERS = ['none', 'crt'];
-const HEX = /^#[0-9a-fA-F]{6}$/;
+const HEX = /^#?[0-9a-fA-F]{6}$/;
+const ROW_NAME = /^[A-Za-z_]\w*$/;
 
 function findThemes(root, arg) {
   if (arg) {
@@ -37,7 +40,12 @@ function findThemes(root, arg) {
 function loadTheme(dir, id) {
   const file = path.join(dir, String(id), 'theme.json');
   if (!/^[a-z][a-z0-9-]*$/.test(id || '') || !fs.existsSync(file)) throw new Error(`no theme '${id}' in ${dir}; run: node tools/theme.cjs list`);
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
+  const theme = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (theme.id !== id) throw new Error(`theme.json at ${dir}/${id} has id '${theme.id}', not '${id}': the folder name and the id must match`);
+  for (const [k, v] of Object.entries(theme.accent || {})) {
+    if (!ROW_NAME.test(v)) throw new Error(`theme '${id}' has an invalid accent.${k} row name '${v}' in theme.json`);
+  }
+  return theme;
 }
 
 function listThemes(dir) {
@@ -48,22 +56,32 @@ function listThemes(dir) {
     .sort((a, b) => (a.id === 'house' ? -1 : b.id === 'house' ? 1 : a.id.localeCompare(b.id)));
 }
 
+// A bare `--flag` (no value) parses to `true`; `--flag=` parses to ''. Neither is a value.
+function needValue(name, v) {
+  if (v === true || v === '') throw new Error(`--${name} needs a value`);
+}
+
 function parseOverrides(args) {
   const o = {};
   if (args.frame !== undefined) {
+    needValue('frame', args.frame);
     if (!FRAMES.includes(String(args.frame))) throw new Error(`--frame must be one of ${FRAMES.join(', ')}`);
     const [width, height] = String(args.frame).split('x').map(Number);
     o.frame = { width, height };
   }
   if (args.carrier !== undefined) {
+    needValue('carrier', args.carrier);
     if (!CARRIERS.includes(String(args.carrier))) throw new Error(`--carrier must be one of ${CARRIERS.join(', ')}`);
     o.carrier = String(args.carrier);
   }
   if (args.accent !== undefined) {
-    if (!HEX.test(String(args.accent))) throw new Error('--accent must be a hex colour like #FF4F3A');
-    o.accent = String(args.accent).toUpperCase();
+    needValue('accent', args.accent);
+    const v = String(args.accent);
+    if (!HEX.test(v)) throw new Error("--accent must be a hex colour like '#FF4F3A' (the # is optional)");
+    o.accent = `#${v.replace(/^#/, '')}`.toUpperCase();
   }
   if (args.grain !== undefined) {
+    needValue('grain', args.grain);
     const g = Number(args.grain);
     if (!(g >= 0 && g <= 1)) throw new Error('--grain must be a number from 0 to 1');
     o.grain = g;
@@ -105,16 +123,20 @@ function applyPalette(lib, rows) {
   const lines = lib.split('\n');
   const b = lines.findIndex((l) => /\/\/ BEGIN 2\.2/.test(l));
   const e = lines.findIndex((l) => /\/\/ END 2\.2/.test(l));
-  if (b < 0 || e < b) throw new Error('src/lib.js has no // BEGIN 2.2 ... // END 2.2 markers');
+  if (b < 0 || !(e > b)) throw new Error('src/lib.js has no // BEGIN 2.2 ... // END 2.2 markers');
   const tb = lines.findIndex((l, i) => i > b && i < e && /\/\/ BEGIN theme /.test(l));
   const te = lines.findIndex((l, i) => i > tb && i < e && /\/\/ END theme /.test(l));
-  if (tb >= 0 && te > tb) {
+  if (tb >= 0 && te < 0) throw new Error('src/lib.js has a // BEGIN theme marker inside the 2.2 markers without a matching // END theme');
+  // The clash check runs on every apply, over the 2.2 lines outside the existing theme region
+  // [tb, te] (that region is about to be replaced wholesale, so its own rows never clash).
+  const names = rows.join('\n').match(/^\s*\w+(?=\s*:)/gm) || [];
+  const outside = lines.slice(b, e).filter((_, i) => !(tb >= 0 && b + i >= tb && b + i <= te));
+  const clash = names.map((n) => n.trim()).find((n) => outside.some((l) => new RegExp(`^\\s*${n}\\s*:`).test(l)));
+  if (clash) throw new Error(`src/lib.js already has '${clash}' inside the 2.2 markers: theme rows pasted by hand. Remove them, then run apply again`);
+  if (tb >= 0) {
     lines.splice(tb, te - tb + 1, ...rows);
     return lines.join('\n');
   }
-  const names = rows.join('\n').match(/^\s*\w+(?=\s*:)/gm) || [];
-  const clash = names.map((n) => n.trim()).find((n) => lines.slice(b, e).some((l) => new RegExp(`^\\s*${n}\\s*:`).test(l)));
-  if (clash) throw new Error(`src/lib.js already has '${clash}' inside the 2.2 markers: theme rows pasted by hand. Remove them, then run apply again`);
   let at = b + 1;
   while (at < e && /^\s*\/\//.test(lines[at])) at++;
   lines.splice(at, 0, ...rows);
@@ -150,6 +172,14 @@ function applyArtBible(ab, theme, sections, note) {
   return out.replace(/^Theme: .*$/m, () => `Theme: ${theme.id} (\`themes/${theme.id}/\` in the skill; tools/theme.cjs resolves it into \`docs/theme.json\`).`);
 }
 
+/** Drop overrides that match the theme's own value: not worth a note or an overrides.* record. */
+function dropRedundantOverrides(theme, o) {
+  const out = Object.assign({}, o);
+  if (out.frame && theme.frame && out.frame.width === theme.frame.width && out.frame.height === theme.frame.height) delete out.frame;
+  if (out.carrier && out.carrier !== 'none' && theme.carrier && theme.carrier.kind === out.carrier) delete out.carrier;
+  return out;
+}
+
 function resolveTheme(theme, o) {
   const t = JSON.parse(JSON.stringify(theme));
   if (o.frame) t.frame = o.frame;
@@ -163,9 +193,11 @@ function resolveTheme(theme, o) {
 function apply(root, dir, id, o) {
   const theme = loadTheme(dir, id);
   if (o.accent && !(theme.accent && theme.accent.base)) throw new Error(`theme '${id}' has no accent rows in its theme.json; --accent is not available for it`);
+  o = dropRedundantOverrides(theme, o);
   const abFile = path.join(root, 'docs', 'art-bible.md');
   const libFile = path.join(root, 'src', 'lib.js');
   if (!fs.existsSync(abFile)) throw new Error('docs/art-bible.md is missing: copy the skill templates into docs/ first (step 1)');
+  if (!fs.existsSync(libFile)) throw new Error('src/lib.js is missing: copy the skill foundation into src/ first (step 1)');
   const values = o.accent ? accentValues(theme, o.accent) : {};
   const pal = fs.readFileSync(path.join(dir, id, theme.palette || 'palette.js'), 'utf8');
   const sections = fs.readFileSync(path.join(dir, id, 'art-bible-1-9.md'), 'utf8');
@@ -193,7 +225,7 @@ function summary(t) {
 function listTable(dir) {
   const rows = listThemes(dir).map((t) => {
     const pal = fs.readFileSync(path.join(dir, t.id, t.palette || 'palette.js'), 'utf8');
-    const acc = t.accent && t.accent.base ? rowHex(pal, t.accent.base) : 'fixed';
+    const acc = t.accent && t.accent.base ? rowHex(pal, t.accent.base) || 'missing' : 'fixed';
     return [t.id, `${t.frame.width}x${t.frame.height}`, t.carrier ? t.carrier.kind : 'none', acc, t.status, t.look || t.name];
   });
   const w = [0, 1, 2, 3, 4].map((i) => Math.max(...rows.map((r) => r[i].length), 7));
@@ -203,8 +235,10 @@ function listTable(dir) {
 function main() {
   const args = C.parseArgs(process.argv.slice(2));
   const [cmd, id] = args._;
-  const root = args.root ? path.resolve(args.root) : C.ROOT;
   try {
+    if (args.root !== undefined && typeof args.root !== 'string') throw new Error('--root needs a path');
+    if (args.themes !== undefined && typeof args.themes !== 'string') throw new Error('--themes needs a path');
+    const root = args.root ? path.resolve(args.root) : C.ROOT;
     const dir = findThemes(root, typeof args.themes === 'string' ? args.themes : null);
     if (cmd !== 'show' && !dir) throw new Error('no themes/ folder found: pass --themes <skill>/themes or set PF_THEMES');
     if (cmd === 'list') console.log(listTable(dir));
@@ -218,7 +252,7 @@ function main() {
       fs.mkdirSync(path.dirname(out), { recursive: true });
       fs.writeFileSync(out, lookbook(dir));
       console.log(`lookbook -> ${out}`);
-    } else throw new Error('usage: node tools/theme.cjs list | apply <id> [--frame WxH] [--carrier none|crt] [--accent #RRGGBB] [--grain 0..1] | show | lookbook [--out path]');
+    } else throw new Error("usage: node tools/theme.cjs list | apply <id> [--frame WxH] [--carrier none|crt] [--accent '#RRGGBB'] [--grain 0..1] | show | lookbook [--out path]");
   } catch (e) {
     C.die(e.message);
   }

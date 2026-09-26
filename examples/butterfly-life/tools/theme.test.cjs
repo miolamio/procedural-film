@@ -5,13 +5,33 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const T = require('./theme.cjs');
 
 const THEMES = T.findThemes(path.resolve(__dirname, '..'));
 const skip = !THEMES && 'no skill themes/ folder next to this film';
+const BIN = path.join(__dirname, 'theme.cjs');
+
+// Every mkdtempSync'd folder this file creates is tracked here and removed when the process exits,
+// whichever test created it and whether or not it passed.
+const tmpDirs = [];
+function tmp(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+process.on('exit', () => {
+  for (const d of tmpDirs) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+});
 
 function film() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pf-theme-'));
+  const dir = tmp('pf-theme-');
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'docs'));
   fs.copyFileSync(path.join(THEMES, '..', 'foundation', 'src', 'lib.js'), path.join(dir, 'src', 'lib.js'));
@@ -20,6 +40,18 @@ function film() {
 }
 const read = (dir, f) => fs.readFileSync(path.join(dir, f), 'utf8');
 const block22 = (lib) => lib.slice(lib.indexOf('// BEGIN 2.2'), lib.indexOf('// END 2.2'));
+
+/** A minimal fake themes/ folder (its own INDEX.md, one theme). For loadTheme/listThemes edge cases. */
+function fakeThemes(id, themeJson, extra = {}) {
+  const dir = tmp('pf-themes-');
+  fs.writeFileSync(path.join(dir, 'INDEX.md'), '# themes\n');
+  const tDir = path.join(dir, id);
+  fs.mkdirSync(tDir);
+  fs.writeFileSync(path.join(tDir, 'theme.json'), JSON.stringify(themeJson));
+  fs.writeFileSync(path.join(tDir, 'palette.js'), extra.palette || '    // no rows\n');
+  fs.writeFileSync(path.join(tDir, 'art-bible-1-9.md'), extra.sections || '## 1. Frame\n');
+  return dir;
+}
 
 test('list puts house first and reads every theme', { skip }, () => {
   const ids = T.listThemes(THEMES).map((t) => t.id);
@@ -79,6 +111,15 @@ test('bad input is refused before anything is written', { skip }, () => {
   assert.throws(() => T.parseOverrides({ accent: 'red' }), /--accent/);
   assert.throws(() => T.parseOverrides({ grain: '2' }), /--grain/);
   assert.throws(() => T.parseOverrides({ carrier: 'vhs' }), /--carrier/);
+  // a bare flag (--grain with no value) parses to `true`; `--grain=` parses to ''. Neither is a value.
+  assert.throws(() => T.parseOverrides({ frame: true }), /--frame/);
+  assert.throws(() => T.parseOverrides({ frame: '' }), /--frame/);
+  assert.throws(() => T.parseOverrides({ carrier: true }), /--carrier/);
+  assert.throws(() => T.parseOverrides({ carrier: '' }), /--carrier/);
+  assert.throws(() => T.parseOverrides({ accent: true }), /--accent/);
+  assert.throws(() => T.parseOverrides({ accent: '' }), /--accent/);
+  assert.throws(() => T.parseOverrides({ grain: true }), /--grain/);
+  assert.throws(() => T.parseOverrides({ grain: '' }), /--grain/);
   const dir = film();
   const before = read(dir, 'src/lib.js');
   assert.throws(() => T.apply(dir, THEMES, 'house', T.parseOverrides({ accent: '#FF0000' })), /no accent rows/);
@@ -91,4 +132,142 @@ test('rows pasted by hand without the theme markers are refused', { skip }, () =
   const libFile = path.join(dir, 'src', 'lib.js');
   fs.writeFileSync(libFile, read(dir, 'src/lib.js').replace(/(\n\s*\/\/ END 2\.2)/, "\n    void: '#05060A',$1"));
   assert.throws(() => T.apply(dir, THEMES, 'negative', {}), /pasted by hand/);
+});
+
+test('--accent accepts a hex value without the leading #', { skip }, () => {
+  assert.strictEqual(T.parseOverrides({ accent: '3aa0ff' }).accent, '#3AA0FF');
+  assert.strictEqual(T.parseOverrides({ accent: '#3aa0ff' }).accent, '#3AA0FF');
+});
+
+test('switching themes is refused when a hand-added subject row clashes with the new theme', { skip }, () => {
+  const dir = film();
+  T.apply(dir, THEMES, 'shards', {});
+  const libFile = path.join(dir, 'src', 'lib.js');
+  // 'line' is not a shards row (so the first apply succeeds) but it is a negative row.
+  fs.writeFileSync(libFile, read(dir, 'src/lib.js').replace(/(\n\s*\/\/ END 2\.2)/, "\n    line: '#123456',$1"));
+  const before = read(dir, 'src/lib.js');
+  assert.throws(() => T.apply(dir, THEMES, 'negative', {}), /already has 'line'/);
+  assert.strictEqual(read(dir, 'src/lib.js'), before);
+});
+
+test('a lone // BEGIN theme without a matching // END theme is refused', { skip }, () => {
+  const dir = film();
+  const libFile = path.join(dir, 'src', 'lib.js');
+  fs.writeFileSync(
+    libFile,
+    read(dir, 'src/lib.js').replace(/(\n\s*\/\/ END 2\.2)/, "\n    // BEGIN theme ghost (stray)\n    ghost: '#000000',$1")
+  );
+  const before = read(dir, 'src/lib.js');
+  assert.throws(() => T.apply(dir, THEMES, 'negative', {}), /without a matching/);
+  assert.strictEqual(read(dir, 'src/lib.js'), before);
+});
+
+test('END 2.2 must be strictly after BEGIN 2.2', { skip }, () => {
+  const dir = film();
+  const libFile = path.join(dir, 'src', 'lib.js');
+  const merged = read(dir, 'src/lib.js').replace(/\/\/ BEGIN 2\.2[\s\S]*?\/\/ END 2\.2/, '// BEGIN 2.2 // END 2.2');
+  fs.writeFileSync(libFile, merged);
+  assert.throws(() => T.apply(dir, THEMES, 'negative', {}), /BEGIN 2\.2[\s\S]*END 2\.2/);
+});
+
+test('a missing src/lib.js is refused with a friendly error', { skip }, () => {
+  const dir = film();
+  fs.rmSync(path.join(dir, 'src', 'lib.js'));
+  assert.throws(() => T.apply(dir, THEMES, 'negative', {}), /src\/lib\.js is missing/);
+});
+
+test('an art bible with neither the PASTE marker nor a theme block is refused, lib.js untouched', { skip }, () => {
+  const dir = film();
+  const abFile = path.join(dir, 'docs', 'art-bible.md');
+  fs.writeFileSync(abFile, read(dir, 'docs/art-bible.md').replace(/<!-- PASTE themes[\s\S]*?-->/, ''));
+  const before = read(dir, 'src/lib.js');
+  assert.throws(() => T.apply(dir, THEMES, 'negative', {}), /neither the template PASTE marker nor a theme block/);
+  assert.strictEqual(read(dir, 'src/lib.js'), before);
+});
+
+test('applying the same theme and overrides twice is idempotent', { skip }, () => {
+  const dir = film();
+  const o = T.parseOverrides({ accent: '#3AA0FF', grain: '0.2' });
+  T.apply(dir, THEMES, 'negative', o);
+  const lib1 = read(dir, 'src/lib.js');
+  const ab1 = read(dir, 'docs/art-bible.md');
+  T.apply(dir, THEMES, 'negative', o);
+  assert.strictEqual(read(dir, 'src/lib.js'), lib1);
+  assert.strictEqual(read(dir, 'docs/art-bible.md'), ab1);
+});
+
+test('dropping --accent on a later apply restores the theme\'s own accent hex', { skip }, () => {
+  const dir = film();
+  T.apply(dir, THEMES, 'negative', T.parseOverrides({ accent: '#3AA0FF' }));
+  T.apply(dir, THEMES, 'negative', {});
+  const b = block22(read(dir, 'src/lib.js'));
+  assert.match(b, /accent: '#FF9442'/);
+  assert.doesNotMatch(b, /3AA0FF/i);
+});
+
+test('an override equal to the theme\'s own value is not recorded as an override', { skip }, () => {
+  const dir = film();
+  const t = T.apply(dir, THEMES, 'phosphor', T.parseOverrides({ carrier: 'crt', frame: '1920x1080' }));
+  assert.strictEqual(t.overrides.carrier, undefined);
+  assert.strictEqual(t.overrides.frame, undefined);
+  assert.deepStrictEqual(t.carrier, { kind: 'crt' });
+  assert.deepStrictEqual(t.frame, { width: 1920, height: 1080 });
+  assert.doesNotMatch(read(dir, 'docs/art-bible.md'), /Film overrides/);
+});
+
+test('a theme.json whose id does not match its folder name is refused', () => {
+  const dir = fakeThemes('foo', {
+    id: 'bar',
+    name: 'Mismatch',
+    status: 'ready',
+    frame: { width: 1080, height: 1920 },
+    plates: {},
+    palette: 'palette.js',
+  });
+  assert.throws(() => T.listThemes(dir), /has id 'bar'/);
+});
+
+test('an invalid accent row name in theme.json fails clearly instead of crashing a RegExp', () => {
+  const dir = fakeThemes(
+    'bad',
+    {
+      id: 'bad',
+      name: 'Bad',
+      status: 'ready',
+      frame: { width: 1080, height: 1920 },
+      plates: {},
+      accent: { base: '(oops' },
+      palette: 'palette.js',
+    },
+    { palette: "    accent: '#FF0000',\n" }
+  );
+  assert.throws(() => T.listThemes(dir), /invalid accent.*row name/);
+});
+
+test('listTable shows "missing" instead of crashing when an accent row is absent from palette.js', () => {
+  const dir = fakeThemes(
+    'ghosttheme',
+    {
+      id: 'ghosttheme',
+      name: 'Ghost',
+      status: 'ready',
+      frame: { width: 1080, height: 1920 },
+      plates: {},
+      accent: { base: 'ghost' },
+      palette: 'palette.js',
+    },
+    { palette: '    // no ghost row here\n' }
+  );
+  const r = spawnSync(process.execPath, [BIN, 'list', '--themes', dir], { encoding: 'utf8' });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /missing/);
+});
+
+test('--root and --themes reject a value-less flag', () => {
+  const r1 = spawnSync(process.execPath, [BIN, 'list', '--root'], { encoding: 'utf8' });
+  assert.notStrictEqual(r1.status, 0);
+  assert.match(r1.stderr, /--root needs a path/);
+  const r2 = spawnSync(process.execPath, [BIN, 'list', '--themes'], { encoding: 'utf8' });
+  assert.notStrictEqual(r2.status, 0);
+  assert.match(r2.stderr, /--themes needs a path/);
 });
