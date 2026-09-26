@@ -36,6 +36,7 @@ FILM.TIMELINE = {
     { id: 'fx-polygon', file: '24-fx-shards.js', start: 47, end: 48, mode: 'schematic', transitionIn: { kind: 'shatter', dur: 0.75, x: 540, y: 910, seed: 3 }, brief: 'The field shatters from the box into a flight down a polygon tunnel.' },
     { id: 'fx-blob', file: '25-fx-blob.js', start: 48, end: 50, mode: 'illustrated', post: 0.5, brief: 'Blob theme: a melting marbled blob creature, a pair merging and splitting, a relief of isolines.' },
     { id: 'fx-ramp', file: '26-fx-ramp.js', start: 50, end: 52, mode: 'schematic', brief: 'Ramps: every named colour scale as a strip, a crater as a heat map, a terrain relief with a rising sea.' },
+    { id: 'fx-stick', file: '27-fx-stick.js', start: 52, end: 54, mode: 'illustrated', brief: 'Stick figures: a jointed walker with a red balloon, a spring figure reaching and jumping, a row of head styles, poses on twos.' },
     { id: 'fx-noise-plate', file: '28-fx-noise-plate.js', start: 54, end: 56, mode: 'illustrated', brief: 'Noise plates: snow overexposure and stipple over bare trees with one red drop; xerox toner dropouts and drum streaks on a stencil.' },
   ],
   cues: [
