@@ -399,3 +399,14 @@ A body made of metaballs that merges, splits, drips and melts: a flat fill, a he
 - Mistake: animating the outline instead of the balls — the balls are the character, the rim follows. A `phase` that stands still, so the body freezes between moves. Too fine a `cell` on a large body: 8 to 12 px is smooth enough and keeps the frame in budget. A drip drawn as a separate shape: give it a ball and it joins and leaves the body by itself
 - Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/25-fx-blob.js`
 
+
+## 38. Stick figures
+
+Small people drawn in thin trembling line: a disc head (solid, scribbled, hatched or a plain face), limbs of straight segments with a thickening at each joint, or limbs of springs (zigzag, coil or ladder) under a scribbled knot of a head. They act in held poses that change on twos; the line boils between the poses, the joints never slide.
+
+- Duration: 2.0 to 4.0 s. One key pose a quarter note to a bar, mixed on twos; a walk is four drawings a stride
+- Plate: flat and quiet (paper, snow, a colour field); a single accent near the figure — a balloon, a mark on the ground — and nothing else in colour
+- Camera: locked, or a slow drift; the figures stand on a drawn ground line
+- Leans on: `stickFigure` (`head`, `limb`, `facing`, `height`, `joint`), `stickPose` for hands and feet another drawing attaches to, `poseMix`, `stickPoses`, `onTwos`, `springLimb` and `scribbleBall` on their own
+- Mistake: easing the pose on every frame — mix it at `onTwos(t)`, so a pose is held two frames. Placing the figure by its hip while it crouches or jumps: the default anchor stands it on `y`, lift it by moving `y`. Attaching a prop to a guessed point instead of the returned joints. Spring limbs folded flat on themselves (a knee past about 2 rad), which reads as a tangle. Copying a known figure (the Murder, Drown or Fighting Men men): give the film's people their own proportions, heads and acts
+- Fixture: `skills/procedural-film/foundation/tools/fixtures/scenes/27-fx-stick.js`

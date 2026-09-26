@@ -7220,6 +7220,452 @@
   lib.plot = plot;
 
   // ===========================================================================
+  // Stick figures
+  // ===========================================================================
+
+  // Body proportions in head diameters. 'line' is the jointed stick (characters-reference.md §4–6:
+  // torso ≈ 2.5 heads, legs ≈ 3.5); the spring body (§3) has long legs, ≈ 56% of the height, and a
+  // head of ≈ 17% of it. A standing figure is head + neck + torso + thigh + shin tall; the foot
+  // points forward and adds no height.
+  const STICK_BODY = Object.freeze({ head: 1, neck: 0.25, torso: 2.5, upperArm: 1.35, forearm: 1.25, thigh: 1.8, shin: 1.75, foot: 0.3 });
+  const SPRING_BODY = Object.freeze({ head: 1, neck: 0.12, torso: 1.35, upperArm: 1.45, forearm: 1.4, thigh: 1.6, shin: 1.6, foot: 0 });
+  const POSE_KEYS = ['rot', 'lean', 'neck', 'armL', 'elbowL', 'armR', 'elbowR', 'legL', 'kneeL', 'legR', 'kneeR'];
+  const SPRING_KINDS = { spring: 1, zigzag: 1, coil: 1, ladder: 1 };
+
+  /**
+   * stickPose(pose, opts) : the joints of a stick figure, without drawing. Pure; stickFigure draws
+   * exactly these (plus the boil tremble).
+   * pose: joint angles in radians, every one 0 by default (standing straight, arms hanging).
+   * A positive angle swings toward the side the figure faces:
+   *   rot     the whole figure about the hip (π/2 lies it face down, -π/2 on its back)
+   *   lean    the torso at the hip          neck    the head on the torso
+   *   armL armR    shoulder, from hanging down (π/2 points forward, π straight up)
+   *   elbowL elbowR  forearm folds forward
+   *   legL legR    hip, from straight down   kneeL kneeR    shin folds back
+   * opts:
+   *   x, y     where the figure stands: with anchor 'ground' (default) the lowest point of the
+   *            figure sits on y and the hip on x; with anchor 'hip' the hip is at (x, y)
+   *   height   0.33 · frame height   standing height, head top to sole
+   *   facing   1 (right) or -1 (left)
+   *   limb     'line' | 'spring' ('zigzag') | 'coil' | 'ladder'   picks the default body
+   *   body     { head, neck, torso, upperArm, forearm, thigh, shin, foot }   overrides, in heads
+   * Returns { hip, shoulder, neck, head, headR, elbowL, handL, elbowR, handR, kneeL, ankleL,
+   *   toeL, kneeR, ankleR, toeR, D (head diameter), facing, headAngle } in frame pixels.
+   */
+  function stickPose(pose, o = {}) {
+    const p = pose || {};
+    const B = Object.assign({}, SPRING_KINDS[o.limb] ? SPRING_BODY : STICK_BODY, o.body);
+    const height = o.height != null ? o.height : H() * 0.33;
+    const D = height / (B.head + B.neck + B.torso + B.thigh + B.shin);
+    const f = o.facing === -1 ? -1 : 1;
+    const a = (k) => +p[k] || 0;
+    // dir(θ, len): θ = 0 points down the frame, θ > 0 swings toward the facing side
+    const dir = (t, len) => [f * Math.sin(t) * len, Math.cos(t) * len];
+    const add = (P, v) => [P[0] + v[0], P[1] + v[1]];
+    const hip = [0, 0];
+    const torso = -a('lean');
+    const shoulder = add(hip, dir(torso, -B.torso * D));
+    const headAng = torso - a('neck');
+    const neck = add(shoulder, dir(headAng, -B.neck * D));
+    const head = add(shoulder, dir(headAng, -(B.neck * D + (B.head * D) / 2)));
+    const arm = (s, e) => {
+      const el = add(shoulder, dir(torso + a(s), B.upperArm * D));
+      return [el, add(el, dir(torso + a(s) + a(e), B.forearm * D))];
+    };
+    const leg = (s, k) => {
+      const kn = add(hip, dir(a(s), B.thigh * D));
+      const an = add(kn, dir(a(s) - a(k), B.shin * D));
+      // the foot points forward, only a third as steep as the shin, so it stays near flat
+      return [kn, an, add(an, dir(Math.PI / 2 + 0.35 * (a(s) - a(k)), B.foot * D))];
+    };
+    const [elbowL, handL] = arm('armL', 'elbowL');
+    const [elbowR, handR] = arm('armR', 'elbowR');
+    const [kneeL, ankleL, toeL] = leg('legL', 'kneeL');
+    const [kneeR, ankleR, toeR] = leg('legR', 'kneeR');
+    const J = { hip, shoulder, neck, head, elbowL, handL, elbowR, handR, kneeL, ankleL, toeL, kneeR, ankleR, toeR };
+    const r = f * a('rot');
+    const c = Math.cos(r), s = Math.sin(r);
+    const headR = (B.head * D) / 2;
+    let low = -Infinity;
+    for (const k in J) {
+      const P = J[k];
+      J[k] = [P[0] * c - P[1] * s, P[0] * s + P[1] * c];
+      const bottom = J[k][1] + (k === 'head' ? headR : 0);
+      if (bottom > low) low = bottom;
+    }
+    const dx = o.x != null ? o.x : W() / 2;
+    const dy = (o.y != null ? o.y : H() * 0.8) - (o.anchor === 'hip' ? 0 : low);
+    for (const k in J) J[k] = [J[k][0] + dx, J[k][1] + dy];
+    J.headR = headR;
+    J.D = B.head * D;
+    J.facing = f;
+    J.headAngle = -f * headAng + r; // screen rotation of the head, clockwise (0 upright)
+    return J;
+  }
+  lib.stickPose = stickPose;
+
+  /** poseMix(a, b, u) : a pose between a (u = 0) and b (u = 1), angle by angle. */
+  function poseMix(pa, pb, u) {
+    const out = {};
+    for (const k of POSE_KEYS) {
+      const x = (pa && +pa[k]) || 0, y = (pb && +pb[k]) || 0;
+      if (x || y) out[k] = x + (y - x) * u;
+    }
+    return out;
+  }
+  lib.poseMix = poseMix;
+
+  // A few poses to start from (facing right; mix them with poseMix, override single joints).
+  // walk1..walk4 are the contact and passing drawings of one stride, a quarter of a cycle apart.
+  const stickPoses = {
+    stand: {},
+    walk1: { lean: 0.06, armL: -0.5, elbowL: 0.25, armR: 0.5, elbowR: 0.55, legL: 0.42, kneeL: 0.08, legR: -0.38, kneeR: 0.3 },
+    walk2: { lean: 0.08, armL: -0.12, elbowL: 0.3, armR: 0.12, elbowR: 0.4, legL: 0.05, kneeL: 0.3, legR: -0.05, kneeR: 1.05 },
+    walk3: { lean: 0.06, armL: 0.5, elbowL: 0.55, armR: -0.5, elbowR: 0.25, legL: -0.38, kneeL: 0.3, legR: 0.42, kneeR: 0.08 },
+    walk4: { lean: 0.08, armL: 0.12, elbowL: 0.4, armR: -0.12, elbowR: 0.3, legL: -0.05, kneeL: 1.05, legR: 0.05, kneeR: 0.3 },
+    reach: { lean: -0.05, neck: -0.35, armL: 2.75, elbowL: 0.1, armR: 2.95, elbowR: -0.05, legL: 0.06, legR: -0.06 },
+    crouch: { lean: 0.5, neck: -0.3, armL: 0.9, elbowL: 0.8, armR: 0.6, elbowR: 1.0, legL: 1.05, kneeL: 1.75, legR: 0.7, kneeR: 1.85 },
+    jump: { lean: 0.2, neck: -0.2, armL: 2.3, elbowL: 0.4, armR: 2.0, elbowR: 0.6, legL: 0.9, kneeL: 1.6, legR: 0.3, kneeR: 1.3 },
+    sit: { lean: -0.12, neck: 0.1, armL: 1.0, elbowL: 0.35, armR: 0.7, elbowR: 0.5, legL: 2.1, kneeL: 1.07, legR: 1.9, kneeR: 0.85 },
+    wave: { armL: 0.12, elbowL: 0.1, armR: 2.3, elbowR: 0.9, legL: 0.1, legR: -0.1, neck: 0.1 },
+    fall: { rot: -0.35, lean: -0.2, neck: -0.3, armL: 2.6, elbowL: 0.5, armR: 1.9, elbowR: -0.4, legL: 0.6, kneeL: 0.2, legR: -0.25, kneeR: 0.9 },
+    lie: { rot: -Math.PI / 2, neck: 0.15, armL: 0.35, elbowL: 0.3, armR: -0.2, elbowR: 0.5, legL: 0.15, kneeL: 0.4, legR: -0.05, kneeR: 0.1 },
+  };
+  for (const k of Object.keys(stickPoses)) Object.freeze(stickPoses[k]);
+  lib.stickPoses = Object.freeze(stickPoses);
+
+  // a trembling polyline: joints jitter on the boil clock, each segment bows a little
+  function trembleChain(ctx, pts, tremble, seed, bi, sub) {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const A = pts[i], B = pts[i + 1];
+      const dx = B[0] - A[0], dy = B[1] - A[1];
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      const n = Math.max(2, Math.ceil(len / sub));
+      if (i === 0) ctx.moveTo(A[0], A[1]);
+      for (let k = 1; k <= n; k++) {
+        const u = k / n;
+        const d = k === n ? 0 : tremble * (Math.sin(Math.PI * u) * noise1(i * 1.31 + bi * 0.47, seed) + 0.45 * noise1(k * 0.9 + bi * 2.3 + i * 5.1, seed + 3));
+        ctx.lineTo(A[0] + dx * u + nx * d, A[1] + dy * u + ny * d);
+      }
+    }
+  }
+
+  // closed wobbly disc path (radius wobbles by `wob` px on the boil clock)
+  function discPath(ctx, x, y, r, wob, seed, bi) {
+    const n = Math.max(16, Math.min(48, Math.ceil(r * 0.8)));
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * TAU;
+      const rr = r + wob * noise1(Math.cos(a) * 1.3 + 3 + bi * 1.9, seed) * (0.6 + 0.4 * Math.sin(a * 2 + seed));
+      if (i) ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+      else ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+  }
+
+  /**
+   * scribbleBall(ctx, x, y, r, opts) : a dense tangle of scribbled loops inside radius r (the
+   * spring figure's head). One continuous line whose centre wanders; it trembles on the boil clock.
+   *   color pal.ink   width r·0.07   turns 14   seed 7   wobble r·0.05   alpha 1   boil (like inkPath)
+   */
+  function scribbleBall(ctx, x, y, r, o = {}) {
+    const seed = seedInt(o.seed === undefined ? 7 : o.seed);
+    const bi = boilIndex(o);
+    const turns = Math.max(1, o.turns || 14);
+    const wob = o.wobble != null ? o.wobble : r * 0.05;
+    const per = 11;
+    const m = Math.ceil(turns * per);
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    ctx.strokeStyle = o.color || pal.ink;
+    ctx.lineWidth = o.width != null ? o.width : Math.max(1, r * 0.07);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let px = 0, py = 0;
+    for (let i = 0; i <= m; i++) {
+      const cx = 0.42 * r * noise1(i * 0.021, seed + 11);
+      const cy = 0.42 * r * noise1(i * 0.021, seed + 12);
+      const rho = r * (0.5 + 0.28 * noise1(i * 0.09, seed + 13));
+      const ang = (i / per) * TAU * (1 + 0.15 * noise1(i * 0.05, seed + 14));
+      let qx = cx + Math.cos(ang) * rho + wob * noise1(i * 0.31 + bi * 3.1, seed + 15);
+      let qy = cy + Math.sin(ang) * rho * 0.9 + wob * noise1(i * 0.31 + bi * 3.1, seed + 16);
+      const d = Math.hypot(qx, qy);
+      if (d > r) (qx *= r / d), (qy *= r / d);
+      qx += x;
+      qy += y;
+      if (i === 0) ctx.moveTo(qx, qy);
+      else if (i === 1) ctx.lineTo((px + qx) / 2, (py + qy) / 2);
+      else ctx.quadraticCurveTo(px, py, (px + qx) / 2, (py + qy) / 2);
+      px = qx;
+      py = qy;
+    }
+    ctx.lineTo(px, py);
+    ctx.stroke();
+    ctx.restore();
+  }
+  lib.scribbleBall = scribbleBall;
+
+  // Catmull-Rom through pts, sampled about every `gap` px; returns { X, Y, S } arrays
+  function smoothLine(pts, gap) {
+    const X = [], Y = [];
+    const n = pts.length;
+    for (let i = 0; i < n - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)];
+      const m = Math.max(1, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / gap));
+      for (let k = i ? 1 : 0; k <= m; k++) {
+        const t = k / m, t2 = t * t, t3 = t2 * t;
+        const cr = (a, b, c, d) => 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (3 * b - a - 3 * c + d) * t3);
+        X.push(cr(p0[0], p1[0], p2[0], p3[0]));
+        Y.push(cr(p0[1], p1[1], p2[1], p3[1]));
+      }
+    }
+    const S = [0];
+    for (let i = 1; i < X.length; i++) S.push(S[i - 1] + Math.hypot(X[i] - X[i - 1], Y[i] - Y[i - 1]));
+    return { X, Y, S };
+  }
+
+  // point and unit normal at arc length s on a smoothLine
+  function lineAt(C, s) {
+    const { X, Y, S } = C;
+    const last = S.length - 1;
+    if (s <= 0) s = 0;
+    if (s >= S[last]) s = S[last];
+    let lo = 0, hi = last;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (S[mid] <= s) lo = mid;
+      else hi = mid;
+    }
+    const seg = S[hi] - S[lo] || 1;
+    const u = (s - S[lo]) / seg;
+    const tx = (X[hi] - X[lo]) / seg, ty = (Y[hi] - Y[lo]) / seg;
+    return [X[lo] + (X[hi] - X[lo]) * u, Y[lo] + (Y[hi] - Y[lo]) * u, -ty, tx];
+  }
+
+  /**
+   * springLimb(ctx, a, b, opts) : a limb drawn as a spring from point a to point b, through
+   * opts.via (a point, or a list of points: the elbow or knee) on a smooth curve.
+   *   kind    'zigzag' | 'coil' (looped wire) | 'ladder' (two rails and rungs)
+   *   amp     0.014 · frame height   half the width of the spring
+   *   step    0.011 · frame height   distance between zigzag corners, coil half-turns or rungs
+   *   color pal.ink   width max(1.5, 0.0021 · frame height)   alpha 1
+   *   jitter  amp · 0.18   px the corners tremble on the boil clock     seed 5   boil (like inkPath)
+   * The spring starts on a and ends on b. Returns the length of the centre curve.
+   */
+  function springLimb(ctx, a, b, o = {}) {
+    const v = o.via;
+    const via = !v || !v.length ? [] : Array.isArray(v[0]) || typeof v[0] === 'object' ? v.map(XY) : [XY(v)];
+    const C = smoothLine([XY(a)].concat(via, [XY(b)]), 3);
+    const L = C.S[C.S.length - 1];
+    if (!(L > 0)) return 0;
+    const kind = o.kind || 'zigzag';
+    const amp = o.amp != null ? o.amp : H() * 0.014;
+    const N = Math.max(1, Math.round(L / (o.step != null ? o.step : H() * 0.011)));
+    const step = L / N;
+    const seed = seedInt(o.seed === undefined ? 5 : o.seed);
+    const bi = boilIndex(o);
+    const jit = o.jitter != null ? o.jitter : amp * 0.18;
+    const env = (s) => Math.min(1, s / step, (L - s) / step);
+    const jn = (k, c) => jit * noise1(k * 0.73 + bi * 5.3, seed + c);
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    ctx.strokeStyle = o.color || pal.ink;
+    ctx.lineWidth = o.width != null ? o.width : Math.max(1.5, H() * 0.0021);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    if (kind === 'ladder') {
+      for (const side of [-1, 1]) {
+        const m = Math.max(2, Math.ceil(L / 6));
+        for (let i = 0; i <= m; i++) {
+          const s = (i / m) * L;
+          const q = lineAt(C, s);
+          const d = side * amp + jn(i * 0.25, side);
+          if (i) ctx.lineTo(q[0] + q[2] * d, q[1] + q[3] * d);
+          else ctx.moveTo(q[0] + q[2] * d, q[1] + q[3] * d);
+        }
+      }
+      for (let k = 0; k <= N; k++) {
+        const q = lineAt(C, k * step);
+        const d0 = -amp + jn(k, 3), d1 = amp + jn(k, 4);
+        ctx.moveTo(q[0] + q[2] * d0, q[1] + q[3] * d0);
+        ctx.lineTo(q[0] + q[2] * d1, q[1] + q[3] * d1);
+      }
+    } else if (kind === 'coil') {
+      const per = 9;
+      const A = amp * 0.9;
+      for (let i = 0; i <= N * per; i++) {
+        const s = (i / per) * step;
+        const ph = (i / per) * Math.PI;
+        const e = env(s);
+        const q = lineAt(C, s + A * e * Math.cos(ph) - A * e);
+        const d = amp * e * Math.sin(ph) + jn(i / per, 1) * e;
+        if (i) ctx.lineTo(q[0] + q[2] * d, q[1] + q[3] * d);
+        else ctx.moveTo(q[0], q[1]);
+      }
+    } else {
+      for (let k = 0; k <= N; k++) {
+        const s = k * step;
+        const q = lineAt(C, Math.min(L, Math.max(0, s + (k && k < N ? jn(k, 2) * 0.5 : 0))));
+        const d = k === 0 || k === N ? 0 : (k % 2 ? amp : -amp) + jn(k, 1);
+        if (k) ctx.lineTo(q[0] + q[2] * d, q[1] + q[3] * d);
+        else ctx.moveTo(q[0], q[1]);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+    return L;
+  }
+  lib.springLimb = springLimb;
+
+  /**
+   * stickFigure(ctx, pose, opts) : draws the stick figure stickPose(pose, opts) describes and
+   * returns its joints. Thin limbs with a thickening at each joint, a disc head, the joints and the
+   * line trembling on the boil clock (hold a pose for two frames with lib.onTwos).
+   *   head     'solid' (black disc) | 'scribble' (black disc, light scribbles inside) |
+   *            'hatch' (black disc, light diagonal strokes) | 'face' (outlined, two dots and a
+   *            mouth) | 'knot' (a scribbleBall; the default for spring limbs)
+   *   limb     'line' | 'spring' ('zigzag') | 'coil' | 'ladder'   (springs draw through springLimb)
+   *   color    pal.ink       light  pal.white (scribbles, hatching, the face fill)
+   *   width    D · 0.075     joint  1.3 (radius of a joint dot, in line widths; 0 for none)
+   *   tremble  width · 0.5   px each segment bows         jitter D · 0.03   px each joint shakes
+   *   amp, step  2.15% and 1.7% of height (spring limbs)   alpha 1   seed 1   boil (like inkPath)
+   *   plus stickPose's x, y, anchor, height, facing, body
+   */
+  function stickFigure(ctx, pose, o = {}) {
+    const J = stickPose(pose, o);
+    const limb = o.limb === 'spring' ? 'zigzag' : o.limb || 'line';
+    const spring = limb !== 'line';
+    const seed = seedInt(o.seed === undefined ? 1 : o.seed);
+    const bi = boilIndex(o);
+    const D = J.D;
+    const color = o.color || pal.ink;
+    const light = o.light || pal.white;
+    const w = o.width != null ? o.width : Math.max(1.2, D * (spring ? 0.045 : 0.075));
+    const jit = o.jitter != null ? o.jitter : D * 0.03;
+    const tremble = o.tremble != null ? o.tremble : w * 0.5;
+    const names = ['hip', 'shoulder', 'neck', 'head', 'elbowL', 'handL', 'elbowR', 'handR', 'kneeL', 'ankleL', 'toeL', 'kneeR', 'ankleR', 'toeR'];
+    const P = {};
+    names.forEach((k, i) => {
+      const p = J[k];
+      P[k] = jit ? [p[0] + jit * noise1(bi * 0.83 + i * 7.1, seed + 21), p[1] + jit * noise1(bi * 0.83 + i * 7.1, seed + 22)] : p;
+    });
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = w;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const chains = [
+      ['hip', 'shoulder', 'neck'],
+      ['shoulder', 'elbowL', 'handL'],
+      ['shoulder', 'elbowR', 'handR'],
+      ['hip', 'kneeL', 'ankleL', 'toeL'],
+      ['hip', 'kneeR', 'ankleR', 'toeR'],
+    ];
+    if (spring) {
+      const height = o.height != null ? o.height : H() * 0.33;
+      const amp = o.amp != null ? o.amp : height * 0.0215;
+      const step = o.step != null ? o.step : height * 0.017;
+      chains.forEach((ch, i) => {
+        const pts = ch.map((k) => P[k]).filter((p, j) => j < 2 || Math.hypot(p[0] - P[ch[j - 1]][0], p[1] - P[ch[j - 1]][1]) > 1);
+        const end = i === 0 ? pts[1] : pts[pts.length - 1];
+        const via = i === 0 ? [] : pts.slice(1, -1);
+        springLimb(ctx, pts[0], end, { via, kind: limb, amp, step, color, width: w, seed: seed + i, boil: bi });
+      });
+      // the neck runs on into the knot so the head does not float
+      const hx = P.head[0], hy = P.head[1];
+      const into = [P.neck[0] + (hx - P.neck[0]) * 0.55, P.neck[1] + (hy - P.neck[1]) * 0.55];
+      ctx.beginPath();
+      trembleChain(ctx, [P.shoulder, into], tremble, seed, bi, D * 0.4);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      chains.forEach((ch, i) => {
+        const pts = ch.map((k) => P[k]);
+        if (pts.length === 4 && Math.hypot(pts[3][0] - pts[2][0], pts[3][1] - pts[2][1]) < 0.5) pts.pop();
+        trembleChain(ctx, pts, tremble, seed + i * 13, bi, D * 0.4);
+      });
+      ctx.stroke();
+      const jr = (o.joint != null ? o.joint : 1.3) * w;
+      if (jr > w / 2) {
+        ctx.beginPath();
+        for (const k of ['hip', 'shoulder', 'elbowL', 'elbowR', 'kneeL', 'kneeR']) {
+          const q = P[k];
+          ctx.moveTo(q[0] + jr, q[1]);
+          ctx.ellipse(q[0], q[1], jr, jr * 0.92, 0, 0, TAU);
+        }
+        for (const k of ['handL', 'handR']) {
+          const q = P[k];
+          ctx.moveTo(q[0] + jr * 0.85, q[1]);
+          ctx.arc(q[0], q[1], jr * 0.85, 0, TAU);
+        }
+        ctx.fill();
+      }
+    }
+    // head
+    const [hx, hy] = P.head;
+    const r = J.headR;
+    const head = o.head || (spring ? 'knot' : 'solid');
+    if (head === 'knot') {
+      scribbleBall(ctx, hx, hy, r, { color, seed: seed + 5, boil: bi, width: Math.max(1, r * 0.075) });
+    } else if (head === 'face') {
+      ctx.beginPath();
+      discPath(ctx, hx, hy, r, r * 0.04, seed + 5, bi);
+      ctx.fillStyle = light;
+      ctx.fill();
+      ctx.lineWidth = w;
+      ctx.stroke();
+      const f = J.facing, ang = J.headAngle;
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const at = (u, v) => [hx + (u * c - v * s) * r, hy + (u * s + v * c) * r];
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      for (const u of [0.02, 0.42]) {
+        const e = at(f * u, -0.12);
+        ctx.moveTo(e[0] + w * 0.9, e[1]);
+        ctx.arc(e[0], e[1], w * 0.9, 0, TAU);
+      }
+      ctx.fill();
+      ctx.beginPath();
+      const m0 = at(f * 0.02, 0.36), m1 = at(f * 0.4, 0.33);
+      ctx.moveTo(m0[0], m0[1]);
+      ctx.lineTo(m1[0], m1[1]);
+      ctx.lineWidth = w * 0.8;
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      discPath(ctx, hx, hy, r, r * 0.035, seed + 5, bi);
+      ctx.fillStyle = color;
+      ctx.fill();
+      if (head === 'scribble') {
+        scribbleBall(ctx, hx, hy, r * 0.78, { color: light, seed: seed + 9, boil: bi, turns: 5, width: Math.max(1, r * 0.05), wobble: r * 0.08 });
+      } else if (head === 'hatch') {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(hx, hy, r * 0.8, 0, TAU);
+        ctx.clip();
+        ctx.beginPath();
+        const d = 0.7071;
+        for (let k = -2; k <= 2; k++) {
+          const o2 = k * r * 0.3 + r * 0.05 * noise1(k + bi * 1.7, seed + 31);
+          ctx.moveTo(hx + o2 * d - r * d, hy - o2 * d - r * d);
+          ctx.lineTo(hx + o2 * d + r * d, hy - o2 * d + r * d);
+        }
+        ctx.strokeStyle = light;
+        ctx.lineWidth = Math.max(1, r * 0.07);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+    return J;
+  }
+  lib.stickFigure = stickFigure;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
