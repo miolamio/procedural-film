@@ -7220,6 +7220,124 @@
   lib.plot = plot;
 
   // ===========================================================================
+  // Ramp
+  // ===========================================================================
+
+  // Colour scales made of lib.pal names, so a false-colour relief, a heat map or a cooling glow
+  // stays on the published palette with no hex in scene code. A ramp is a list of stops: a pal
+  // name (spaced evenly from 0 to 1) or [at, name] with at in 0..1, never decreasing (two stops at
+  // the same at make a hard edge). Colours mix linearly in RGB, like lib.mix.
+  //
+  // Named ramps live in this table. A theme or a film adds its own rows here, next to the colours
+  // its 2.2 rows add to the palette, for example
+  //     crater: ['craterDeep', 'crater', 'craterHot', 'yolk'],
+  // The rows below use only the 2.1 and 2.3 names, which every film's palette carries.
+  const ramps = {
+    heat: ['night', 'dusk', 'red', 'orange', 'sun', 'white'],
+    terrain: [[0, 'tealDeep'], [0.38, 'teal'], [0.4, 'paperDeep'], [0.62, 'sage'], [0.82, 'wood'], [1, 'white']],
+    blueprint: ['navyDeep', 'navy', 'grid', 'paleBlue', 'lineWhite'],
+    tone: ['paper', 'tan', 'inkFaint', 'inkSoft', 'ink'],
+  };
+  for (const k of Object.keys(ramps)) {
+    for (const s of ramps[k]) if (Array.isArray(s)) Object.freeze(s);
+    Object.freeze(ramps[k]);
+  }
+  Object.freeze(ramps);
+
+  // Resolved ramps: by name, by list identity, and by the list's text (an inline literal list is
+  // a new array every frame, so its text finds the one already built). Never keyed by time.
+  const rampByName = new Map();
+  const rampByList = new WeakMap();
+  const rampByText = new Map();
+
+  function buildRamp(list, label) {
+    if (!Array.isArray(list) || list.length < 2) {
+      throw new TypeError(`lib.ramp ${label}: a ramp needs at least two stops`);
+    }
+    const n = list.length;
+    const at = new Float64Array(n);
+    const rgb = [];
+    const stops = [];
+    let prev = 0;
+    for (let i = 0; i < n; i++) {
+      const s = list[i];
+      const pos = typeof s === 'string' ? i / (n - 1) : Array.isArray(s) ? s[0] : NaN;
+      const name = typeof s === 'string' ? s : Array.isArray(s) ? s[1] : undefined;
+      if (!(pos >= 0 && pos <= 1) || pos < prev) {
+        throw new TypeError(`lib.ramp ${label}: stop ${i} needs a position in 0..1, not below the stop before it`);
+      }
+      if (typeof name !== 'string' || typeof pal[name] !== 'string') {
+        throw new TypeError(`lib.ramp ${label}: stop ${i} '${String(name)}' is not a lib.pal name`);
+      }
+      prev = pos;
+      at[i] = pos;
+      rgb.push(parseColor(pal[name]));
+      stops.push(Object.freeze([pos, pal[name]]));
+    }
+    return { at, rgb, stops: Object.freeze(stops) };
+  }
+
+  function rampOf(spec) {
+    if (typeof spec === 'string') {
+      let R = rampByName.get(spec);
+      if (!R) {
+        if (!Object.prototype.hasOwnProperty.call(ramps, spec)) {
+          throw new TypeError(
+            `lib.ramp: no ramp named '${spec}' (named: ${Object.keys(ramps).join(', ')}); ` +
+              `add a row to the ramps table in lib.js, or pass a list of lib.pal names`
+          );
+        }
+        R = buildRamp(ramps[spec], `'${spec}'`);
+        rampByName.set(spec, R);
+      }
+      return R;
+    }
+    if (Array.isArray(spec)) {
+      let R = rampByList.get(spec);
+      if (!R) {
+        const text = JSON.stringify(spec);
+        R = rampByText.get(text);
+        if (!R) {
+          R = buildRamp(spec, text);
+          rampByText.set(text, R);
+        }
+        rampByList.set(spec, R);
+      }
+      return R;
+    }
+    throw new TypeError('lib.ramp: pass a ramp name or a list of lib.pal names');
+  }
+
+  function rampEval(R, v, out) {
+    const at = R.at;
+    const x = v > 0 ? (v < 1 ? v : 1) : 0; // NaN reads as 0
+    const last = at.length - 1;
+    let i = 1;
+    while (i < last && x > at[i]) i++;
+    const a = at[i - 1];
+    const b = at[i];
+    const k = b > a ? clamp((x - a) / (b - a)) : x >= b ? 1 : 0;
+    const A = R.rgb[i - 1];
+    const B = R.rgb[i];
+    out[0] = Math.round(A[0] + (B[0] - A[0]) * k);
+    out[1] = Math.round(A[1] + (B[1] - A[1]) * k);
+    out[2] = Math.round(A[2] + (B[2] - A[2]) * k);
+    return out;
+  }
+
+  const rampTmp = [0, 0, 0];
+  /** ramp(name | stops, v) : css 'rgb(r,g,b)' of the scale at v (clamped to 0..1). */
+  lib.ramp = (spec, v) => {
+    const c = rampEval(rampOf(spec), v, rampTmp);
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  };
+  /** rampRGB(name | stops, v, out?) : [r, g, b] 0..255 integers, written into out when given. */
+  lib.rampRGB = (spec, v, out) => rampEval(rampOf(spec), v, out || [0, 0, 0]);
+  /** rampStops(name | stops) : frozen [[at, '#hex'], ...], e.g. for CanvasGradient.addColorStop. */
+  lib.rampStops = (spec) => rampOf(spec).stops;
+  lib.ramps = ramps;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 
