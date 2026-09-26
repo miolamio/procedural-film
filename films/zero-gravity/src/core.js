@@ -503,7 +503,7 @@
     }
   });
 
-  // One scratch the size of the frame for carriers that move the picture (vhs, film). Allocated
+  // One scratch the size of the frame for carriers that move the picture (vhs, film, xerox). Allocated
   // once per frame size, never per frame; each call copies the current frame into it.
   let carrierScratchC = null;
   function carrierScratch(ctx) {
@@ -707,6 +707,111 @@
       }
       ctx.fill();
     }
+  });
+
+  // xerox: a photocopy of the frame. Each boil drawing is a new copy: the sheet lands up to
+  // `jitter` px off (whole device px, the uncovered edge paper white). The copy drops the colour,
+  // takes a toner grain (a tile offset per copy) and steepens the tones with the light ones blown
+  // out (saturation, then the threshold grade's ramp moved toward black: color-burn and
+  // color-dodge, no pixel reads), so blacks and whites stay solid and the mid-tones break into grain. Toner skips are a
+  // lib.noisePlate of paper white that changes with every copy (three boil variants); dropouts are
+  // pale vertical bands the drum leaves down the whole sheet, and streaks thin dark lines from dirt
+  // on the glass, both fixed in place and shimmering on the boil clock.
+  //   jitter 3 (logical px, 0..8)   mono 1 (0..1)   contrast 0.6 (0..1)   exposure 0.35 (0..1)
+  //   speckle 0.5 (0..1)   toner 0.5 (0..1)   dropouts 0.5 (0..1)   streaks 0.5 (0..1)
+  const XEROX_PAPER = '#ffffff';
+  const XEROX_TONER = '#141414';
+  // The toner grain: half of a 160 × 160 grid of cells black, each cell b device px, smoothed
+  // into soft dots. One tile per cell size, repeated as a pattern and offset per copy.
+  const XEROX_GRAIN_N = 160;
+  const xeroxCache = {};
+  function xeroxGrain(ctx, b) {
+    const key = 'grain' + b;
+    if (!xeroxCache[key]) {
+      const n = XEROX_GRAIN_N;
+      const small = makeCanvas(n, n);
+      const sg = small.getContext('2d');
+      const img = sg.createImageData(n, n);
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (ihash(i, j, 57) < 0.5) img.data[(j * n + i) * 4 + 3] = 255;
+      sg.putImageData(img, 0, 0);
+      const tile = makeCanvas(n * b, n * b);
+      const tg = tile.getContext('2d');
+      tg.imageSmoothingEnabled = true;
+      tg.drawImage(small, 0, 0, n * b, n * b);
+      xeroxCache[key] = tile;
+    }
+    return ctx.createPattern(xeroxCache[key], 'repeat');
+  }
+  FILM.defineCarrier('xerox', (ctx, T, o, S) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const bf = Math.floor(T * FILM.BOIL_FPS + EPS);
+    const lib = FILM.lib;
+    const plate = lib && typeof lib.noisePlate === 'function';
+    const noise = (opts) => {
+      ctx.setTransform(S, 0, 0, S, 0, 0);
+      lib.noisePlate(ctx, Object.assign({ w: w / S, h: h / S }, opts));
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    };
+    const jit = carrierNum(o, 'jitter', 3, 0, 8) * S;
+    const jx = Math.round(jit * (2 * ihash(bf, 121, 5) - 1));
+    const jy = Math.round(jit * (2 * ihash(bf, 122, 5) - 1));
+    if (jx || jy) {
+      const src = carrierScratch(ctx);
+      ctx.fillStyle = XEROX_PAPER;
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(src, jx, jy);
+    }
+    const mono = carrierNum(o, 'mono', 1, 0, 1);
+    if (mono > 0) gradeFill(ctx, w, h, 'saturation', '#808080', mono);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    const sp = carrierNum(o, 'speckle', 0.5, 0, 1);
+    if (sp > 0) {
+      const b = Math.max(1, Math.round(2 * S));
+      const pat = xeroxGrain(ctx, b);
+      const span = XEROX_GRAIN_N * b;
+      pat.setTransform(new DOMMatrix([1, 0, 0, 1, Math.floor(ihash(bf, 130, 5) * span), Math.floor(ihash(bf, 131, 5) * span)]));
+      ctx.globalAlpha = 0.3 * sp;
+      ctx.fillStyle = pat;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 1;
+    }
+    const k = carrierNum(o, 'contrast', 0.6, 0, 1);
+    const ex = carrierNum(o, 'exposure', 0.35, 0, 1);
+    if (k > 0 || ex > 0) {
+      // the ramp [lo, hi] goes to [0, 1]: burn by s = 1 - lo, then dodge by d with 1 - d = (hi - lo) / s
+      const r = Math.pow(0.02, k * k);
+      const c = 0.5 - 0.25 * ex;
+      const lo = Math.max(0, c - r / 2);
+      const hi = Math.min(1, c + r / 2);
+      const s = 1 - lo;
+      const d = 1 - (hi - lo) / s;
+      const grey = (v) => cssRgb([v * 255, v * 255, v * 255]);
+      if (lo > 0) gradeFill(ctx, w, h, 'color-burn', grey(s), 1);
+      if (d > 0) gradeFill(ctx, w, h, 'color-dodge', grey(d), 1);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+    const toner = carrierNum(o, 'toner', 0.5, 0, 1);
+    if (plate && toner > 0) {
+      noise({ seed: 58, scale: [50, 120], threshold: 1 - 0.12 * toner, soft: 0.08, grain: 0.1, octaves: 3, color: XEROX_PAPER, res: 0.2, boil: bf % 3 });
+    }
+    const drop = carrierNum(o, 'dropouts', 0.5, 0, 1);
+    if (plate && drop > 0) {
+      noise({ seed: 59, scale: [16, 3000], threshold: 1 - 0.1 * drop, soft: 0.05, octaves: 2, color: XEROX_PAPER, alpha: 0.6 + 0.3 * ihash(bf, 123, 5), res: 0.25 });
+    }
+    const st = carrierNum(o, 'streaks', 0.5, 0, 1);
+    ctx.fillStyle = XEROX_TONER;
+    for (let i = 0, n = Math.round(st * 8); i < n; i++) {
+      const x = Math.round((0.04 + 0.92 * ihash(i, 124, 5)) * w) + jx;
+      const part = ihash(i, 125, 5) < 0.5;
+      const y0 = part ? ihash(i, 126, 5) * h * 0.6 : 0;
+      const y1 = part ? y0 + h * (0.25 + 0.5 * ihash(i, 127, 5)) : h;
+      ctx.globalAlpha = st * (0.5 + 0.4 * ihash(i, bf, 128));
+      ctx.fillRect(x, y0, Math.max(1, Math.round((1 + 2.5 * ihash(i, 129, 5)) * S)), y1 - y0);
+    }
+    ctx.globalAlpha = 1;
   });
 
   // ---------------------------------------------------------------------------

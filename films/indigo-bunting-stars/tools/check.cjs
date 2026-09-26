@@ -886,6 +886,7 @@ async function main() {
       crt: ['scanlines', 'period', 'mask', 'radius', 'edge', 'hum', 'humPeriod', 'flicker'],
       vhs: ['chroma', 'tracking', 'trackPeriod', 'head', 'timecode', 'clock'],
       film: ['perf', 'weave', 'scratches', 'dust', 'flicker', 'gate'],
+      xerox: ['jitter', 'mono', 'contrast', 'exposure', 'speckle', 'toner', 'dropouts', 'streaks'],
     };
     const carrierProblems = (c, at) => {
       if (c === undefined || c === null || c === false) return;

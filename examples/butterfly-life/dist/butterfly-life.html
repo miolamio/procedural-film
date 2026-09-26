@@ -514,7 +514,7 @@
     }
   });
 
-  // One scratch the size of the frame for carriers that move the picture (vhs, film). Allocated
+  // One scratch the size of the frame for carriers that move the picture (vhs, film, xerox). Allocated
   // once per frame size, never per frame; each call copies the current frame into it.
   let carrierScratchC = null;
   function carrierScratch(ctx) {
@@ -718,6 +718,111 @@
       }
       ctx.fill();
     }
+  });
+
+  // xerox: a photocopy of the frame. Each boil drawing is a new copy: the sheet lands up to
+  // `jitter` px off (whole device px, the uncovered edge paper white). The copy drops the colour,
+  // takes a toner grain (a tile offset per copy) and steepens the tones with the light ones blown
+  // out (saturation, then the threshold grade's ramp moved toward black: color-burn and
+  // color-dodge, no pixel reads), so blacks and whites stay solid and the mid-tones break into grain. Toner skips are a
+  // lib.noisePlate of paper white that changes with every copy (three boil variants); dropouts are
+  // pale vertical bands the drum leaves down the whole sheet, and streaks thin dark lines from dirt
+  // on the glass, both fixed in place and shimmering on the boil clock.
+  //   jitter 3 (logical px, 0..8)   mono 1 (0..1)   contrast 0.6 (0..1)   exposure 0.35 (0..1)
+  //   speckle 0.5 (0..1)   toner 0.5 (0..1)   dropouts 0.5 (0..1)   streaks 0.5 (0..1)
+  const XEROX_PAPER = '#ffffff';
+  const XEROX_TONER = '#141414';
+  // The toner grain: half of a 160 × 160 grid of cells black, each cell b device px, smoothed
+  // into soft dots. One tile per cell size, repeated as a pattern and offset per copy.
+  const XEROX_GRAIN_N = 160;
+  const xeroxCache = {};
+  function xeroxGrain(ctx, b) {
+    const key = 'grain' + b;
+    if (!xeroxCache[key]) {
+      const n = XEROX_GRAIN_N;
+      const small = makeCanvas(n, n);
+      const sg = small.getContext('2d');
+      const img = sg.createImageData(n, n);
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (ihash(i, j, 57) < 0.5) img.data[(j * n + i) * 4 + 3] = 255;
+      sg.putImageData(img, 0, 0);
+      const tile = makeCanvas(n * b, n * b);
+      const tg = tile.getContext('2d');
+      tg.imageSmoothingEnabled = true;
+      tg.drawImage(small, 0, 0, n * b, n * b);
+      xeroxCache[key] = tile;
+    }
+    return ctx.createPattern(xeroxCache[key], 'repeat');
+  }
+  FILM.defineCarrier('xerox', (ctx, T, o, S) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const bf = Math.floor(T * FILM.BOIL_FPS + EPS);
+    const lib = FILM.lib;
+    const plate = lib && typeof lib.noisePlate === 'function';
+    const noise = (opts) => {
+      ctx.setTransform(S, 0, 0, S, 0, 0);
+      lib.noisePlate(ctx, Object.assign({ w: w / S, h: h / S }, opts));
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    };
+    const jit = carrierNum(o, 'jitter', 3, 0, 8) * S;
+    const jx = Math.round(jit * (2 * ihash(bf, 121, 5) - 1));
+    const jy = Math.round(jit * (2 * ihash(bf, 122, 5) - 1));
+    if (jx || jy) {
+      const src = carrierScratch(ctx);
+      ctx.fillStyle = XEROX_PAPER;
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(src, jx, jy);
+    }
+    const mono = carrierNum(o, 'mono', 1, 0, 1);
+    if (mono > 0) gradeFill(ctx, w, h, 'saturation', '#808080', mono);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    const sp = carrierNum(o, 'speckle', 0.5, 0, 1);
+    if (sp > 0) {
+      const b = Math.max(1, Math.round(2 * S));
+      const pat = xeroxGrain(ctx, b);
+      const span = XEROX_GRAIN_N * b;
+      pat.setTransform(new DOMMatrix([1, 0, 0, 1, Math.floor(ihash(bf, 130, 5) * span), Math.floor(ihash(bf, 131, 5) * span)]));
+      ctx.globalAlpha = 0.3 * sp;
+      ctx.fillStyle = pat;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 1;
+    }
+    const k = carrierNum(o, 'contrast', 0.6, 0, 1);
+    const ex = carrierNum(o, 'exposure', 0.35, 0, 1);
+    if (k > 0 || ex > 0) {
+      // the ramp [lo, hi] goes to [0, 1]: burn by s = 1 - lo, then dodge by d with 1 - d = (hi - lo) / s
+      const r = Math.pow(0.02, k * k);
+      const c = 0.5 - 0.25 * ex;
+      const lo = Math.max(0, c - r / 2);
+      const hi = Math.min(1, c + r / 2);
+      const s = 1 - lo;
+      const d = 1 - (hi - lo) / s;
+      const grey = (v) => cssRgb([v * 255, v * 255, v * 255]);
+      if (lo > 0) gradeFill(ctx, w, h, 'color-burn', grey(s), 1);
+      if (d > 0) gradeFill(ctx, w, h, 'color-dodge', grey(d), 1);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
+    const toner = carrierNum(o, 'toner', 0.5, 0, 1);
+    if (plate && toner > 0) {
+      noise({ seed: 58, scale: [50, 120], threshold: 1 - 0.12 * toner, soft: 0.08, grain: 0.1, octaves: 3, color: XEROX_PAPER, res: 0.2, boil: bf % 3 });
+    }
+    const drop = carrierNum(o, 'dropouts', 0.5, 0, 1);
+    if (plate && drop > 0) {
+      noise({ seed: 59, scale: [16, 3000], threshold: 1 - 0.1 * drop, soft: 0.05, octaves: 2, color: XEROX_PAPER, alpha: 0.6 + 0.3 * ihash(bf, 123, 5), res: 0.25 });
+    }
+    const st = carrierNum(o, 'streaks', 0.5, 0, 1);
+    ctx.fillStyle = XEROX_TONER;
+    for (let i = 0, n = Math.round(st * 8); i < n; i++) {
+      const x = Math.round((0.04 + 0.92 * ihash(i, 124, 5)) * w) + jx;
+      const part = ihash(i, 125, 5) < 0.5;
+      const y0 = part ? ihash(i, 126, 5) * h * 0.6 : 0;
+      const y1 = part ? y0 + h * (0.25 + 0.5 * ihash(i, 127, 5)) : h;
+      ctx.globalAlpha = st * (0.5 + 0.4 * ihash(i, bf, 128));
+      ctx.fillRect(x, y0, Math.max(1, Math.round((1 + 2.5 * ihash(i, 129, 5)) * S)), y1 - y0);
+    }
+    ctx.globalAlpha = 1;
   });
 
   // ---------------------------------------------------------------------------
@@ -10565,6 +10670,495 @@
     dbBlit(ctx, plate);
   }
   lib.dryBrushFill = dryBrushFill;
+
+  // ===========================================================================
+  // Heightfield
+  // ===========================================================================
+
+  // One surface, three pictures: a false-colour map from above (fill), a contour map (contour)
+  // and a perspective contour mesh (mesh). The field is sampled on the unit square (u right, v
+  // down the map, toward the viewer in the mesh) and laid over one footprint `box`; the mesh
+  // stands on that footprint in px, so rot [π/2, 0, 0] with persp 0 looks straight down onto the
+  // map and every point lands where the fill put it. A scene cuts between the modes, or turns the
+  // mesh down onto the map, and the surface stays put. Pass `range` so the colours hold across a
+  // cut and do not breathe with an animated field.
+  //
+  // Caches are keyed by shape and size (the raster scratch, its ImageData, the ramp LUT) or by
+  // the scene's own `key` for a field that does not change (its samples), never by time.
+
+  const hfModes = {
+    fill: { res: 96, fill: true, levels: 0, lines: null },
+    contour: { res: 96, fill: false, levels: 10, lines: null },
+    mesh: { res: 40, fill: true, levels: 0, lines: 'grid' },
+  };
+  const hfScratch = new Map(); // Float32Array per role and length, reused every frame
+  const hfGrids = new Map(); // samples of a keyed (static) field, small LRU
+  const hfLuts = new Map(); // ramp × steps → Uint8Array(256 × 3)
+
+  function hfBuf(role, n) {
+    const k = role + n;
+    let b = hfScratch.get(k);
+    if (!b) {
+      b = new Float32Array(n);
+      hfScratch.set(k, b);
+    }
+    return b;
+  }
+
+  // (u, v) → h for a function or a grid ({ w, h, data } row-major, or an array of rows),
+  // bilinear between grid nodes, the grid spanning the unit square corner to corner.
+  function hfSource(field) {
+    if (typeof field === 'function') return { fn: field, gw: 0, gh: 0 };
+    let gw, gh, at;
+    if (Array.isArray(field) && Array.isArray(field[0])) {
+      gh = field.length;
+      gw = field[0].length;
+      at = (i, j) => +field[j][i];
+    } else if (field && field.data && field.w > 1 && field.h > 1) {
+      gw = field.w | 0;
+      gh = field.h | 0;
+      const d = field.data;
+      at = (i, j) => +d[j * gw + i];
+    } else {
+      throw new TypeError('lib.heightfield: field is a function (u, v) → h, { w, h, data } or an array of rows');
+    }
+    if (gw < 2 || gh < 2) throw new TypeError('lib.heightfield: a grid needs at least 2 × 2 values');
+    const fn = (u, v) => {
+      const x = clamp(u) * (gw - 1), y = clamp(v) * (gh - 1);
+      const i = Math.min(gw - 2, Math.floor(x)), j = Math.min(gh - 2, Math.floor(y));
+      const fx = x - i, fy = y - j;
+      const a = at(i, j), b = at(i + 1, j), c = at(i, j + 1), d = at(i + 1, j + 1);
+      return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
+    };
+    return { fn, gw, gh };
+  }
+
+  function hfBoxOf(o) {
+    const b = o.box || [0, 0, W(), H()];
+    return [+b[0] || 0, +b[1] || 0, b[2] > 0 ? +b[2] : W(), b[3] > 0 ? +b[3] : H()];
+  }
+
+  // Everything the modes share: the options resolved, the field sampled on (nx+1) × (ny+1)
+  // nodes, the height range, the normalised heights and the hillshade per node.
+  function hfPrepare(field, o) {
+    const mode = o.mode || 'fill';
+    const M = hfModes[mode];
+    if (!M) throw new TypeError(`lib.heightfield: mode is 'fill', 'contour' or 'mesh', not '${mode}'`);
+    const src = hfSource(field);
+    const box = hfBoxOf(o);
+    const [, , bw, bh] = box;
+    const res = o.res > 0 ? o.res | 0 : src.gw ? src.gw - 1 : M.res;
+    const nx = Math.max(1, Math.min(512, res));
+    const ny = Math.max(1, Math.min(512, o.res > 0 || !src.gh ? Math.round((nx * bh) / bw) : src.gh - 1));
+    const stride = nx + 1;
+    const n = stride * (ny + 1);
+    const sample = (out) => {
+      for (let j = 0; j <= ny; j++) {
+        for (let i = 0; i <= nx; i++) {
+          const h = +src.fn(i / nx, j / ny);
+          out[j * stride + i] = Number.isFinite(h) ? h : NaN;
+        }
+      }
+      return out;
+    };
+    let hs;
+    if (o.key != null) {
+      const gk = ['hf', String(o.key), nx, ny, src.gw, src.gh].join('|');
+      hs = hfGrids.get(gk);
+      if (hs) {
+        hfGrids.delete(gk);
+      } else {
+        hs = sample(new Float32Array(n));
+        while (hfGrids.size >= 16) hfGrids.delete(hfGrids.keys().next().value);
+      }
+      hfGrids.set(gk, hs);
+    } else {
+      hs = sample(hfBuf('h', n));
+    }
+    let lo, hi;
+    if (Array.isArray(o.range) && o.range.length === 2) {
+      lo = +o.range[0];
+      hi = +o.range[1];
+    } else {
+      lo = Infinity;
+      hi = -Infinity;
+      for (let k = 0; k < n; k++) {
+        const h = hs[k];
+        if (h < lo) lo = h;
+        if (h > hi) hi = h;
+      }
+      if (!(lo <= hi)) lo = hi = 0;
+    }
+    const span = hi - lo || 1;
+    const hn = hfBuf('n', n);
+    for (let k = 0; k < n; k++) {
+      const h = hs[k];
+      hn[k] = h === h ? (h - lo) / span : 0; // NaN reads as the bottom of the range
+    }
+    const lift = o.lift != null ? +o.lift : bw * 0.2;
+    const shadeAmt = o.shade != null ? clamp(+o.shade, 0, 1) : 0.35;
+    const sh = hfBuf('s', n);
+    if (shadeAmt > 0) {
+      const L = o.light || [-0.5, -0.6, 0.62];
+      const ll = Math.hypot(L[0], L[1], L[2]) || 1;
+      const lx = L[0] / ll, ly = L[1] / ll, lz = L[2] / ll;
+      const dx = bw / nx, dy = bh / ny;
+      for (let j = 0; j <= ny; j++) {
+        for (let i = 0; i <= nx; i++) {
+          const k = j * stride + i;
+          const i0 = i ? k - 1 : k, i1 = i < nx ? k + 1 : k;
+          const j0 = j ? k - stride : k, j1 = j < ny ? k + stride : k;
+          const gx = ((hn[i1] - hn[i0]) * lift) / (((i1 - i0) || 1) * dx);
+          const gy = ((hn[j1] - hn[j0]) * lift) / ((((j1 - j0) / stride) || 1) * dy);
+          const lam = (-gx * lx - gy * ly + lz) / Math.sqrt(gx * gx + gy * gy + 1);
+          // flat ground keeps its colour; a slope toward the light brightens, away darkens
+          sh[k] = Math.max(0, 1 + shadeAmt * (Math.max(0, lam) / lz - 1));
+        }
+      }
+    } else {
+      sh.fill(1);
+    }
+    const cut = o.cut != null ? (+o.cut - lo) / span : -Infinity;
+    const levelsIn = o.levels !== undefined ? o.levels : M.levels;
+    let levels = [];
+    if (Array.isArray(levelsIn)) levels = levelsIn.map(Number).filter(Number.isFinite);
+    else if (levelsIn > 0) for (let k = 1; k <= (levelsIn | 0); k++) levels.push(lo + (span * k) / ((levelsIn | 0) + 1));
+    return { mode, M, src, box, nx, ny, stride, n, hs, hn, sh, lo, hi, span, lift, shadeAmt, cut, levels };
+  }
+
+  function hfLut(spec, steps) {
+    const key = (typeof spec === 'string' ? spec : JSON.stringify(spec)) + '|' + steps;
+    let lut = hfLuts.get(key);
+    if (lut) return lut;
+    const R = rampOf(spec);
+    lut = new Uint8Array(256 * 3);
+    const c = [0, 0, 0];
+    for (let k = 0; k < 256; k++) {
+      let v = k / 255;
+      if (steps > 1) v = Math.min(steps - 1, Math.floor(v * steps)) / (steps - 1);
+      rampEval(R, v, c);
+      lut[k * 3] = c[0];
+      lut[k * 3 + 1] = c[1];
+      lut[k * 3 + 2] = c[2];
+    }
+    hfLuts.set(key, lut);
+    return lut;
+  }
+
+  function hfView(G, o) {
+    const [bx, by, bw, bh] = G.box;
+    return viewOf({
+      at: o.at || [bx + bw / 2, by + bh / 2],
+      scale: o.scale != null ? o.scale : 1,
+      rot: o.rot || [0.85, 0, 0],
+      persp: o.persp != null ? o.persp : Math.max(bw, bh) * 2.2,
+      shift: o.shift,
+    });
+  }
+
+  // mesh space: X across the box, Y up (lift px for the whole range), Z toward the viewer, in px
+  function hfVert(G, u, v, hn) {
+    return [(u - 0.5) * G.box[2], hn * G.lift, (v - 0.5) * G.box[3]];
+  }
+
+  function hfFill(ctx, G, o) {
+    const [bx, by, bw, bh] = G.box;
+    const S = Math.min(1, renderScale());
+    const cell = o.cell > 0 ? +o.cell : 3;
+    const rw = Math.max(2, Math.min(2048, Math.round((bw * S) / cell)));
+    const rh = Math.max(2, Math.min(2048, Math.round((bh * S) / cell)));
+    const steps = Math.max(0, o.steps | 0);
+    const spec = o.ramp || 'terrain';
+    const lut = hfLut(spec, steps);
+    const paint = (plate) => {
+      const img = plate.img;
+      const d = img.data;
+      const { nx, ny, stride, hn, sh, cut } = G;
+      for (let y = 0; y < rh; y++) {
+        const gy = ((y + 0.5) / rh) * ny;
+        const j = Math.min(ny - 1, Math.floor(gy));
+        const fy = gy - j;
+        for (let x = 0; x < rw; x++) {
+          const gx = ((x + 0.5) / rw) * nx;
+          const i = Math.min(nx - 1, Math.floor(gx));
+          const fx = gx - i;
+          const k = j * stride + i;
+          const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+          const v = hn[k] * w00 + hn[k + 1] * w10 + hn[k + stride] * w01 + hn[k + stride + 1] * w11;
+          const p = (y * rw + x) * 4;
+          if (v < cut) {
+            d[p + 3] = 0;
+            continue;
+          }
+          const s = sh[k] * w00 + sh[k + 1] * w10 + sh[k + stride] * w01 + sh[k + stride + 1] * w11;
+          const q = (v <= 0 ? 0 : v >= 1 ? 255 : (v * 255 + 0.5) | 0) * 3;
+          const r = lut[q] * s, g = lut[q + 1] * s, b = lut[q + 2] * s;
+          d[p] = r > 255 ? 255 : r;
+          d[p + 1] = g > 255 ? 255 : g;
+          d[p + 2] = b > 255 ? 255 : b;
+          d[p + 3] = 255;
+        }
+      }
+      plate.g.putImageData(img, 0, 0);
+      return plate;
+    };
+    const makePlate = () => {
+      const c = newCanvas(rw, rh);
+      const g = c.getContext('2d');
+      return { c, g, img: g.createImageData(rw, rh) };
+    };
+    // one scratch plate per raster size, repainted every call (a few ms), so light, cut and
+    // range may animate without a canvas per frame
+    const plate = paint(cached(['hfScratch', rw, rh].join('|'), makePlate));
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(plate.c, bx, by, bw, bh);
+    ctx.restore();
+    return rw * rh;
+  }
+
+  function hfContours(ctx, G, o) {
+    if (!G.levels.length) return 0;
+    const [bx, by, bw, bh] = G.box;
+    const { nx, ny, stride, hs } = G;
+    const cw = bw / nx, chh = bh / ny;
+    const fieldPx = (x, y) => {
+      const gx = clamp((x - bx) / cw, 0, nx), gy = clamp((y - by) / chh, 0, ny);
+      const i = Math.min(nx - 1, Math.floor(gx)), j = Math.min(ny - 1, Math.floor(gy));
+      const fx = gx - i, fy = gy - j;
+      const k = j * stride + i;
+      const a = hs[k], b = hs[k + 1], c = hs[k + stride], d = hs[k + stride + 1];
+      return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
+    };
+    const sets = isolines(fieldPx, G.box, G.levels, { cell: cw * (1 + 1e-9) });
+    const color = o.color === undefined || o.color === 'ramp' ? null : o.color;
+    const spec = o.ramp || 'terrain';
+    const width = o.width != null ? +o.width : 2;
+    const major = Math.max(0, o.major | 0);
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    let n = 0;
+    for (let k = 0; k < sets.length; k++) {
+      if (!sets[k].length) continue;
+      ctx.beginPath();
+      for (const l of sets[k]) lib.tracePath(ctx, l.pts, l.closed);
+      ctx.strokeStyle = color || lib.ramp(spec, (G.levels[k] - G.lo) / G.span);
+      ctx.lineWidth = major && (k + 1) % major === 0 ? width * 2 : width;
+      ctx.stroke();
+      n += sets[k].length;
+    }
+    ctx.restore();
+    return n;
+  }
+
+  /** heightMesh(field, opts) : the surface as a mesh3d { verts, edges, faces } for wire3d or faces3d. */
+  function heightMesh(field, o = {}) {
+    const G = hfPrepare(field, Object.assign({ mode: 'mesh', shade: 0 }, o));
+    const { nx, ny, stride, hn } = G;
+    const verts = [];
+    const edges = [];
+    const faces = [];
+    const lines = o.lines === undefined ? 'grid' : o.lines;
+    const every = Math.max(1, o.every | 0 || 1);
+    for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) verts.push(hfVert(G, i / nx, j / ny, hn[j * stride + i]));
+    for (let j = 0; j <= ny; j++) {
+      for (let i = 0; i <= nx; i++) {
+        const k = j * stride + i;
+        if (i < nx && lines !== 'cols' && j % every === 0) edges.push([k, k + 1]);
+        if (j < ny && lines !== 'rows' && i % every === 0) edges.push([k, k + stride]);
+        if (i < nx && j < ny) faces.push([k, k + 1, k + stride + 1, k + stride]);
+      }
+    }
+    return mesh(verts, edges, faces);
+  }
+  lib.heightMesh = heightMesh;
+
+  function hfMesh(ctx, G, o) {
+    const { nx, ny, stride, hn, sh, cut } = G;
+    const v = hfView(G, o);
+    const fill = o.fill !== undefined ? o.fill : G.M.fill;
+    const lines = o.lines !== undefined ? o.lines : G.M.lines;
+    const every = Math.max(1, o.every | 0 || 1);
+    const width = o.width != null ? +o.width : 1.2;
+    const color = o.color || pal.lineWhite;
+    const lineAlpha = o.lineAlpha != null ? +o.lineAlpha : 0.55;
+    const n = G.n;
+    const P = hfBuf('px', n), Q = hfBuf('py', n), Z = hfBuf('pz', n);
+    for (let j = 0; j <= ny; j++) {
+      for (let i = 0; i <= nx; i++) {
+        const k = j * stride + i;
+        const p = projectView(hfVert(G, i / nx, j / ny, hn[k]), v);
+        P[k] = p[0];
+        Q[k] = p[1];
+        Z[k] = p[2];
+      }
+    }
+    const cells = nx * ny;
+    const order = hfBuf('ord', cells);
+    const depth = hfBuf('dep', cells);
+    let m = 0;
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const k = j * stride + i;
+        if ((hn[k] + hn[k + 1] + hn[k + stride] + hn[k + stride + 1]) * 0.25 < cut) continue;
+        depth[m] = (Z[k] + Z[k + 1] + Z[k + stride] + Z[k + stride + 1]) * 0.25;
+        order[m] = j * nx + i;
+        m++;
+      }
+    }
+    const idx = hfBuf('idx', cells).subarray(0, m);
+    for (let q = 0; q < m; q++) idx[q] = q;
+    idx.sort((a, b) => depth[a] - depth[b] || order[a] - order[b]);
+    const steps = Math.max(0, o.steps | 0);
+    const lut = fill === true ? hfLut(o.ramp || 'terrain', steps) : null;
+    const rowsOn = lines === 'grid' || lines === 'rows';
+    const colsOn = lines === 'grid' || lines === 'cols';
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    const base = ctx.globalAlpha;
+    for (let q = 0; q < m; q++) {
+      const c = order[idx[q]];
+      const i = c % nx, j = (c - i) / nx;
+      const k = j * stride + i;
+      const a = k, b = k + 1, d = k + stride + 1, e = k + stride;
+      ctx.beginPath();
+      ctx.moveTo(P[a], Q[a]);
+      ctx.lineTo(P[b], Q[b]);
+      ctx.lineTo(P[d], Q[d]);
+      ctx.lineTo(P[e], Q[e]);
+      ctx.closePath();
+      let style;
+      if (lut) {
+        const hv = (hn[a] + hn[b] + hn[d] + hn[e]) * 0.25;
+        const s = (sh[a] + sh[b] + sh[d] + sh[e]) * 0.25;
+        const t = (hv <= 0 ? 0 : hv >= 1 ? 255 : (hv * 255 + 0.5) | 0) * 3;
+        style = `rgb(${Math.min(255, Math.round(lut[t] * s))},${Math.min(255, Math.round(lut[t + 1] * s))},${Math.min(255, Math.round(lut[t + 2] * s))})`;
+      } else {
+        style = fill;
+      }
+      ctx.globalAlpha = base;
+      ctx.fillStyle = style;
+      ctx.fill();
+      // the quad's own colour over its rim hides the hairline seams between neighbours
+      ctx.strokeStyle = style;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      if (!lines || width <= 0) continue;
+      ctx.beginPath();
+      if (rowsOn && j % every === 0) {
+        ctx.moveTo(P[a], Q[a]);
+        ctx.lineTo(P[b], Q[b]);
+      }
+      if (rowsOn && (j + 1) % every === 0) {
+        ctx.moveTo(P[e], Q[e]);
+        ctx.lineTo(P[d], Q[d]);
+      }
+      if (colsOn && i % every === 0) {
+        ctx.moveTo(P[a], Q[a]);
+        ctx.lineTo(P[e], Q[e]);
+      }
+      if (colsOn && (i + 1) % every === 0) {
+        ctx.moveTo(P[b], Q[b]);
+        ctx.lineTo(P[d], Q[d]);
+      }
+      ctx.globalAlpha = base * lineAlpha;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    }
+    ctx.restore();
+    return m;
+  }
+
+  /**
+   * heightfield(ctx, field, opts) : a height field as a false-colour map, a contour map or a
+   * perspective contour mesh. field is a function (u, v) → h over the unit square (u right, v
+   * down the map), a grid { w, h, data } (row-major) or an array of rows. Returns
+   * { lo, hi, nx, ny, levels, drawn }.
+   *   mode 'fill' | 'contour' | 'mesh'   presets of the options below
+   *   box [0, 0, W, H]   the map's footprint in px; the mesh stands on it
+   *   res 96 (mesh 40)   grid cells across (rows follow the box aspect); a grid field keeps its own
+   *   range [lo, hi]     heights mapped to ramp 0..1 (default the sampled min and max)
+   *   ramp 'terrain'     a lib.ramps name or a list of pal names; steps 0 (N: N flat bands)
+   *   shade 0.35 (0..1)  hillshade from light [-0.5, -0.6, 0.62] (map x, map y, up)
+   *   lift 0.2 × box w   px the whole range stands up in the mesh (and steepens the shade)
+   *   cut                heights below this are left empty (an island on the ground)
+   *   fill               true: ramp colour; a colour: flat (hidden-line wire); false: none
+   *                      (fill and mesh default true, contour false)
+   *   levels             contour count or an array of heights (contour 10, else 0)
+   *   color 'ramp'       contour colour ('ramp' colours each level by height); in the mesh the
+   *                      grid colour, pal.lineWhite, at lineAlpha 0.55
+   *   width 2 (mesh 1.2) major 0 (every major-th contour twice as wide)
+   *   cell 3             px per raster cell of the fill (the plate is smoothed when drawn)
+   *   lines 'grid' | 'rows' | 'cols' | null (mesh)   every 1 (a line on every nth node)
+   *   rot [0.85, 0, 0]  persp 2.2 × box   at box centre   scale 1   shift   the mesh view
+   *                      (wire3d's; rot [π/2, 0, 0] with persp 0 is the map from above)
+   *   depthFade, hidden  passed to wire3d when the mesh has fill false
+   *   key                a field that never changes: its samples are cached by key, res and box
+   *                      aspect (the options may still animate; the field must not)
+   */
+  function heightfield(ctx, field, o = {}) {
+    const G = hfPrepare(field, o);
+    let drawn = 0;
+    const fill = o.fill !== undefined ? o.fill : G.M.fill;
+    if (G.mode === 'mesh') {
+      if (fill) {
+        drawn = hfMesh(ctx, G, o);
+      } else {
+        const m = heightMesh(field, o);
+        const view = hfView(G, o);
+        drawn = wire3d(ctx, m, {
+          at: [view.ax, view.ay],
+          scale: view.scale,
+          rot: [view.rx, view.ry, view.rz],
+          persp: view.persp,
+          shift: o.shift,
+          color: o.color || pal.lineWhite,
+          width: o.width != null ? o.width : 1.2,
+          depthFade: o.depthFade,
+          hidden: o.hidden,
+        });
+      }
+    } else {
+      if (fill === true) drawn += hfFill(ctx, G, o);
+      else if (typeof fill === 'string') {
+        ctx.save();
+        ctx.fillStyle = fill;
+        ctx.fillRect(G.box[0], G.box[1], G.box[2], G.box[3]);
+        ctx.restore();
+      }
+      drawn += hfContours(ctx, G, o);
+    }
+    return { lo: G.lo, hi: G.hi, nx: G.nx, ny: G.ny, levels: G.levels.slice(), drawn };
+  }
+  lib.heightfield = heightfield;
+
+  /**
+   * heightPoint(field, u, v, opts) : [x, y, depth] of the surface at (u, v) in the picture
+   * heightfield draws with the same field and opts: on the map for fill and contour (depth is the
+   * height 0..1 in range), projected for mesh. Pins a label or a marker to the surface in any mode.
+   */
+  function heightPoint(field, u, v, o = {}) {
+    const src = hfSource(field);
+    let lo, hi;
+    if (Array.isArray(o.range) && o.range.length === 2) {
+      lo = +o.range[0];
+      hi = +o.range[1];
+    } else {
+      const G = hfPrepare(field, Object.assign({}, o, { shade: 0, levels: 0 }));
+      lo = G.lo;
+      hi = G.hi;
+    }
+    const h = +src.fn(clamp(u), clamp(v));
+    const hn = Number.isFinite(h) ? (h - lo) / (hi - lo || 1) : 0;
+    const box = hfBoxOf(o);
+    if ((o.mode || 'fill') !== 'mesh') return [box[0] + u * box[2], box[1] + v * box[3], hn];
+    const G = { box, lift: o.lift != null ? +o.lift : box[2] * 0.2 };
+    return projectView(hfVert(G, u, v, hn), hfView(G, o));
+  }
+  lib.heightPoint = heightPoint;
 
   // ===========================================================================
   // Read-only
