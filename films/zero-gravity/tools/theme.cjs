@@ -9,7 +9,7 @@
 //
 // Overrides are the axes that hold across themes. Line, tone and motion come whole from the theme.
 //   --frame 1080x1920 | 1920x1080 | 1080x1080     the canvas: the timeline's width and height
-//   --carrier none | crt                          the medium over the whole film: the timeline's carrier
+//   --carrier none | crt | vhs | film             the medium over the whole film: the timeline's carrier
 //   --accent '#RRGGBB'                            the theme's accent rows; the # is optional, but quote the
 //                                                 value so the shell doesn't read '#...' as a comment; hot
 //                                                 and deep steps are derived from it
@@ -23,7 +23,7 @@ const path = require('path');
 const C = require('./common.cjs');
 
 const FRAMES = ['1080x1920', '1920x1080', '1080x1080'];
-const CARRIERS = ['none', 'crt'];
+const CARRIERS = ['none', 'crt', 'vhs', 'film'];
 const HEX = /^#?[0-9a-fA-F]{6}$/;
 const ROW_NAME = /^[A-Za-z_]\w*$/;
 
@@ -43,9 +43,26 @@ function loadTheme(dir, id) {
   const theme = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (theme.id !== id) throw new Error(`theme.json at ${dir}/${id} has id '${theme.id}', not '${id}': the folder name and the id must match`);
   for (const [k, v] of Object.entries(theme.accent || {})) {
+    if (k === 'budget') continue;
     if (!ROW_NAME.test(v)) throw new Error(`theme '${id}' has an invalid accent.${k} row name '${v}' in theme.json`);
   }
+  const budgetErr = accentBudgetProblem(theme.accent);
+  if (budgetErr) throw new Error(`theme '${id}' has an invalid accent.budget in theme.json: ${budgetErr}`);
   return theme;
+}
+
+/** accent.budget (check 12): { frames, share, area, row }. Returns what is wrong with it, or null. */
+function accentBudgetProblem(accent) {
+  if (!accent || accent.budget === undefined) return null;
+  const b = accent.budget;
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return 'it must be an object: { frames, share, area, row }';
+  for (const k of Object.keys(b)) if (!['frames', 'share', 'area', 'row'].includes(k)) return `'${k}' is not a budget field (frames, share, area, row)`;
+  if (b.frames === undefined && b.share === undefined && b.area === undefined) return 'name at least one of frames, share, area';
+  if (b.frames !== undefined && !(Number.isInteger(b.frames) && b.frames >= 1)) return 'frames must be a whole number of frames, at least 1';
+  for (const k of ['share', 'area']) if (b[k] !== undefined && !(typeof b[k] === 'number' && b[k] > 0 && b[k] <= 1)) return `${k} must be a number above 0, at most 1`;
+  if (b.row !== undefined && !(typeof b.row === 'string' && ROW_NAME.test(b.row))) return `row '${b.row}' is not a lib.pal row name`;
+  if (b.row === undefined && !accent.base) return 'a theme with no accent.base names the measured lib.pal row in budget.row';
+  return null;
 }
 
 function listThemes(dir) {
@@ -279,7 +296,7 @@ function main() {
       fs.mkdirSync(path.dirname(out), { recursive: true });
       fs.writeFileSync(out, html);
       console.log(`lookbook -> ${out}`);
-    } else throw new Error("usage: node tools/theme.cjs list | apply <id> [--frame WxH] [--carrier none|crt] [--accent '#RRGGBB'] [--grain 0..1] | show | lookbook [--out path]");
+    } else throw new Error("usage: node tools/theme.cjs list | apply <id> [--frame WxH] [--carrier none|crt|vhs|film] [--accent '#RRGGBB'] [--grain 0..1] | show | lookbook [--out path]");
   } catch (e) {
     C.die(e.message);
   }
@@ -304,7 +321,7 @@ function lookbook(dir) {
       preview: fs.existsSync(img) ? `data:image/jpeg;base64,${fs.readFileSync(img).toString('base64')}` : null,
     };
   });
-  return LOOKBOOK.replace('/*THEMES*/null', () => JSON.stringify(data).replace(/</g, '\\u003c'));
+  return LOOKBOOK.replace('/*THEMES*/null', () => JSON.stringify(data).replace(/</g, '\\u003c')).replace('/*CARRIERS*/null', () => JSON.stringify(CARRIERS));
 }
 
 const LOOKBOOK = `<title>Style lookbook</title>
@@ -352,6 +369,7 @@ const THEMES=/*THEMES*/null;
 const $=(id)=>document.getElementById(id);
 const esc=(s)=>String(s).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const FRAMES=['1080x1920','1920x1080','1080x1080'];
+const CARRIERS=/*CARRIERS*/null;
 let sel=THEMES[0];
 const st={frame:null,carrier:null,accent:null,grain:null};
 const dim=(t)=>t.frame.width+'x'+t.frame.height;
@@ -359,7 +377,7 @@ function radios(host,name,opts,def,cur){host.innerHTML=opts.map((o)=>'<label><in
 function cards(){$('cards').innerHTML=THEMES.map((t)=>'<button class="card" type="button" data-id="'+t.id+'" aria-pressed="'+(t===sel)+'">'+(t.preview?'<img alt="" src="'+t.preview+'">':'')+'<div class="t"><b>'+esc(t.name)+'</b><span>'+esc(t.id)+' · '+esc(dim(t))+' · '+esc(t.status)+'</span><br><span>'+esc(t.look)+'</span><div class="sw">'+t.swatches.map((h)=>'<i style="background:'+h+'"></i>').join('')+'</div></div></button>').join('');}
 function controls(){
   radios($('frame'),'frame',FRAMES,dim(sel),st.frame);
-  radios($('carrier'),'carrier',['none','crt'],sel.carrier,st.carrier);
+  radios($('carrier'),'carrier',CARRIERS,sel.carrier,st.carrier);
   $('accOn').disabled=!sel.accent;$('accOn').checked=!!st.accent;$('acc').disabled=!st.accent;$('acc').value=(st.accent||sel.accent||'#888888').toLowerCase();
   $('accNote').textContent=sel.accent?'theme: '+sel.accent:'this theme keeps its accent in lib.pal';
   $('grOn').checked=st.grain!==null;$('gr').disabled=st.grain===null;$('gr').value=st.grain!==null?st.grain:(sel.grain!==null?sel.grain:0.5);
@@ -395,5 +413,5 @@ render();
 </script>
 `;
 
-module.exports = { findThemes, listThemes, parseOverrides, mixHex, apply, summary, lookbook };
+module.exports = { findThemes, listThemes, parseOverrides, mixHex, apply, summary, lookbook, accentBudgetProblem };
 if (require.main === module) main();

@@ -3,7 +3,7 @@
   "name": "Flat scallop / Three inks",
   "status": "ready",
   "look": "Flat print in white, scarlet and soot with one lagoon cyan: heavy even contours, offset scallop waves, fir rows; plate B is a wire schematic on scarlet",
-  "accent": { "base": "lagoon" },
+  "accent": { "base": "lagoon", "budget": { "area": 0.02 } },
   "frame": { "width": 1920, "height": 1080 },
   "plates": {
     "A": { "name": "print", "mode": "illustrated", "post": 0, "base": "sheet", "line": "soot", "text": "soot" },

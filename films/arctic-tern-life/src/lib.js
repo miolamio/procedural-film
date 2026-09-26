@@ -7257,6 +7257,1565 @@
   lib.plot = plot;
 
   // ===========================================================================
+  // Ramp
+  // ===========================================================================
+
+  // Colour scales made of lib.pal names, so a false-colour relief, a heat map or a cooling glow
+  // stays on the published palette with no hex in scene code. A ramp is a list of stops: a pal
+  // name (spaced evenly from 0 to 1) or [at, name] with at in 0..1, never decreasing (two stops at
+  // the same at make a hard edge). Colours mix linearly in RGB, like lib.mix.
+  //
+  // Named ramps live in this table. A theme or a film adds its own rows here, next to the colours
+  // its 2.2 rows add to the palette, for example
+  //     crater: ['craterDeep', 'crater', 'craterHot', 'yolk'],
+  // The rows below use only the 2.1 and 2.3 names, which every film's palette carries.
+  const ramps = {
+    heat: ['night', 'dusk', 'red', 'orange', 'sun', 'white'],
+    terrain: [[0, 'tealDeep'], [0.38, 'teal'], [0.4, 'paperDeep'], [0.62, 'sage'], [0.82, 'wood'], [1, 'white']],
+    blueprint: ['navyDeep', 'navy', 'grid', 'paleBlue', 'lineWhite'],
+    tone: ['paper', 'tan', 'inkFaint', 'inkSoft', 'ink'],
+  };
+  for (const k of Object.keys(ramps)) {
+    for (const s of ramps[k]) if (Array.isArray(s)) Object.freeze(s);
+    Object.freeze(ramps[k]);
+  }
+  Object.freeze(ramps);
+
+  // Resolved ramps: by name, by list identity, and by the list's text (an inline literal list is
+  // a new array every frame, so its text finds the one already built). Never keyed by time.
+  const rampByName = new Map();
+  const rampByList = new WeakMap();
+  const rampByText = new Map();
+
+  function buildRamp(list, label) {
+    if (!Array.isArray(list) || list.length < 2) {
+      throw new TypeError(`lib.ramp ${label}: a ramp needs at least two stops`);
+    }
+    const n = list.length;
+    const at = new Float64Array(n);
+    const rgb = [];
+    const stops = [];
+    let prev = 0;
+    for (let i = 0; i < n; i++) {
+      const s = list[i];
+      const pos = typeof s === 'string' ? i / (n - 1) : Array.isArray(s) ? s[0] : NaN;
+      const name = typeof s === 'string' ? s : Array.isArray(s) ? s[1] : undefined;
+      if (!(pos >= 0 && pos <= 1) || pos < prev) {
+        throw new TypeError(`lib.ramp ${label}: stop ${i} needs a position in 0..1, not below the stop before it`);
+      }
+      if (typeof name !== 'string' || typeof pal[name] !== 'string') {
+        throw new TypeError(`lib.ramp ${label}: stop ${i} '${String(name)}' is not a lib.pal name`);
+      }
+      prev = pos;
+      at[i] = pos;
+      rgb.push(parseColor(pal[name]));
+      stops.push(Object.freeze([pos, pal[name]]));
+    }
+    return { at, rgb, stops: Object.freeze(stops) };
+  }
+
+  function rampOf(spec) {
+    if (typeof spec === 'string') {
+      let R = rampByName.get(spec);
+      if (!R) {
+        if (!Object.prototype.hasOwnProperty.call(ramps, spec)) {
+          throw new TypeError(
+            `lib.ramp: no ramp named '${spec}' (named: ${Object.keys(ramps).join(', ')}); ` +
+              `add a row to the ramps table in lib.js, or pass a list of lib.pal names`
+          );
+        }
+        R = buildRamp(ramps[spec], `'${spec}'`);
+        rampByName.set(spec, R);
+      }
+      return R;
+    }
+    if (Array.isArray(spec)) {
+      let R = rampByList.get(spec);
+      if (!R) {
+        const text = JSON.stringify(spec);
+        R = rampByText.get(text);
+        if (!R) {
+          R = buildRamp(spec, text);
+          rampByText.set(text, R);
+        }
+        rampByList.set(spec, R);
+      }
+      return R;
+    }
+    throw new TypeError('lib.ramp: pass a ramp name or a list of lib.pal names');
+  }
+
+  function rampEval(R, v, out) {
+    const at = R.at;
+    const x = v > 0 ? (v < 1 ? v : 1) : 0; // NaN reads as 0
+    const last = at.length - 1;
+    let i = 1;
+    while (i < last && x > at[i]) i++;
+    const a = at[i - 1];
+    const b = at[i];
+    const k = b > a ? clamp((x - a) / (b - a)) : x >= b ? 1 : 0;
+    const A = R.rgb[i - 1];
+    const B = R.rgb[i];
+    out[0] = Math.round(A[0] + (B[0] - A[0]) * k);
+    out[1] = Math.round(A[1] + (B[1] - A[1]) * k);
+    out[2] = Math.round(A[2] + (B[2] - A[2]) * k);
+    return out;
+  }
+
+  const rampTmp = [0, 0, 0];
+  /** ramp(name | stops, v) : css 'rgb(r,g,b)' of the scale at v (clamped to 0..1). */
+  lib.ramp = (spec, v) => {
+    const c = rampEval(rampOf(spec), v, rampTmp);
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  };
+  /** rampRGB(name | stops, v, out?) : [r, g, b] 0..255 integers, written into out when given. */
+  lib.rampRGB = (spec, v, out) => rampEval(rampOf(spec), v, out || [0, 0, 0]);
+  /** rampStops(name | stops) : frozen [[at, '#hex'], ...], e.g. for CanvasGradient.addColorStop. */
+  lib.rampStops = (spec) => rampOf(spec).stops;
+  lib.ramps = ramps;
+
+  // ===========================================================================
+  // Noise plate
+  // ===========================================================================
+
+  /**
+   * noisePlate(ctx, opts) : an fbm2 field cut at a threshold, one colour, over a rectangle.
+   * Snow overexposure (paper-white blotches over the drawing), stipple (grain, small scale),
+   * toner dropouts (paper colour over ink, or 'destination-out'), streaks (scale [sx, sy]).
+   * The field is rastered once at `res` of the frame and cached by every option below plus the
+   * boil variant (never by raw time), stretched once to the render size; a frame only blits it.
+   *   x, y, w, h   0, 0, frame width, frame height
+   *   seed         7
+   *   scale        60      feature size in frame px; [sx, sy] stretches it (sy ≫ sx: vertical streaks)
+   *   threshold    0.7     fraction of the plate left empty: 0.7 covers about 30% (rank, not level)
+   *   soft         0.04    rank width of the edge ramp (0 is a hard mask)
+   *   grain        0       0..1 white noise mixed into the field before the cut: speckle, stipple
+   *                        (1 is pure per-pixel noise, no fbm: the cheapest plate)
+   *   octaves      4
+   *   color        pal.ink (a lib.pal name or a colour)
+   *   alpha        1       applied at the blit
+   *   res          0.25    raster size relative to the frame (0.05..1)
+   *   boil         false   true: three variants on the 12 fps clock; a number picks a variant
+   */
+  function noisePlate(ctx, o = {}) {
+    const x = o.x || 0, y = o.y || 0;
+    const w = o.w || W(), h = o.h || H();
+    const S = renderScale();
+    const seed = seedInt(o.seed === undefined ? 7 : o.seed);
+    const sc = Array.isArray(o.scale) ? o.scale : [o.scale, o.scale];
+    const sx = Math.max(0.5, +sc[0] || 60), sy = Math.max(0.5, +(sc[1] != null ? sc[1] : sc[0]) || 60);
+    const threshold = clamp(o.threshold != null ? +o.threshold : 0.7, 0, 1);
+    const soft = clamp(o.soft != null ? +o.soft : 0.04, 0, 1);
+    const grain = clamp(o.grain != null ? +o.grain : 0, 0, 1);
+    const oct = Math.max(1, Math.min(6, o.octaves == null ? 4 : o.octaves | 0));
+    const color = (typeof o.color === 'string' && pal[o.color]) || o.color || pal.ink;
+    const alpha = clamp(o.alpha != null ? +o.alpha : 1, 0, 1);
+    const res = clamp(o.res != null ? +o.res : 0.25, 0.05, 1);
+    let variant = 0;
+    if (o.boil === true) variant = lib.boil(lib.T) % 3;
+    else if (typeof o.boil === 'number') variant = Math.abs(o.boil | 0) % 3;
+    if (!(alpha > 0) || threshold >= 1 || !(w > 0) || !(h > 0)) return;
+    const ow = Math.max(1, Math.round(w * S)), oh = Math.max(1, Math.round(h * S));
+    const cw = Math.max(1, Math.round(ow * res)), ch = Math.max(1, Math.round(oh * res));
+    const key = ['noisePlate', w, h, ow, oh, cw, ch, seed, sx, sy, threshold, soft, grain, oct, color, variant].join('|');
+    const c = cached(key, () => makeNoisePlate(ow, oh, cw, ch, w / cw, h / ch, seed, sx, sy, threshold, soft, grain, oct, color, variant));
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.drawImage(c, x, y, w, h);
+    ctx.restore();
+  }
+
+  // The field is computed at cw × ch, then stretched once (smoothed) to the render size ow × oh:
+  // a 1:1 blit per frame costs a tenth of a stretching one on a software canvas.
+  function makeNoisePlate(ow, oh, cw, ch, px, py, seed, sx, sy, threshold, soft, grain, oct, color, variant) {
+    const n = cw * ch;
+    const f = new Float32Array(n);
+    // A boil variant nudges the domain by a third of a feature and reseeds the grain, so the
+    // plate shimmers in place instead of jumping to a new pattern.
+    const ox = variant * 0.37, oy = variant * 0.29;
+    const gs = seed + 131 + variant * 17;
+    let lo = Infinity, hi = -Infinity;
+    for (let j = 0; j < ch; j++) {
+      const ny = ((j + 0.5) * py) / sy + oy;
+      for (let i = 0; i < cw; i++) {
+        let v = grain < 1 ? lib.fbm2(((i + 0.5) * px) / sx + ox, ny, seed, oct) : 0;
+        if (grain > 0) v = v * (1 - grain) + (h3(i, j, gs) * 2 - 1) * 0.6 * grain;
+        f[j * cw + i] = v;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    // Cut by rank: a histogram of the field gives the level below which `threshold` of it lies,
+    // so the covered fraction does not depend on the seed, the scale or the octaves.
+    const B = 2048;
+    const span = hi - lo || 1;
+    const hist = new Uint32Array(B);
+    for (let k = 0; k < n; k++) hist[Math.min(B - 1, (((f[k] - lo) / span) * B) | 0)]++;
+    const level = (q) => {
+      if (q <= 0) return lo - 1e-6;
+      if (q >= 1) return hi + 1e-6;
+      const target = q * n;
+      let acc = 0;
+      for (let b = 0; b < B; b++) {
+        const next = acc + hist[b];
+        if (next >= target) return lo + ((b + (hist[b] ? (target - acc) / hist[b] : 0)) / B) * span;
+        acc = next;
+      }
+      return hi;
+    };
+    const e0 = level(threshold - soft / 2), e1 = level(threshold + soft / 2);
+    const c = newCanvas(cw, ch);
+    const g = c.getContext('2d');
+    const img = g.createImageData(cw, ch);
+    const d = img.data;
+    const [r, gg, b] = parseColor(color);
+    for (let k = 0; k < n; k++) {
+      const v = f[k];
+      const a = e1 > e0 ? smoothstep(e0, e1, v) : v > e0 ? 1 : 0;
+      if (!(a > 0)) continue;
+      const q = k * 4;
+      d[q] = r;
+      d[q + 1] = gg;
+      d[q + 2] = b;
+      d[q + 3] = Math.round(a * 255);
+    }
+    g.putImageData(img, 0, 0);
+    if (ow === cw && oh === ch) return c;
+    const out = newCanvas(ow, oh);
+    const og = out.getContext('2d');
+    og.imageSmoothingEnabled = true;
+    og.imageSmoothingQuality = 'high';
+    og.drawImage(c, 0, 0, ow, oh);
+    return out;
+  }
+  lib.noisePlate = noisePlate;
+
+  // ===========================================================================
+  // Stick figures
+  // ===========================================================================
+
+  // Body proportions in head diameters. 'line' is the jointed stick (characters-reference.md §4–6:
+  // torso ≈ 2.5 heads, legs ≈ 3.5); the spring body (§3) has long legs, ≈ 56% of the height, and a
+  // head of ≈ 17% of it. A standing figure is head + neck + torso + thigh + shin tall; the foot
+  // points forward and adds no height.
+  const STICK_BODY = Object.freeze({ head: 1, neck: 0.25, torso: 2.5, upperArm: 1.35, forearm: 1.25, thigh: 1.8, shin: 1.75, foot: 0.3 });
+  const SPRING_BODY = Object.freeze({ head: 1, neck: 0.12, torso: 1.35, upperArm: 1.45, forearm: 1.4, thigh: 1.6, shin: 1.6, foot: 0 });
+  const POSE_KEYS = ['rot', 'lean', 'neck', 'armL', 'elbowL', 'armR', 'elbowR', 'legL', 'kneeL', 'legR', 'kneeR'];
+  const SPRING_KINDS = { spring: 1, zigzag: 1, coil: 1, ladder: 1 };
+
+  /**
+   * stickPose(pose, opts) : the joints of a stick figure, without drawing. Pure; stickFigure draws
+   * exactly these (plus the boil tremble).
+   * pose: joint angles in radians, every one 0 by default (standing straight, arms hanging).
+   * A positive angle swings toward the side the figure faces:
+   *   rot     the whole figure about the hip (π/2 lies it face down, -π/2 on its back)
+   *   lean    the torso at the hip          neck    the head on the torso
+   *   armL armR    shoulder, from hanging down (π/2 points forward, π straight up)
+   *   elbowL elbowR  forearm folds forward
+   *   legL legR    hip, from straight down   kneeL kneeR    shin folds back
+   * opts:
+   *   x, y     where the figure stands: with anchor 'ground' (default) the lowest point of the
+   *            figure sits on y and the hip on x; with anchor 'hip' the hip is at (x, y)
+   *   height   0.33 · frame height   standing height, head top to sole
+   *   facing   1 (right) or -1 (left)
+   *   limb     'line' | 'spring' ('zigzag') | 'coil' | 'ladder'   picks the default body
+   *   body     { head, neck, torso, upperArm, forearm, thigh, shin, foot }   overrides, in heads
+   * Returns { hip, shoulder, neck, head, headR, elbowL, handL, elbowR, handR, kneeL, ankleL,
+   *   toeL, kneeR, ankleR, toeR, D (head diameter), facing, headAngle } in frame pixels.
+   */
+  function stickPose(pose, o = {}) {
+    const p = pose || {};
+    const B = Object.assign({}, SPRING_KINDS[o.limb] ? SPRING_BODY : STICK_BODY, o.body);
+    const height = o.height != null ? o.height : H() * 0.33;
+    const D = height / (B.head + B.neck + B.torso + B.thigh + B.shin);
+    const f = o.facing === -1 ? -1 : 1;
+    const a = (k) => +p[k] || 0;
+    // dir(θ, len): θ = 0 points down the frame, θ > 0 swings toward the facing side
+    const dir = (t, len) => [f * Math.sin(t) * len, Math.cos(t) * len];
+    const add = (P, v) => [P[0] + v[0], P[1] + v[1]];
+    const hip = [0, 0];
+    const torso = -a('lean');
+    const shoulder = add(hip, dir(torso, -B.torso * D));
+    const headAng = torso - a('neck');
+    const neck = add(shoulder, dir(headAng, -B.neck * D));
+    const head = add(shoulder, dir(headAng, -(B.neck * D + (B.head * D) / 2)));
+    const arm = (s, e) => {
+      const el = add(shoulder, dir(torso + a(s), B.upperArm * D));
+      return [el, add(el, dir(torso + a(s) + a(e), B.forearm * D))];
+    };
+    const leg = (s, k) => {
+      const kn = add(hip, dir(a(s), B.thigh * D));
+      const an = add(kn, dir(a(s) - a(k), B.shin * D));
+      // the foot points forward, only a third as steep as the shin, so it stays near flat
+      return [kn, an, add(an, dir(Math.PI / 2 + 0.35 * (a(s) - a(k)), B.foot * D))];
+    };
+    const [elbowL, handL] = arm('armL', 'elbowL');
+    const [elbowR, handR] = arm('armR', 'elbowR');
+    const [kneeL, ankleL, toeL] = leg('legL', 'kneeL');
+    const [kneeR, ankleR, toeR] = leg('legR', 'kneeR');
+    const J = { hip, shoulder, neck, head, elbowL, handL, elbowR, handR, kneeL, ankleL, toeL, kneeR, ankleR, toeR };
+    const r = f * a('rot');
+    const c = Math.cos(r), s = Math.sin(r);
+    const headR = (B.head * D) / 2;
+    let low = -Infinity;
+    for (const k in J) {
+      const P = J[k];
+      J[k] = [P[0] * c - P[1] * s, P[0] * s + P[1] * c];
+      const bottom = J[k][1] + (k === 'head' ? headR : 0);
+      if (bottom > low) low = bottom;
+    }
+    const dx = o.x != null ? o.x : W() / 2;
+    const dy = (o.y != null ? o.y : H() * 0.8) - (o.anchor === 'hip' ? 0 : low);
+    for (const k in J) J[k] = [J[k][0] + dx, J[k][1] + dy];
+    J.headR = headR;
+    J.D = B.head * D;
+    J.facing = f;
+    J.headAngle = -f * headAng + r; // screen rotation of the head, clockwise (0 upright)
+    return J;
+  }
+  lib.stickPose = stickPose;
+
+  /** poseMix(a, b, u) : a pose between a (u = 0) and b (u = 1), angle by angle. */
+  function poseMix(pa, pb, u) {
+    const out = {};
+    for (const k of POSE_KEYS) {
+      const x = (pa && +pa[k]) || 0, y = (pb && +pb[k]) || 0;
+      if (x || y) out[k] = x + (y - x) * u;
+    }
+    return out;
+  }
+  lib.poseMix = poseMix;
+
+  // A few poses to start from (facing right; mix them with poseMix, override single joints).
+  // walk1..walk4 are the contact and passing drawings of one stride, a quarter of a cycle apart.
+  const stickPoses = {
+    stand: {},
+    walk1: { lean: 0.06, armL: -0.5, elbowL: 0.25, armR: 0.5, elbowR: 0.55, legL: 0.42, kneeL: 0.08, legR: -0.38, kneeR: 0.3 },
+    walk2: { lean: 0.08, armL: -0.12, elbowL: 0.3, armR: 0.12, elbowR: 0.4, legL: 0.05, kneeL: 0.3, legR: -0.05, kneeR: 1.05 },
+    walk3: { lean: 0.06, armL: 0.5, elbowL: 0.55, armR: -0.5, elbowR: 0.25, legL: -0.38, kneeL: 0.3, legR: 0.42, kneeR: 0.08 },
+    walk4: { lean: 0.08, armL: 0.12, elbowL: 0.4, armR: -0.12, elbowR: 0.3, legL: -0.05, kneeL: 1.05, legR: 0.05, kneeR: 0.3 },
+    reach: { lean: -0.05, neck: -0.35, armL: 2.75, elbowL: 0.1, armR: 2.95, elbowR: -0.05, legL: 0.06, legR: -0.06 },
+    crouch: { lean: 0.5, neck: -0.3, armL: 0.9, elbowL: 0.8, armR: 0.6, elbowR: 1.0, legL: 1.05, kneeL: 1.75, legR: 0.7, kneeR: 1.85 },
+    jump: { lean: 0.2, neck: -0.2, armL: 2.3, elbowL: 0.4, armR: 2.0, elbowR: 0.6, legL: 0.9, kneeL: 1.6, legR: 0.3, kneeR: 1.3 },
+    sit: { lean: -0.12, neck: 0.1, armL: 1.0, elbowL: 0.35, armR: 0.7, elbowR: 0.5, legL: 2.1, kneeL: 1.07, legR: 1.9, kneeR: 0.85 },
+    wave: { armL: 0.12, elbowL: 0.1, armR: 2.3, elbowR: 0.9, legL: 0.1, legR: -0.1, neck: 0.1 },
+    fall: { rot: -0.35, lean: -0.2, neck: -0.3, armL: 2.6, elbowL: 0.5, armR: 1.9, elbowR: -0.4, legL: 0.6, kneeL: 0.2, legR: -0.25, kneeR: 0.9 },
+    lie: { rot: -Math.PI / 2, neck: 0.15, armL: 0.35, elbowL: 0.3, armR: -0.2, elbowR: 0.5, legL: 0.15, kneeL: 0.4, legR: -0.05, kneeR: 0.1 },
+  };
+  for (const k of Object.keys(stickPoses)) Object.freeze(stickPoses[k]);
+  lib.stickPoses = Object.freeze(stickPoses);
+
+  // a trembling polyline: joints jitter on the boil clock, each segment bows a little
+  function trembleChain(ctx, pts, tremble, seed, bi, sub) {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const A = pts[i], B = pts[i + 1];
+      const dx = B[0] - A[0], dy = B[1] - A[1];
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      const n = Math.max(2, Math.ceil(len / sub));
+      if (i === 0) ctx.moveTo(A[0], A[1]);
+      for (let k = 1; k <= n; k++) {
+        const u = k / n;
+        const d = k === n ? 0 : tremble * (Math.sin(Math.PI * u) * noise1(i * 1.31 + bi * 0.47, seed) + 0.45 * noise1(k * 0.9 + bi * 2.3 + i * 5.1, seed + 3));
+        ctx.lineTo(A[0] + dx * u + nx * d, A[1] + dy * u + ny * d);
+      }
+    }
+  }
+
+  // closed wobbly disc path (radius wobbles by `wob` px on the boil clock)
+  function discPath(ctx, x, y, r, wob, seed, bi) {
+    const n = Math.max(16, Math.min(48, Math.ceil(r * 0.8)));
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * TAU;
+      const rr = r + wob * noise1(Math.cos(a) * 1.3 + 3 + bi * 1.9, seed) * (0.6 + 0.4 * Math.sin(a * 2 + seed));
+      if (i) ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+      else ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+  }
+
+  /**
+   * scribbleBall(ctx, x, y, r, opts) : a dense tangle of scribbled loops inside radius r (the
+   * spring figure's head). One continuous line whose centre wanders; it trembles on the boil clock.
+   *   color pal.ink   width r·0.07   turns 14   seed 7   wobble r·0.05   alpha 1   boil (like inkPath)
+   */
+  function scribbleBall(ctx, x, y, r, o = {}) {
+    const seed = seedInt(o.seed === undefined ? 7 : o.seed);
+    const bi = boilIndex(o);
+    const turns = Math.max(1, o.turns || 14);
+    const wob = o.wobble != null ? o.wobble : r * 0.05;
+    const per = 11;
+    const m = Math.ceil(turns * per);
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    ctx.strokeStyle = o.color || pal.ink;
+    ctx.lineWidth = o.width != null ? o.width : Math.max(1, r * 0.07);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let px = 0, py = 0;
+    for (let i = 0; i <= m; i++) {
+      const cx = 0.42 * r * noise1(i * 0.021, seed + 11);
+      const cy = 0.42 * r * noise1(i * 0.021, seed + 12);
+      const rho = r * (0.5 + 0.28 * noise1(i * 0.09, seed + 13));
+      const ang = (i / per) * TAU * (1 + 0.15 * noise1(i * 0.05, seed + 14));
+      let qx = cx + Math.cos(ang) * rho + wob * noise1(i * 0.31 + bi * 3.1, seed + 15);
+      let qy = cy + Math.sin(ang) * rho * 0.9 + wob * noise1(i * 0.31 + bi * 3.1, seed + 16);
+      const d = Math.hypot(qx, qy);
+      if (d > r) (qx *= r / d), (qy *= r / d);
+      qx += x;
+      qy += y;
+      if (i === 0) ctx.moveTo(qx, qy);
+      else if (i === 1) ctx.lineTo((px + qx) / 2, (py + qy) / 2);
+      else ctx.quadraticCurveTo(px, py, (px + qx) / 2, (py + qy) / 2);
+      px = qx;
+      py = qy;
+    }
+    ctx.lineTo(px, py);
+    ctx.stroke();
+    ctx.restore();
+  }
+  lib.scribbleBall = scribbleBall;
+
+  // Catmull-Rom through pts, sampled about every `gap` px; returns { X, Y, S } arrays
+  function smoothLine(pts, gap) {
+    const X = [], Y = [];
+    const n = pts.length;
+    for (let i = 0; i < n - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)];
+      const m = Math.max(1, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / gap));
+      for (let k = i ? 1 : 0; k <= m; k++) {
+        const t = k / m, t2 = t * t, t3 = t2 * t;
+        const cr = (a, b, c, d) => 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (3 * b - a - 3 * c + d) * t3);
+        X.push(cr(p0[0], p1[0], p2[0], p3[0]));
+        Y.push(cr(p0[1], p1[1], p2[1], p3[1]));
+      }
+    }
+    const S = [0];
+    for (let i = 1; i < X.length; i++) S.push(S[i - 1] + Math.hypot(X[i] - X[i - 1], Y[i] - Y[i - 1]));
+    return { X, Y, S };
+  }
+
+  // point and unit normal at arc length s on a smoothLine
+  function lineAt(C, s) {
+    const { X, Y, S } = C;
+    const last = S.length - 1;
+    if (s <= 0) s = 0;
+    if (s >= S[last]) s = S[last];
+    let lo = 0, hi = last;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (S[mid] <= s) lo = mid;
+      else hi = mid;
+    }
+    const seg = S[hi] - S[lo] || 1;
+    const u = (s - S[lo]) / seg;
+    const tx = (X[hi] - X[lo]) / seg, ty = (Y[hi] - Y[lo]) / seg;
+    return [X[lo] + (X[hi] - X[lo]) * u, Y[lo] + (Y[hi] - Y[lo]) * u, -ty, tx];
+  }
+
+  /**
+   * springLimb(ctx, a, b, opts) : a limb drawn as a spring from point a to point b, through
+   * opts.via (a point, or a list of points: the elbow or knee) on a smooth curve.
+   *   kind    'zigzag' | 'coil' (looped wire) | 'ladder' (two rails and rungs)
+   *   amp     0.014 · frame height   half the width of the spring
+   *   step    0.011 · frame height   distance between zigzag corners, coil half-turns or rungs
+   *   color pal.ink   width max(1.5, 0.0021 · frame height)   alpha 1
+   *   jitter  amp · 0.18   px the corners tremble on the boil clock     seed 5   boil (like inkPath)
+   * The spring starts on a and ends on b. Returns the length of the centre curve.
+   */
+  function springLimb(ctx, a, b, o = {}) {
+    const v = o.via;
+    const via = !v || !v.length ? [] : Array.isArray(v[0]) || typeof v[0] === 'object' ? v.map(XY) : [XY(v)];
+    const C = smoothLine([XY(a)].concat(via, [XY(b)]), 3);
+    const L = C.S[C.S.length - 1];
+    if (!(L > 0)) return 0;
+    const kind = o.kind || 'zigzag';
+    const amp = o.amp != null ? o.amp : H() * 0.014;
+    const N = Math.max(1, Math.round(L / (o.step != null ? o.step : H() * 0.011)));
+    const step = L / N;
+    const seed = seedInt(o.seed === undefined ? 5 : o.seed);
+    const bi = boilIndex(o);
+    const jit = o.jitter != null ? o.jitter : amp * 0.18;
+    const env = (s) => Math.min(1, s / step, (L - s) / step);
+    const jn = (k, c) => jit * noise1(k * 0.73 + bi * 5.3, seed + c);
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    ctx.strokeStyle = o.color || pal.ink;
+    ctx.lineWidth = o.width != null ? o.width : Math.max(1.5, H() * 0.0021);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    if (kind === 'ladder') {
+      for (const side of [-1, 1]) {
+        const m = Math.max(2, Math.ceil(L / 6));
+        for (let i = 0; i <= m; i++) {
+          const s = (i / m) * L;
+          const q = lineAt(C, s);
+          const d = side * amp + jn(i * 0.25, side);
+          if (i) ctx.lineTo(q[0] + q[2] * d, q[1] + q[3] * d);
+          else ctx.moveTo(q[0] + q[2] * d, q[1] + q[3] * d);
+        }
+      }
+      for (let k = 0; k <= N; k++) {
+        const q = lineAt(C, k * step);
+        const d0 = -amp + jn(k, 3), d1 = amp + jn(k, 4);
+        ctx.moveTo(q[0] + q[2] * d0, q[1] + q[3] * d0);
+        ctx.lineTo(q[0] + q[2] * d1, q[1] + q[3] * d1);
+      }
+    } else if (kind === 'coil') {
+      const per = 9;
+      const A = amp * 0.9;
+      for (let i = 0; i <= N * per; i++) {
+        const s = (i / per) * step;
+        const ph = (i / per) * Math.PI;
+        const e = env(s);
+        const q = lineAt(C, s + A * e * Math.cos(ph) - A * e);
+        const d = amp * e * Math.sin(ph) + jn(i / per, 1) * e;
+        if (i) ctx.lineTo(q[0] + q[2] * d, q[1] + q[3] * d);
+        else ctx.moveTo(q[0], q[1]);
+      }
+    } else {
+      for (let k = 0; k <= N; k++) {
+        const s = k * step;
+        const q = lineAt(C, Math.min(L, Math.max(0, s + (k && k < N ? jn(k, 2) * 0.5 : 0))));
+        const d = k === 0 || k === N ? 0 : (k % 2 ? amp : -amp) + jn(k, 1);
+        if (k) ctx.lineTo(q[0] + q[2] * d, q[1] + q[3] * d);
+        else ctx.moveTo(q[0], q[1]);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+    return L;
+  }
+  lib.springLimb = springLimb;
+
+  /**
+   * stickFigure(ctx, pose, opts) : draws the stick figure stickPose(pose, opts) describes and
+   * returns its joints. Thin limbs with a thickening at each joint, a disc head, the joints and the
+   * line trembling on the boil clock (hold a pose for two frames with lib.onTwos).
+   *   head     'solid' (black disc) | 'scribble' (black disc, light scribbles inside) |
+   *            'hatch' (black disc, light diagonal strokes) | 'face' (outlined, two dots and a
+   *            mouth) | 'knot' (a scribbleBall; the default for spring limbs)
+   *   limb     'line' | 'spring' ('zigzag') | 'coil' | 'ladder'   (springs draw through springLimb)
+   *   color    pal.ink       light  pal.white (scribbles, hatching, the face fill)
+   *   width    D · 0.075     joint  1.3 (radius of a joint dot, in line widths; 0 for none)
+   *   tremble  width · 0.5   px each segment bows         jitter D · 0.03   px each joint shakes
+   *   amp, step  2.15% and 1.7% of height (spring limbs)   alpha 1   seed 1   boil (like inkPath)
+   *   plus stickPose's x, y, anchor, height, facing, body
+   */
+  function stickFigure(ctx, pose, o = {}) {
+    const J = stickPose(pose, o);
+    const limb = o.limb === 'spring' ? 'zigzag' : o.limb || 'line';
+    const spring = limb !== 'line';
+    const seed = seedInt(o.seed === undefined ? 1 : o.seed);
+    const bi = boilIndex(o);
+    const D = J.D;
+    const color = o.color || pal.ink;
+    const light = o.light || pal.white;
+    const w = o.width != null ? o.width : Math.max(1.2, D * (spring ? 0.045 : 0.075));
+    const jit = o.jitter != null ? o.jitter : D * 0.03;
+    const tremble = o.tremble != null ? o.tremble : w * 0.5;
+    const names = ['hip', 'shoulder', 'neck', 'head', 'elbowL', 'handL', 'elbowR', 'handR', 'kneeL', 'ankleL', 'toeL', 'kneeR', 'ankleR', 'toeR'];
+    const P = {};
+    names.forEach((k, i) => {
+      const p = J[k];
+      P[k] = jit ? [p[0] + jit * noise1(bi * 0.83 + i * 7.1, seed + 21), p[1] + jit * noise1(bi * 0.83 + i * 7.1, seed + 22)] : p;
+    });
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = w;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const chains = [
+      ['hip', 'shoulder', 'neck'],
+      ['shoulder', 'elbowL', 'handL'],
+      ['shoulder', 'elbowR', 'handR'],
+      ['hip', 'kneeL', 'ankleL', 'toeL'],
+      ['hip', 'kneeR', 'ankleR', 'toeR'],
+    ];
+    if (spring) {
+      const height = o.height != null ? o.height : H() * 0.33;
+      const amp = o.amp != null ? o.amp : height * 0.0215;
+      const step = o.step != null ? o.step : height * 0.017;
+      chains.forEach((ch, i) => {
+        const pts = ch.map((k) => P[k]).filter((p, j) => j < 2 || Math.hypot(p[0] - P[ch[j - 1]][0], p[1] - P[ch[j - 1]][1]) > 1);
+        const end = i === 0 ? pts[1] : pts[pts.length - 1];
+        const via = i === 0 ? [] : pts.slice(1, -1);
+        springLimb(ctx, pts[0], end, { via, kind: limb, amp, step, color, width: w, seed: seed + i, boil: bi });
+      });
+      // the neck runs on into the knot so the head does not float
+      const hx = P.head[0], hy = P.head[1];
+      const into = [P.neck[0] + (hx - P.neck[0]) * 0.55, P.neck[1] + (hy - P.neck[1]) * 0.55];
+      ctx.beginPath();
+      trembleChain(ctx, [P.shoulder, into], tremble, seed, bi, D * 0.4);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      chains.forEach((ch, i) => {
+        const pts = ch.map((k) => P[k]);
+        if (pts.length === 4 && Math.hypot(pts[3][0] - pts[2][0], pts[3][1] - pts[2][1]) < 0.5) pts.pop();
+        trembleChain(ctx, pts, tremble, seed + i * 13, bi, D * 0.4);
+      });
+      ctx.stroke();
+      const jr = (o.joint != null ? o.joint : 1.3) * w;
+      if (jr > w / 2) {
+        ctx.beginPath();
+        for (const k of ['hip', 'shoulder', 'elbowL', 'elbowR', 'kneeL', 'kneeR']) {
+          const q = P[k];
+          ctx.moveTo(q[0] + jr, q[1]);
+          ctx.ellipse(q[0], q[1], jr, jr * 0.92, 0, 0, TAU);
+        }
+        for (const k of ['handL', 'handR']) {
+          const q = P[k];
+          ctx.moveTo(q[0] + jr * 0.85, q[1]);
+          ctx.arc(q[0], q[1], jr * 0.85, 0, TAU);
+        }
+        ctx.fill();
+      }
+    }
+    // head
+    const [hx, hy] = P.head;
+    const r = J.headR;
+    const head = o.head || (spring ? 'knot' : 'solid');
+    if (head === 'knot') {
+      scribbleBall(ctx, hx, hy, r, { color, seed: seed + 5, boil: bi, width: Math.max(1, r * 0.075) });
+    } else if (head === 'face') {
+      ctx.beginPath();
+      discPath(ctx, hx, hy, r, r * 0.04, seed + 5, bi);
+      ctx.fillStyle = light;
+      ctx.fill();
+      ctx.lineWidth = w;
+      ctx.stroke();
+      const f = J.facing, ang = J.headAngle;
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const at = (u, v) => [hx + (u * c - v * s) * r, hy + (u * s + v * c) * r];
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      for (const u of [0.02, 0.42]) {
+        const e = at(f * u, -0.12);
+        ctx.moveTo(e[0] + w * 0.9, e[1]);
+        ctx.arc(e[0], e[1], w * 0.9, 0, TAU);
+      }
+      ctx.fill();
+      ctx.beginPath();
+      const m0 = at(f * 0.02, 0.36), m1 = at(f * 0.4, 0.33);
+      ctx.moveTo(m0[0], m0[1]);
+      ctx.lineTo(m1[0], m1[1]);
+      ctx.lineWidth = w * 0.8;
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      discPath(ctx, hx, hy, r, r * 0.035, seed + 5, bi);
+      ctx.fillStyle = color;
+      ctx.fill();
+      if (head === 'scribble') {
+        scribbleBall(ctx, hx, hy, r * 0.78, { color: light, seed: seed + 9, boil: bi, turns: 5, width: Math.max(1, r * 0.05), wobble: r * 0.08 });
+      } else if (head === 'hatch') {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(hx, hy, r * 0.8, 0, TAU);
+        ctx.clip();
+        ctx.beginPath();
+        const d = 0.7071;
+        for (let k = -2; k <= 2; k++) {
+          const o2 = k * r * 0.3 + r * 0.05 * noise1(k + bi * 1.7, seed + 31);
+          ctx.moveTo(hx + o2 * d - r * d, hy - o2 * d - r * d);
+          ctx.lineTo(hx + o2 * d + r * d, hy - o2 * d + r * d);
+        }
+        ctx.strokeStyle = light;
+        ctx.lineWidth = Math.max(1, r * 0.07);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+    return J;
+  }
+  lib.stickFigure = stickFigure;
+
+  // ===========================================================================
+  // Stroke font
+  // ===========================================================================
+
+  // A single-line font drawn as strokes, the same on every machine (a system font is not). Glyphs
+  // live on a grid 10 units tall: y 0 is the cap line, y 10 the baseline; a glyph is w units wide.
+  // Each stroke is a polyline [x, y, x, y, ...]; a stroke of one point is a dot. Strokes are listed
+  // stems first: in the stencil style a stroke whose end touches an earlier stroke is cut short
+  // there (the bridge), so O is two halves (bridges top and bottom) and E a stem with three bars.
+  // The hand style joins strokes that meet end to end back into one pen line. Upper case only:
+  // lower case draws as upper case (Latin and Cyrillic), an unknown character as '?'.
+  const SF = {};
+  function sfArc(cx, cy, rx, ry, a0, a1) {
+    const n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / 12));
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const a = ((a0 + ((a1 - a0) * i) / n) * Math.PI) / 180;
+      out.push(+(cx + rx * Math.cos(a)).toFixed(3), +(cy + ry * Math.sin(a)).toFixed(3));
+    }
+    return out;
+  }
+  const sfG = (chars, w, ...strokes) => {
+    for (const ch of chars) SF[ch] = { w, s: strokes };
+  };
+  {
+    const A = sfArc;
+    const ring = (cx, rx) => [A(cx, 5, rx, 5, -90, 90), A(cx, 5, rx, 5, 90, 270)];
+    // Latin
+    sfG('AА', 6, [0, 10, 3, 0], [3, 0, 6, 10], [1.05, 6.5, 4.95, 6.5]);
+    sfG('BВ', 6.75, [0, 0, 0, 10], [0, 0, 3.5, 0].concat(A(3.5, 2.25, 2.25, 2.25, -90, 90), [0, 4.5]), [0, 4.5, 4, 4.5].concat(A(4, 7.25, 2.75, 2.75, -90, 90), [0, 10]));
+    sfG('CС', 6.3, A(3.4, 5, 3.4, 5, -42, -318));
+    sfG('D', 6, [0, 0, 0, 10], [0, 0, 1.5, 0].concat(A(1.5, 5, 4.5, 5, -90, 90), [0, 10]));
+    sfG('EЕ', 5, [0, 0, 0, 10], [0, 0, 5, 0], [0, 10, 5, 10], [0, 5, 4, 5]);
+    sfG('F', 5, [0, 0, 0, 10], [0, 0, 5, 0], [0, 5, 4, 5]);
+    sfG('G', 6.6, A(3.3, 5, 3.3, 5, -40, -360), [3.6, 5, 6.6, 5]);
+    sfG('HН', 6, [0, 0, 0, 10], [6, 0, 6, 10], [0, 5, 6, 5]);
+    sfG('I', 0, [0, 0, 0, 10]);
+    sfG('J', 5, [5, 0, 5, 7].concat(A(2.5, 7, 2.5, 3, 0, 180)));
+    sfG('KК', 5.5, [0, 0, 0, 10], [5.5, 0, 0, 6], [1.8, 4.036, 5.5, 10]);
+    sfG('L', 5, [0, 0, 0, 10], [0, 10, 5, 10]);
+    sfG('MМ', 7.5, [0, 10, 0, 0], [0, 0, 3.75, 7], [3.75, 7, 7.5, 0], [7.5, 0, 7.5, 10]);
+    sfG('N', 6, [0, 10, 0, 0], [0, 0, 6, 10], [6, 10, 6, 0]);
+    sfG('OО', 6.6, ...ring(3.3, 3.3));
+    sfG('PР', 6.25, [0, 0, 0, 10], [0, 0, 3.5, 0].concat(A(3.5, 2.75, 2.75, 2.75, -90, 90), [0, 5.5]));
+    sfG('Q', 6.6, ...ring(3.3, 3.3), [4, 7.2, 6.8, 10.6]);
+    sfG('R', 6.25, [0, 0, 0, 10], [0, 0, 3.5, 0].concat(A(3.5, 2.75, 2.75, 2.75, -90, 90), [0, 5.5]), [2.8, 5.5, 6.1, 10]);
+    sfG('S', 5.8, A(2.9, 2.5, 2.8, 2.5, -25, -270), A(2.9, 7.5, 2.9, 2.5, -90, 155));
+    sfG('TТ', 6, [0, 0, 6, 0], [3, 0, 3, 10]);
+    sfG('U', 6, [6, 0, 6, 10], [0, 0, 0, 7].concat(A(3, 7, 3, 3, 180, 0)));
+    sfG('V', 6, [0, 0, 3, 10], [3, 10, 6, 0]);
+    sfG('W', 8.4, [0, 0, 2.1, 10], [2.1, 10, 4.2, 2], [4.2, 2, 6.3, 10], [6.3, 10, 8.4, 0]);
+    sfG('XХ', 6, [0, 0, 6, 10], [6, 0, 0, 10]);
+    sfG('Y', 6, [0, 0, 3, 5], [6, 0, 3, 5], [3, 5, 3, 10]);
+    sfG('Z', 6, [0, 0, 6, 0], [6, 0, 0, 10], [0, 10, 6, 10]);
+    // digits
+    sfG('0', 5.5, ...ring(2.75, 2.75));
+    sfG('1', 3, [0, 2, 3, 0], [3, 0, 3, 10]);
+    sfG('2', 5.5, A(2.75, 2.9, 2.75, 2.9, -165, 25).concat([0, 10]), [0, 10, 5.5, 10]);
+    sfG('3З', 5.6, A(2.7, 2.5, 2.6, 2.5, -150, 90), A(2.7, 7.5, 2.9, 2.5, -90, 150));
+    sfG('4', 6, [4.5, 10, 4.5, 0], [4.5, 0, 0, 7], [0, 7, 6, 7]);
+    {
+      const bowl5 = A(2.6, 6.9, 2.9, 3.1, -140, 150);
+      sfG('5', 5.5, [5.2, 0, 0.6, 0], [0.6, 0, bowl5[0], bowl5[1]], bowl5);
+    }
+    {
+      const stem6 = A(4.5, 7, 4.5, 7, -80, -180);
+      sfG('6', 5.5, stem6, A(2.75, 7, 2.75, 3, 180, -180));
+      sfG('9', 5.5, A(2.75, 3, 2.75, 3, 0, 360), A(1, 3, 4.5, 7, 0, 80));
+    }
+    sfG('7', 5.5, [0, 0, 5.5, 0], [5.5, 0, 1.8, 10]);
+    sfG('8', 5.5, A(2.75, 2.5, 2.4, 2.5, 90, 450), A(2.75, 7.5, 2.75, 2.5, -90, 270));
+    // punctuation
+    sfG(' ', 3);
+    sfG('.', 0, [0, 9.6]);
+    sfG(',', 0.8, [0.8, 9.2, 0.8, 10, 0, 11.6]);
+    sfG(':', 0, [0, 3.6], [0, 9.6]);
+    sfG(';', 0.8, [0.8, 3.6], [0.8, 9.2, 0.8, 10, 0, 11.6]);
+    sfG('!', 0, [0, 0, 0, 7], [0, 9.6]);
+    sfG('?', 5, A(2.5, 2.5, 2.5, 2.5, -165, 60).concat([2.5, 5.6, 2.5, 7]), [2.5, 9.6]);
+    sfG("'’", 0, [0, 0, 0, 2.8]);
+    sfG('"', 2.4, [0, 0, 0, 2.8], [2.4, 0, 2.4, 2.8]);
+    sfG('-–—', 3.5, [0, 5.5, 3.5, 5.5]);
+    sfG('_', 5, [0, 10, 5, 10]);
+    sfG('/', 4, [4, 0, 0, 10]);
+    sfG('+', 5, [0, 5, 5, 5], [2.5, 2.5, 2.5, 7.5]);
+    sfG('=', 5, [0, 3.8, 5, 3.8], [0, 6.8, 5, 6.8]);
+    sfG('(', 2.5, A(5, 5, 5, 6, -120, -240));
+    sfG(')', 2.5, A(-2.5, 5, 5, 6, -60, 60));
+    // Cyrillic (А В Е К М Н О Р С Т Х З share the Latin and digit shapes above)
+    sfG('Б', 6.25, [0, 0, 0, 10], [0, 0, 5.5, 0], [0, 4.5, 3.5, 4.5].concat(A(3.5, 7.25, 2.75, 2.75, -90, 90), [0, 10]));
+    sfG('Г', 5, [0, 0, 0, 10], [0, 0, 5, 0]);
+    sfG('Д', 6.8, [1.8, 0, 5.8, 0], [1.8, 0, 0.8, 8.2], [5.8, 0, 5.8, 8.2], [0, 8.2, 6.8, 8.2], [0, 8.2, 0, 10], [6.8, 8.2, 6.8, 10]);
+    sfG('Ж', 8, [4, 0, 4, 10], [4, 5, 0.3, 0], [4, 5, 7.7, 0], [4, 5, 0, 10], [4, 5, 8, 10]);
+    sfG('И', 6, [0, 0, 0, 10], [6, 0, 6, 10], [0, 10, 6, 0]);
+    sfG('Й', 6, [0, 0, 0, 10], [6, 0, 6, 10], [0, 10, 6, 0], A(3, -2.2, 1.6, 1, 180, 0));
+    sfG('Л', 6, [6, 0, 6, 10], [1.8, 0, 6, 0], [0, 10, 1.8, 0]);
+    sfG('П', 6, [0, 0, 0, 10], [6, 0, 6, 10], [0, 0, 6, 0]);
+    sfG('У', 6, [6, 0, 1.2, 10], [0, 0, 2.832, 6.6]);
+    sfG('Ф', 7, [3.5, 0, 3.5, 10], A(3.5, 4.5, 3.5, 2.8, -90, 90), A(3.5, 4.5, 3.5, 2.8, 90, 270));
+    sfG('Ц', 6.8, [0, 0, 0, 8.4], [6, 0, 6, 8.4], [0, 8.4, 6.8, 8.4], [6.8, 8.4, 6.8, 10.8]);
+    sfG('Ч', 6, [6, 0, 6, 10], [0, 0, 0, 3.4].concat(A(3, 3.4, 3, 2.1, 180, 90), [6, 5.1]));
+    sfG('Ш', 8, [0, 0, 0, 10], [0, 10, 8, 10], [4, 0, 4, 10], [8, 0, 8, 10]);
+    sfG('Щ', 8.8, [0, 0, 0, 10], [0, 10, 8.8, 10], [4, 0, 4, 10], [8, 0, 8, 10], [8.8, 10, 8.8, 11.6]);
+    sfG('Ъ', 6.8, [1.5, 0, 1.5, 10], [0, 0, 1.5, 0], [1.5, 4.5, 4, 4.5].concat(A(4, 7.25, 2.75, 2.75, -90, 90), [1.5, 10]));
+    sfG('Ы', 7.5, [0, 0, 0, 10], [7.5, 0, 7.5, 10], [0, 4.5, 2.5, 4.5].concat(A(2.5, 7.25, 2.75, 2.75, -90, 90), [0, 10]));
+    sfG('Ь', 5.25, [0, 0, 0, 10], [0, 4.5, 2.5, 4.5].concat(A(2.5, 7.25, 2.75, 2.75, -90, 90), [0, 10]));
+    sfG('Э', 6.2, A(2.9, 5, 3.3, 5, -138, 138), [2, 5, 6.2, 5]);
+    sfG('Ю', 8.6, [0, 0, 0, 10], [0, 5, 2.2, 5], ...ring(5.6, 3));
+    sfG('Я', 6.25, [6.25, 0, 6.25, 10], [6.25, 0, 2.75, 0].concat(A(2.75, 2.75, 2.75, 2.75, -90, -270), [6.25, 5.5]), [3.3, 5.5, 0, 10]);
+    sfG('Ё', 5, [0, 0, 0, 10], [0, 0, 5, 0], [0, 10, 5, 10], [0, 5, 4, 5], [1, -1.8], [4, -1.8]);
+  }
+  for (const ch of Object.keys(SF)) {
+    SF[ch].s.forEach(Object.freeze);
+    Object.freeze(SF[ch].s);
+    Object.freeze(SF[ch]);
+  }
+  lib.strokeFont = Object.freeze(SF);
+
+  const sfNear = (ax, ay, bx, by) => Math.abs(ax - bx) < 0.05 && Math.abs(ay - by) < 0.05;
+  // distance from (px, py) to a polyline
+  function sfDist(px, py, s) {
+    if (s.length === 2) return Math.hypot(px - s[0], py - s[1]);
+    let best = Infinity;
+    for (let i = 0; i + 3 < s.length; i += 2) best = Math.min(best, ptSegDist(px, py, s[i], s[i + 1], s[i + 2], s[i + 3]));
+    return best;
+  }
+  function sfLen(s) {
+    let L = 0;
+    for (let i = 0; i + 3 < s.length; i += 2) L += Math.hypot(s[i + 2] - s[i], s[i + 3] - s[i + 1]);
+    return L;
+  }
+  function sfReverse(s) {
+    const r = [];
+    for (let i = s.length - 2; i >= 0; i -= 2) r.push(s[i], s[i + 1]);
+    return r;
+  }
+  // hand style: strokes that meet end to end become one pen line (E is one line and a bar)
+  const sfChainCache = new Map();
+  function sfChains(ch) {
+    let out = sfChainCache.get(ch);
+    if (out) return out;
+    const left = SF[ch].s.filter((s) => s.length >= 4).map((s) => s.slice());
+    const dots = SF[ch].s.filter((s) => s.length === 2);
+    out = [];
+    while (left.length) {
+      let line = left.shift();
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (let j = 0; j < left.length; j++) {
+          const s = left[j];
+          const n = line.length, m = s.length;
+          let add = null;
+          if (sfNear(line[n - 2], line[n - 1], s[0], s[1])) add = ['end', s];
+          else if (sfNear(line[n - 2], line[n - 1], s[m - 2], s[m - 1])) add = ['end', sfReverse(s)];
+          else if (sfNear(line[0], line[1], s[m - 2], s[m - 1])) add = ['start', s];
+          else if (sfNear(line[0], line[1], s[0], s[1])) add = ['start', sfReverse(s)];
+          if (!add) continue;
+          line = add[0] === 'end' ? line.concat(add[1].slice(2)) : add[1].slice(0, -2).concat(line);
+          left.splice(j, 1);
+          grew = true;
+          break;
+        }
+      }
+      out.push(line);
+    }
+    out = out.concat(dots);
+    sfChainCache.set(ch, out);
+    return out;
+  }
+  // cut a polyline back by d units at its start or end
+  function sfTrim(s, d, atEnd) {
+    const p = atEnd ? sfReverse(s) : s.slice();
+    let left = d;
+    while (p.length >= 4) {
+      const seg = Math.hypot(p[2] - p[0], p[3] - p[1]);
+      if (seg > left) {
+        const f = left / seg;
+        p[0] += (p[2] - p[0]) * f;
+        p[1] += (p[3] - p[1]) * f;
+        return atEnd ? sfReverse(p) : p;
+      }
+      left -= seg;
+      p.splice(0, 2);
+    }
+    return null;
+  }
+  // stencil style, drawn with butt caps and mitred corners, in glyph units. Strokes that meet end
+  // to end at a sharp angle (V, M, N, W, the arms of Y) join into one polyline: a bridge there
+  // would eat the letter. Any other end that touches an earlier stroke is cut back until its end
+  // corners clear that stroke by half a weight plus the bridge, so the gap is the same at any
+  // angle; an end that would need more than a weight past that stays joined (K's leg). A free end
+  // that runs level or plumb is lengthened by half a weight for a square corner. A stroke too short
+  // to lose its ends (A's bar at a heavy weight) keeps them. A dot becomes a square.
+  const sfStencilCache = new Map();
+  function sfEnd(s, atEnd) {
+    const n = s.length;
+    const [x, y, px, py] = atEnd ? [s[n - 2], s[n - 1], s[n - 4], s[n - 3]] : [s[0], s[1], s[2], s[3]];
+    const L = Math.hypot(x - px, y - py) || 1;
+    return { x, y, tx: (x - px) / L, ty: (y - py) / L }; // tangent points out of the stroke
+  }
+  function sfStencil(ch, wU, bU) {
+    const key = ch + '|' + wU.toFixed(3) + '|' + bU.toFixed(3);
+    let out = sfStencilCache.get(key);
+    if (out) return out;
+    const src = SF[ch].s.map((q) => q.slice());
+    for (let merged = true; merged; ) {
+      merged = false;
+      for (let i = 0; i < src.length && !merged; i++) {
+        for (let j = i + 1; j < src.length && !merged; j++) {
+          const A = src[i], B = src[j];
+          if (A.length < 4 || B.length < 4) continue;
+          for (const ea of [false, true]) {
+            for (const eb of [false, true]) {
+              const pa = sfEnd(A, ea), pb = sfEnd(B, eb);
+              const dot = pa.tx * pb.tx + pa.ty * pb.ty; // 1: the two run back over each other
+              if (merged || !sfNear(pa.x, pa.y, pb.x, pb.y) || dot < 0.26 || dot > 0.97) continue;
+              const a2 = ea ? A : sfReverse(A); // runs into the joint
+              const b2 = eb ? sfReverse(B) : B; // runs out of it
+              src[i] = a2.concat(b2.slice(2));
+              src.splice(j, 1);
+              merged = true;
+            }
+          }
+        }
+      }
+    }
+    const need = wU / 2 + bU - 1e-3;
+    const most = need + wU;
+    out = [];
+    for (let j = 0; j < src.length; j++) {
+      let s = src[j];
+      if (s.length === 2) {
+        out.push([s[0], s[1] - wU / 2, s[0], s[1] + wU / 2]);
+        continue;
+      }
+      const touches = (x, y) => {
+        for (let i = 0; i < j; i++) if (src[i].length >= 4 && sfDist(x, y, src[i]) < 0.25) return true;
+        return false;
+      };
+      const clear = (e) => {
+        for (const q of out) {
+          if (sfDist(e.x, e.y, q) < need) return false;
+          if (sfDist(e.x - (e.ty * wU) / 2, e.y + (e.tx * wU) / 2, q) < need) return false;
+          if (sfDist(e.x + (e.ty * wU) / 2, e.y - (e.tx * wU) / 2, q) < need) return false;
+        }
+        return true;
+      };
+      // shortest cut from one end that clears, or -1
+      const cutFor = (atEnd, room) => {
+        for (let d = wU / 2; d <= Math.min(room, most); d += 0.05) {
+          const r = sfTrim(s, d, atEnd);
+          if (r && r.length >= 4 && clear(sfEnd(r, atEnd))) return d;
+        }
+        return -1;
+      };
+      const n = s.length;
+      const a = touches(s[0], s[1]), b = touches(s[n - 2], s[n - 1]);
+      const room = sfLen(s) - 0.6;
+      let ca = a ? Math.max(0, cutFor(false, room)) : 0;
+      let cb = b ? Math.max(0, cutFor(true, room)) : 0;
+      if (ca + cb > room) ca = cb = 0;
+      if (ca > 0) s = sfTrim(s, ca, false);
+      if (cb > 0) s = sfTrim(s, cb, true);
+      s = s.slice();
+      const m = s.length;
+      for (const atEnd of [false, true]) {
+        if (atEnd ? cb > 0 : ca > 0) continue;
+        const e = sfEnd(s, atEnd);
+        if (Math.abs(e.tx) < 0.02 || Math.abs(e.ty) < 0.02) {
+          const i = atEnd ? m - 2 : 0;
+          s[i] += (e.tx * wU) / 2;
+          s[i + 1] += (e.ty * wU) / 2;
+        }
+      }
+      out.push(s);
+    }
+    if (sfStencilCache.size > 512) sfStencilCache.clear();
+    sfStencilCache.set(key, out);
+    return out;
+  }
+
+  /**
+   * strokeText(ctx, str, x, y, opts) : text in the built-in stroke font, identical on every machine.
+   * Latin, digits, basic punctuation and Cyrillic, upper case (lower case draws as upper case, an
+   * unknown character as '?'); '\n' starts a new line. (x, y) is the cap line of the first line at
+   * its align point; size is the cap height, a line is 1.6 × size.
+   *   style 'hand'            'hand': each pen line through inkPath (tapers, wobble, boil, reveal);
+   *                           'stencil': flat bars with bridges cut where strokes meet
+   *   size 64   color pal.ink   alpha 1   align 'left' | 'center' | 'right'   tracking 0 (units)
+   *   weight                  stroke width in px (hand size × 0.075, stencil size × 0.17)
+   *   bridge                  stencil gap in px (weight × 0.45)
+   *   slant                   shear, x per unit of height (hand 0.12, stencil 0)
+   *   jitter                  hand: per-letter baseline, tilt and scale drift, 0 for none (hand 1, stencil 0)
+   *   seed 1   boil          seeds the jitter and the ink; boil as in inkPath (hand only)
+   *   reveal                  0..1 of the whole text written in order, the pen tip on the open end (hand only)
+   *   ink {}                  extra inkPath options for the hand style (double, rough, wobble, nib...)
+   * Returns { width, height } of the whole text in px.
+   */
+  function strokeText(ctx, str, x, y, o = {}) {
+    const stencil = o.style === 'stencil';
+    const size = o.size != null ? o.size : 64;
+    const u = size / 10;
+    const weight = o.weight != null ? o.weight : size * (stencil ? 0.17 : 0.075);
+    const bridge = o.bridge != null ? o.bridge : weight * 0.45;
+    const slant = o.slant != null ? o.slant : stencil ? 0 : 0.12;
+    const jitter = o.jitter != null ? o.jitter : stencil ? 0 : 1;
+    const seed = seedInt(o.seed === undefined ? 1 : o.seed);
+    const gap = 1.8 * u + weight + (o.tracking || 0) * u;
+    const lead = size * 1.6;
+    const lines = String(str).toUpperCase().split('\n');
+    // layout: every glyph placed as a list of px polylines
+    const placed = [];
+    let width = 0;
+    lines.forEach((line, li) => {
+      const chars = Array.from(line).map((ch) => (SF[ch] ? ch : '?'));
+      let w = 0;
+      chars.forEach((ch, k) => (w += SF[ch].w * u + (k < chars.length - 1 ? gap : 0)));
+      if (chars.length) w += weight;
+      width = Math.max(width, w);
+      let pen = (o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x) + weight / 2;
+      const top = y + li * lead;
+      chars.forEach((ch, k) => {
+        const g = SF[ch];
+        const r = rng(hash(seed, li, k, 71));
+        const dy = jitter * (r() - 0.5) * 0.5 * u;
+        const rot = jitter * (r() - 0.5) * 0.1;
+        const sc = 1 + jitter * (r() - 0.5) * 0.08;
+        const cs = Math.cos(rot) * sc, sn = Math.sin(rot) * sc;
+        const cx = (g.w * u) / 2, cy = 5 * u;
+        const map = (s) => {
+          const out = [];
+          for (let i = 0; i < s.length; i += 2) {
+            const lx = s[i] * u - cx, ly = s[i + 1] * u - cy;
+            const px = cx + lx * cs - ly * sn, py = cy + lx * sn + ly * cs;
+            out.push([pen + px + slant * (10 * u - py), top + py + dy]);
+          }
+          return out;
+        };
+        const strokes = stencil ? sfStencil(ch, weight / u, bridge / u) : sfChains(ch);
+        strokes.forEach((s, j) => placed.push({ pts: map(s), seed: hash(seed, li, k, j) | 0 }));
+        pen += g.w * u + gap;
+      });
+    });
+    const height = lines.length ? (lines.length - 1) * lead + size : 0;
+    const color = o.color || pal.ink;
+    ctx.save();
+    ctx.globalAlpha *= o.alpha != null ? o.alpha : 1;
+    if (stencil) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = weight;
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      ctx.miterLimit = 2; // square corners stay square, V's point is cut flat
+      ctx.beginPath();
+      for (const p of placed) {
+        const P = p.pts;
+        ctx.moveTo(P[0][0], P[0][1]);
+        if (P.length === 1) ctx.lineTo(P[0][0], P[0][1] + 0.01);
+        for (let i = 1; i < P.length; i++) ctx.lineTo(P[i][0], P[i][1]);
+      }
+      ctx.stroke();
+      ctx.restore();
+      return { width, height };
+    }
+    // hand: lengths first, so reveal can write the text in order
+    let total = 0;
+    for (const p of placed) {
+      let L = 0;
+      for (let i = 1; i < p.pts.length; i++) L += Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]);
+      p.len = p.pts.length === 1 ? weight : L;
+      total += p.len;
+    }
+    const upto = o.reveal != null ? clamp(+o.reveal || 0, 0, 1) * total : Infinity;
+    let done = 0;
+    ctx.fillStyle = color;
+    for (const p of placed) {
+      if (done >= upto) break;
+      const part = upto >= done + p.len ? null : (upto - done) / p.len;
+      done += p.len;
+      if (p.pts.length === 1) {
+        const r = rng(p.seed);
+        ctx.beginPath();
+        ctx.arc(p.pts[0][0] + (r() - 0.5) * weight * 0.3, p.pts[0][1], weight * 0.72, 0, TAU);
+        ctx.fill();
+        continue;
+      }
+      const t = Math.min(weight * 2.2, p.len * 0.3);
+      const q = Object.assign(
+        { color, width: weight, seed: p.seed, smooth: false, step: Math.max(1.5, weight * 0.4), wobble: jitter * weight * 0.2, taper: [t * 0.7, t], boil: o.boil },
+        o.ink
+      );
+      if (o.boil === undefined) delete q.boil;
+      if (part != null) q.reveal = part;
+      inkPath(ctx, p.pts, q);
+    }
+    ctx.restore();
+    return { width, height };
+  }
+  lib.strokeText = strokeText;
+
+  // ===========================================================================
+  // Dry brush
+  // ===========================================================================
+
+  /**
+   * dryBrush(ctx, pts, opts) : a dry-brush stroke. The hairs leave parallel streaks that break up
+   * in clumps as the brush runs dry, the paper tooth skips the ink, the edges are ragged, stray
+   * hairs split the tail, and the width follows the pressure. pts is one polyline, or an array of
+   * polylines that share one plate (a tree's branches). The plate is rendered once per points,
+   * options, seed, boil variant and FILM.S, then blitted; it is never keyed by raw time.
+   *   width     28       brush width at full pressure (px)
+   *   color     pal.ink
+   *   alpha     1
+   *   seed      1
+   *   dry       0.45     0 loaded (solid, streaks only toward the tail) .. 1 starved (scratchy from the start)
+   *   tooth     0.6      how hard the paper grain breaks the ink, 0..1
+   *   splay     0.5      stray hairs past the edge and a fanned, split tail, 0..1
+   *   pressure  null     fn(u 0..1) => width multiplier; default a blunt landing and a lift-off
+   *                      over the last third. Low pressure also lifts the outer hairs off the paper.
+   *   bristles  auto     hairs across the width (width / 2.4, 6..64)
+   *   wobble    1.5      hand drift of the centreline (px)
+   *   smooth    true     Catmull-Rom through the points
+   *   boil      true     three drawings on the 12 fps clock; false holds drawing 0, a number picks one
+   *   key                stable id for a pressure function whose source text does not determine it
+   */
+  const DB_LAND = 0.06;
+  function dbPressure(u) {
+    return (0.74 + 0.26 * smoothstep(0, DB_LAND, u)) * (1 - 0.62 * smoothstep(0.64, 1, u));
+  }
+  function dbFillPressure(u) {
+    return (0.86 + 0.14 * smoothstep(0, DB_LAND, u)) * (1 - 0.4 * smoothstep(0.84, 1, u));
+  }
+
+  function dbVariant(o) {
+    if (o.boil === false) return 0;
+    if (typeof o.boil === 'number') return Math.abs(o.boil | 0) % 3;
+    const b = lib.boil(lib.T);
+    return isFinite(b) ? ((b % 3) + 3) % 3 : 0;
+  }
+
+  // Paper tooth: a 256 px periodic tile per boil variant (never per time), shared by every plate.
+  // Fine 2 px value noise, a pixel hash and an 8 px mottle so dry ink breaks in patches, not salt.
+  const DB_TILE = 256;
+  const dbTeeth = [];
+  function dbToothTile(variant) {
+    if (dbTeeth[variant]) return dbTeeth[variant];
+    const T = new Float32Array(DB_TILE * DB_TILE);
+    const s = 7717 + variant * 131;
+    const vnoise = (x, y, cell, seed) => {
+      const n = DB_TILE / cell;
+      const gx = x / cell, gy = y / cell;
+      const ix = Math.floor(gx), iy = Math.floor(gy);
+      const fx = gx - ix, fy = gy - iy;
+      const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+      const x0 = ix % n, y0 = iy % n, x1 = (ix + 1) % n, y1 = (iy + 1) % n;
+      const a = h3(x0, y0, seed), b = h3(x1, y0, seed), c = h3(x0, y1, seed), d = h3(x1, y1, seed);
+      return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+    };
+    for (let y = 0; y < DB_TILE; y++) {
+      for (let x = 0; x < DB_TILE; x++) {
+        T[y * DB_TILE + x] = 0.46 * vnoise(x, y, 2, s) + 0.3 * h3(x, y, s + 1) + 0.24 * vnoise(x, y, 8, s + 2);
+      }
+    }
+    return (dbTeeth[variant] = T);
+  }
+
+  function dbPlate(b, S) {
+    const x0 = Math.floor(b.x), y0 = Math.floor(b.y);
+    const lw = Math.max(1, Math.ceil(b.x + b.w) - x0);
+    const lh = Math.max(1, Math.ceil(b.y + b.h) - y0);
+    const cw = Math.max(1, Math.round(lw * S));
+    const ch = Math.max(1, Math.round(lh * S));
+    return { x0, y0, lw, lh, cw, ch, sx: cw / lw, sy: ch / lh, buf: new Float32Array(cw * ch) };
+  }
+
+  // Deposits one stroke's ink into the plate buffer (max, not sum: ink does not pile up).
+  // Each hair is walked along the centreline and written as a short span across it.
+  function dbStroke(P, pts, q) {
+    const C = centreline(pts, false, 3, q.smooth, 0, 0);
+    if (C.m < 2) return;
+    const L = C.S[C.m - 1];
+    if (!(L > 0.5)) return;
+    const m = C.m;
+    const r = rng(q.seed);
+    // per-sample centreline drift, pressure and load
+    const D = new Float64Array(m), Pw = new Float64Array(m), Ld = new Float64Array(m);
+    const dry = q.dry;
+    const load0 = lerp(1.3, 0.66, dry);
+    const drain = 0.28 + 0.7 * dry;
+    for (let k = 0; k < m; k++) {
+      const s = C.S[k], u = s / L;
+      D[k] = q.wobble * (0.7 * noise1(s / 170, q.seed + 3) + 0.3 * noise1(s / 45, q.seed + 4));
+      Pw[k] = Math.max(0.05, q.pressure(u));
+      Ld[k] = load0 - drain * Math.pow(u, 1.5) + 0.08 * noise1(s / 90, q.seed + 5);
+    }
+    const N = q.bristles;
+    const sp = q.width / N;
+    const hairR = Math.max(0.55, 0.5 * sp * P.sx * 1.15);
+    const land = Math.min(L * 0.3, q.width * 0.45);
+    const clumps = Math.max(2, Math.round(N / 5));
+    const hairs = [];
+    for (let j = 0; j < N; j++) {
+      const v = -1 + (2 * (j + 0.5)) / N + (r() - 0.5) * (1.1 / N);
+      const av = Math.abs(v);
+      hairs.push({
+        v,
+        cap: 1 - 0.32 * av * av * av - 0.24 * r(),
+        thick: 0.72 + 0.6 * r(),
+        len: 30 + 120 * r(),
+        seed: (hash(q.seed, j) & 0x7fffffff) | 0,
+        clump: (hash(q.seed, 'clump', Math.floor((j * clumps) / N)) & 0x7fffffff) | 0,
+        a: r() * land * (0.25 + 0.75 * av), // outer hairs touch down later: a ragged landing
+        b: L,
+      });
+    }
+    const stray = Math.round(q.splay * N * 0.16);
+    for (let j = 0; j < stray; j++) {
+      const a = r() * L * 0.85;
+      hairs.push({
+        v: (r() < 0.5 ? -1 : 1) * (1.04 + 0.24 * r()),
+        cap: 0.55 + 0.3 * r(),
+        thick: 0.55 + 0.35 * r(),
+        len: 18 + 50 * r(),
+        seed: (hash(q.seed, 'stray', j) & 0x7fffffff) | 0,
+        clump: (hash(q.seed, 'stray-clump', j) & 0x7fffffff) | 0,
+        a,
+        b: Math.min(L, a + L * (0.06 + 0.26 * r())),
+      });
+    }
+    const streakAmp = 0.16 + 0.34 * dry;
+    const clumpAmp = 0.12 + 0.4 * dry;
+    const buf = P.buf, cw = P.cw, ch = P.ch, sx = P.sx, sy = P.sy;
+    // One grid of spans along the stroke, shared by every hair: centre (device px), normal,
+    // pressure, load, half-width with the tail fan, and the landing boost.
+    const ds = 1 / sx; // one device pixel between spans: the spans overlap, so a hair has no holes
+    const n = Math.max(2, Math.floor(L / ds) + 1);
+    const GX = new Float64Array(n), GY = new Float64Array(n), GNX = new Float64Array(n), GNY = new Float64Array(n);
+    const GP = new Float64Array(n), GL = new Float64Array(n), GH = new Float64Array(n), GU = new Float64Array(n);
+    for (let i = 0, k = 0; i < n; i++) {
+      const s = Math.min(L, i * ds);
+      while (k < m - 2 && C.S[k + 1] < s) k++;
+      const s0 = C.S[k], s1 = C.S[k + 1];
+      const f = s1 > s0 ? clamp((s - s0) / (s1 - s0)) : 0;
+      const nx = C.NX[k] + (C.NX[k + 1] - C.NX[k]) * f;
+      const ny = C.NY[k] + (C.NY[k + 1] - C.NY[k]) * f;
+      const nl = Math.hypot(nx, ny) || 1;
+      const d = D[k] + (D[k + 1] - D[k]) * f;
+      const p = Pw[k] + (Pw[k + 1] - Pw[k]) * f;
+      const u = s / L;
+      GNX[i] = nx / nl;
+      GNY[i] = ny / nl;
+      GX[i] = (C.X[k] + (C.X[k + 1] - C.X[k]) * f + GNX[i] * d - P.x0) * sx;
+      GY[i] = (C.Y[k] + (C.Y[k + 1] - C.Y[k]) * f + GNY[i] * d - P.y0) * sy;
+      GP[i] = p;
+      GL[i] = (Ld[k] + (Ld[k + 1] - Ld[k]) * f) + (s < land ? 0.3 * (1 - s / land) : 0);
+      GH[i] = (1 + q.splay * 0.5 * smoothstep(0.7, 1, u)) * q.width * 0.5 * p * sx;
+      GU[i] = 0.7 + 0.6 * u;
+    }
+    const NS = 10; // hair noise is evaluated every NS spans and interpolated
+    const wander = sp * 0.45 * sx;
+    for (let h = 0; h < hairs.length; h++) {
+      const hr = hairs[h];
+      const hv = hr.v, cap = hr.cap, hseed = hr.seed, hclump = hr.clump;
+      const k1 = 1 / hr.len, k2 = 1 / (hr.len * 0.4);
+      const inkAt = (s) => (0.62 * noise1(s * k1, hseed) + 0.22 * noise1(s * k2, hseed + 1)) * streakAmp + noise1(s / 70, hclump) * clumpAmp;
+      const lift = Math.abs(hv) - 0.3; // touch = (0.78 p - lift) / 0.16 + 0.5
+      const rr = hairR * hr.thick;
+      const i0 = Math.max(0, Math.ceil(hr.a / ds)), i1 = Math.min(n - 1, Math.floor(hr.b / ds));
+      // noise blocks of NS spans from i0; each block starts where the last one ended
+      let iA = i0;
+      let nA = inkAt(i0 * ds), wA = noise1((i0 * ds) / 26, hseed + 2);
+      let nB = inkAt((i0 + NS) * ds), wB = noise1(((i0 + NS) * ds) / 26, hseed + 2);
+      for (let i = i0; i <= i1; i++) {
+        if (i - iA >= NS) {
+          iA += NS;
+          nA = nB;
+          wA = wB;
+          const sB = (iA + NS) * ds;
+          nB = inkAt(sB);
+          wB = noise1(sB / 26, hseed + 2);
+        }
+        const p = GP[i];
+        // outer hairs lift off first as the pressure drops
+        let touch = (0.78 * p - lift) * 6.25 + 0.5;
+        if (touch <= 0) continue;
+        if (touch > 1) touch = 1;
+        const g = (i - iA) / NS;
+        const e = (GL[i] * cap + (nA + (nB - nA) * g) * GU[i]) * touch;
+        if (e <= 0.03) continue;
+        const nx = GNX[i], ny = GNY[i];
+        const off = hv * GH[i] + wander * (wA + (wB - wA) * g);
+        const px = GX[i] + nx * off;
+        const py = GY[i] + ny * off;
+        const R = rr * (0.72 + 0.28 * p) + 0.5;
+        for (let tt = 0.5 - R; tt < R; tt += 1) {
+          const x = px + nx * tt, y = py + ny * tt;
+          if (x < 0 || y < 0) continue;
+          const xi = x | 0, yi = y | 0;
+          if (xi >= cw || yi >= ch) continue;
+          const c = R - (tt < 0 ? -tt : tt);
+          const v = c >= 1 ? e : e * c;
+          const j = yi * cw + xi;
+          if (v > buf[j]) buf[j] = v;
+        }
+      }
+    }
+  }
+
+  // Ink buffer -> RGBA. The paper tooth sets a threshold per pixel: a loaded brush clears it
+  // everywhere, a dry one only on the grain's peaks. keep(i, x, y) (optional) scales the ink.
+  function dbFinish(P, img, q, variant, keep) {
+    const d = img.data;
+    const buf = P.buf, cw = P.cw, ch = P.ch;
+    const rgb = parseColor(q.color);
+    const T = dbToothTile(variant);
+    const tx = q.seed & 255, ty = (q.seed >>> 8) & 255;
+    const tooth = q.tooth;
+    const A = q.alpha * 255;
+    const col = new Int32Array(cw);
+    for (let xx = 0; xx < cw; xx++) col[xx] = (Math.floor(P.x0 + (xx + 0.5) / P.sx) + tx) & 255;
+    for (let yy = 0; yy < ch; yy++) {
+      const row = ((Math.floor(P.y0 + (yy + 0.5) / P.sy) + ty) & 255) * DB_TILE;
+      for (let xx = 0; xx < cw; xx++) {
+        const i = yy * cw + xx;
+        let e = buf[i];
+        if (!(e > 0.02)) continue;
+        if (keep) {
+          e *= keep(i, xx, yy);
+          if (!(e > 0.02)) continue;
+        }
+        const grain = T[row + col[xx]];
+        let a = (e - (0.2 + tooth * 0.72 * grain) + 0.07) / 0.14;
+        if (a <= 0) continue;
+        if (a > 1) a = 1;
+        a = a * a * (3 - 2 * a) * (0.8 + 0.2 * (e > 1 ? 1 : e));
+        const k = i * 4;
+        d[k] = rgb[0];
+        d[k + 1] = rgb[1];
+        d[k + 2] = rgb[2];
+        d[k + 3] = (a * A + 0.5) | 0;
+      }
+    }
+  }
+
+  function dbParams(o, seed, variant, width, defPressure, hairGap) {
+    const n = o.bristles != null ? o.bristles | 0 : Math.round(width / hairGap);
+    return {
+      seed: (hash(seed, variant) & 0x7fffffff) | 0,
+      width,
+      color: o.color || pal.ink,
+      alpha: clamp(o.alpha != null ? +o.alpha : 1, 0, 1),
+      dry: clamp(o.dry != null ? +o.dry : 0.45, 0, 1),
+      tooth: clamp(o.tooth != null ? +o.tooth : 0.6, 0, 1),
+      splay: clamp(o.splay != null ? +o.splay : 0.5, 0, 1),
+      pressure: typeof o.pressure === 'function' ? o.pressure : defPressure,
+      bristles: Math.max(6, Math.min(64, n)),
+      wobble: o.wobble != null ? +o.wobble : 1.5,
+      smooth: o.smooth !== false,
+    };
+  }
+  function dbKey(q, o) {
+    return [q.seed, q.width, q.color, q.alpha, q.dry, q.tooth, q.splay, q.bristles, q.wobble, q.smooth,
+      typeof o.pressure === 'function' ? hash(String(o.pressure)) : 0, o.key != null ? String(o.key) : ''].join('|');
+  }
+  function dbBlit(ctx, plate) {
+    if (!plate || !plate.length) return;
+    ctx.save();
+    if (Math.abs(renderScale() - 1) < 1e-6) ctx.imageSmoothingEnabled = false;
+    for (const p of plate) ctx.drawImage(p.c, p.x, p.y, p.w, p.h);
+    ctx.restore();
+  }
+  // The finished plate as canvases: one per run of inked columns (trunks side by side keep only
+  // their own strips, not the empty paper between them), each trimmed to its inked rows.
+  function dbCanvas(P, q, variant, keep) {
+    const cw = P.cw, ch = P.ch;
+    const img = new ImageData(cw, ch);
+    dbFinish(P, img, q, variant, keep);
+    const d = img.data;
+    const top = new Int32Array(cw).fill(ch), bottom = new Int32Array(cw).fill(-1);
+    for (let yy = 0; yy < ch; yy++) {
+      for (let xx = 0, k = yy * cw * 4 + 3; xx < cw; xx++, k += 4) {
+        if (d[k]) {
+          if (yy < top[xx]) top[xx] = yy;
+          bottom[xx] = yy;
+        }
+      }
+    }
+    const parts = [];
+    const gap = 4;
+    for (let xx = 0; xx < cw; ) {
+      if (bottom[xx] < 0) {
+        xx++;
+        continue;
+      }
+      let x1 = xx, r0 = top[xx], r1 = bottom[xx];
+      for (let e = xx + 1; e < cw && e <= x1 + gap; e++) {
+        if (bottom[e] < 0) continue;
+        x1 = e;
+        if (top[e] < r0) r0 = top[e];
+        if (bottom[e] > r1) r1 = bottom[e];
+      }
+      const w = x1 - xx + 1, h = r1 - r0 + 1;
+      const c = newCanvas(w, h);
+      c.getContext('2d').putImageData(img, -xx, -r0, xx, r0, w, h);
+      parts.push({ c, x: P.x0 + xx / P.sx, y: P.y0 + r0 / P.sy, w: w / P.sx, h: h / P.sy });
+      xx = x1 + 1;
+    }
+    return parts;
+  }
+
+  function dryBrush(ctx, pts, o = {}) {
+    const lines = toPolys(pts);
+    if (!lines) return;
+    const strokes = lines.filter((l) => l.length >= 2);
+    if (!strokes.length) return;
+    const S = renderScale();
+    const width = Math.max(1, o.width != null ? +o.width : 28);
+    const variant = dbVariant(o);
+    const q = dbParams(o, seedInt(o.seed === undefined ? 1 : o.seed), variant, width, dbPressure, 2.4);
+    const key = ['dryBrush', hashClip(strokes), S, dbKey(q, o)].join('|');
+    const plate = cached(key, () => {
+      const b = polysBounds(strokes);
+      const pad = width * (0.5 + 0.5 * q.splay) + Math.abs(q.wobble) * 1.5 + 4;
+      const P = dbPlate({ x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad }, S);
+      strokes.forEach((line, i) => dbStroke(P, line, Object.assign({}, q, { seed: (hash(q.seed, i) & 0x7fffffff) | 0 })));
+      return dbCanvas(P, q, variant, null);
+    });
+    dbBlit(ctx, plate);
+  }
+  lib.dryBrush = dryBrush;
+
+  // Even-odd coverage of rings on the plate grid, anti-aliased along each row.
+  function dbInside(P, rings) {
+    const cw = P.cw, ch = P.ch;
+    const M = new Uint8Array(cw * ch);
+    const xs = [];
+    for (let yy = 0; yy < ch; yy++) {
+      const ly = P.y0 + (yy + 0.5) / P.sy;
+      xs.length = 0;
+      for (const ring of rings) {
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const a = ring[j], c = ring[i];
+          if ((a[1] > ly) === (c[1] > ly)) continue;
+          xs.push((a[0] + ((ly - a[1]) * (c[0] - a[0])) / (c[1] - a[1]) - P.x0) * P.sx);
+        }
+      }
+      xs.sort((p, s) => p - s);
+      const row = yy * cw;
+      for (let i = 0; i + 1 < xs.length; i += 2) {
+        const xa = xs[i], xb = xs[i + 1];
+        const i0 = Math.max(0, Math.floor(xa)), i1 = Math.min(cw - 1, Math.floor(xb));
+        for (let xx = i0; xx <= i1; xx++) {
+          const pc = xx + 0.5;
+          const cov = clamp(Math.min(pc - xa, xb - pc) + 0.5);
+          const v = (cov * 255 + 0.5) | 0;
+          if (v > M[row + xx]) M[row + xx] = v;
+        }
+      }
+    }
+    return M;
+  }
+
+  /**
+   * dryBrushFill(ctx, shape, opts) : a silhouette painted in parallel dry-brush strokes (trees,
+   * figures). shape is a closed outline, a list of outlines (even-odd, several trunks on one
+   * plate) or a lib.geo entry. The core stays dense, the stroke ends dry out and split, and the
+   * edge frays into hairs along the stroke direction. Cached like dryBrush.
+   *   angle     auto     stroke direction (radians); auto runs along the longer side of the outlines'
+   *                      bounds (summed over the outlines), upward when they are tall: strokes
+   *                      start loaded at the base
+   *   width     26       brush width (px)
+   *   spacing   0.7·width  distance between stroke centrelines
+   *   reach     460      longest single stroke; longer chords are painted in overlapping reloads
+   *   fringe    0.35·width  how far hairs may run past the outline along the strokes (px)
+   *   dry       0.3
+   *   bristles  auto     width / 3: the core is covered by several strokes, so fewer hairs each
+   *   tooth, splay, color, alpha, seed, wobble, pressure, boil, key: as dryBrush
+   */
+  function dryBrushFill(ctx, shape, o = {}) {
+    let src = shape;
+    if (src && typeof src.outline === 'function') src = src.outline();
+    const polys = toPolys(src);
+    if (!polys) return;
+    const rings = polys.filter((p) => p.length >= 3);
+    if (!rings.length) return;
+    const S = renderScale();
+    const b = polysBounds(rings);
+    const width = Math.max(2, o.width != null ? +o.width : 26);
+    const spacing = Math.max(1, o.spacing != null ? +o.spacing : width * 0.7);
+    const reach = Math.max(width * 2, o.reach != null ? +o.reach : 460);
+    const fringe = Math.max(0, o.fringe != null ? +o.fringe : width * 0.35);
+    let tall = 0;
+    for (const ring of rings) {
+      const rb = polysBounds([ring]);
+      tall += rb.h - rb.w;
+    }
+    const angle = o.angle != null ? +o.angle : tall >= 0 ? -Math.PI / 2 : 0;
+    const variant = dbVariant(o);
+    const q = dbParams(Object.assign({ dry: 0.3 }, o), seedInt(o.seed === undefined ? 1 : o.seed), variant, width, dbFillPressure, 3);
+    const key = ['dryBrushFill', hashClip(rings), S, angle, spacing, reach, fringe, dbKey(q, o)].join('|');
+    const plate = cached(key, () => {
+      const pad = fringe + width * 0.6 + 4;
+      const P = dbPlate({ x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad }, S);
+      const dx = Math.cos(angle), dy = Math.sin(angle);
+      const nx = -dy, ny = dx;
+      let n0 = Infinity, n1 = -Infinity;
+      for (const ring of rings) {
+        for (const p of ring) {
+          const v = p[0] * nx + p[1] * ny;
+          if (v < n0) n0 = v;
+          if (v > n1) n1 = v;
+        }
+      }
+      const r = rng(hash(q.seed, 'fill'));
+      let si = 0;
+      for (let off = n0 + spacing * (0.2 + 0.3 * r()); off < n1 + spacing * 0.3; off += spacing * (0.85 + 0.3 * r())) {
+        const cut = Math.min(n1 - 0.5, Math.max(n0 + 0.5, off));
+        // where the line {p·n = cut} crosses the outline, as positions along d
+        const ts = [];
+        for (const ring of rings) {
+          for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const a = ring[j], c = ring[i];
+            const va = a[0] * nx + a[1] * ny - cut, vc = c[0] * nx + c[1] * ny - cut;
+            if ((va > 0) === (vc > 0)) continue;
+            const f = va / (va - vc);
+            ts.push((a[0] + (c[0] - a[0]) * f) * dx + (a[1] + (c[1] - a[1]) * f) * dy);
+          }
+        }
+        ts.sort((p, s) => p - s);
+        for (let i = 0; i + 1 < ts.length; i += 2) {
+          const t0 = ts[i] - width * 0.2 * r(), t1 = ts[i + 1] + fringe * (0.4 + 0.6 * r());
+          const len = t1 - t0;
+          const n = Math.max(1, Math.ceil(len / reach));
+          const seg = len / n;
+          const stagger = (r() - 0.5) * seg * 0.5; // reloads do not line up across strokes
+          for (let k = 0; k < n; k++) {
+            const a = k ? t0 + seg * k + stagger - seg * 0.12 : t0;
+            const e = k < n - 1 ? t0 + seg * (k + 1) + stagger + seg * 0.06 : t1;
+            const lean = (r() - 0.5) * spacing * 0.4;
+            const line = [
+              [a * dx + cut * nx, a * dy + cut * ny],
+              [e * dx + (cut + lean) * nx, e * dy + (cut + lean) * ny],
+            ];
+            dbStroke(P, line, Object.assign({}, q, { seed: (hash(q.seed, si++) & 0x7fffffff) | 0 }));
+          }
+        }
+      }
+      // Trim to the outline. A pixel outside it survives where a hair ran on past the edge: the
+      // outline lies behind it along the stroke (within fringe) or just beside it.
+      const M = dbInside(P, rings);
+      const cw = P.cw, ch = P.ch;
+      const fr = fringe * P.sx;
+      const hs = q.seed + 907;
+      const at = (x, y) => {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        return xi < 0 || yi < 0 || xi >= cw || yi >= ch ? 0 : M[yi * cw + xi];
+      };
+      const keep = (i, xx, yy) => {
+        const m = M[i];
+        if (m >= 255) return 1;
+        const lx = P.x0 + (xx + 0.5) / P.sx, ly = P.y0 + (yy + 0.5) / P.sy;
+        const hair = clamp(0.4 + 0.9 * noise2((lx * dx + ly * dy) * 0.025, (lx * nx + ly * ny) * 0.5, hs));
+        const f = fr * hair;
+        const px = xx + 0.5, py = yy + 0.5;
+        let best = m;
+        if (f > 0.5) {
+          const w = 0.3 * f;
+          best = Math.max(best, at(px - dx * f, py - dy * f), at(px + dx * f, py + dy * f),
+            at(px - dx * f * 0.5, py - dy * f * 0.5), at(px + dx * f * 0.5, py + dy * f * 0.5),
+            at(px + nx * w, py + ny * w), at(px - nx * w, py - ny * w));
+        }
+        return best / 255;
+      };
+      return dbCanvas(P, q, variant, keep);
+    });
+    dbBlit(ctx, plate);
+  }
+  lib.dryBrushFill = dryBrushFill;
+
+  // ===========================================================================
   // Read-only
   // ===========================================================================
 

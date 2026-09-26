@@ -18,7 +18,7 @@
 //                  no text drawn below the safe area (a literal y above FILM.safeArea().y1: 1540 on
 //                  1080×1920, the centred 90% box otherwise; an expression is not read);
 //                  warns on a literal colour outside lib.js (colours come from lib.pal)
-//   4 timeline     coverage, ids, transitions, grade ranges and tint names; warns on off-grid hits
+//   4 timeline     coverage, ids, transitions, grade ranges, tint and duotone names; warns on off-grid hits
 //                  and cuts, a bpm whose 16ths miss the frame grid, a duration that is not whole bars,
 //                  and a frame or carrier that differs from docs/theme.json
 //   5 draw         every checked frame draws without throwing and is not one flat colour
@@ -37,6 +37,9 @@
 //                  created on the second fails (shot, count, total area, first T). Warns when peak
 //                  live canvas area exceeds about 16× the frame. A warning does not fail the gate.
 //                  A long film is split across separate browsers. Every frame is still drawn twice.
+//   12 accent      warns when the theme's accent colour (docs/theme.json accent.budget, measured on the check 9
+//                  frames: every frame at scale 0.25, grain post off) runs longer, shows more often or covers more
+//                  of a frame than the budget allows. No budget → PASS. A warning does not fail the gate.
 //
 // Options: --scale s (default 1), --sweep N (every Nth frame, default 4), --det N (add N evenly spaced determinism
 //          frames on top of the per-shot ones, default 0; never fewer than every shot),
@@ -50,6 +53,7 @@ const os = require('os');
 const path = require('path');
 const C = require('./common.cjs');
 const { build } = require('./build.cjs');
+const { accentBudgetProblem } = require('./theme.cjs');
 
 const results = [];
 function report(n, name, ok, summary, details = []) {
@@ -365,6 +369,57 @@ function worstViolation(kind) {
   return best;
 }
 
+// Check 12 (accent budget). WARN only. The theme's accent.budget in docs/theme.json (tools/fixtures/theme.json
+// under --fixtures) is measured on the check 9 frames: every frame at scale 0.25, grain post off. A pixel is
+// accent when each channel sits within ACCENT_TOL of lib.pal[budget.row || accent.base]; a frame shows the accent
+// when those pixels cover at least ACCENT_MIN of it (about 13 pixels at scale 0.25), so antialiased edges and
+// the fading tail of a ring do not count, and one solid dot does.
+//   frames  the longest run of consecutive accent frames (one event), in frames at 24 fps
+//   share   accent frames as a share of the film's frames (not measured under --shot)
+//   area    the largest share of one frame the accent covers
+// Calibration (check.cjs copied onto copies of the films, theme.json of their theme in docs/):
+//   butterfly-life (house, frames 12): WARN, 44 of 768 frames, one run of 32 in sun-compass (the magenta heading
+//     line holds 1.3 s, against house art bible section 5 "each magenta event lasts at most 12 frames"); every other run fits
+//   indigo-bunting-stars (negative, area 0.01): PASS, peak 0.003%: the Polaris core is a few pixels at scale 0.25
+//   fixtures: palette (the swatch sheet) 24 frames, fx-map 23; annMagenta #E43D8C sits outside the tolerance
+const ACCENT_TOL = 24;
+const ACCENT_MIN = 0.0001;
+
+function readAccentBudget(file) {
+  if (!fs.existsSync(file)) return null;
+  let th;
+  try {
+    th = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    return { error: `${path.basename(file)}: ${e.message}` };
+  }
+  const acc = th && typeof th === 'object' ? th.accent : null;
+  if (!acc || typeof acc !== 'object' || acc.budget === undefined) return null;
+  const problem = accentBudgetProblem(acc);
+  if (problem) return { error: `accent.budget: ${problem}` };
+  const b = acc.budget;
+  return { row: b.row !== undefined ? b.row : acc.base, frames: b.frames, share: b.share, area: b.area };
+}
+
+function analyzeAccent(counts, pixels, from) {
+  const runs = [];
+  let on = 0;
+  let peak = { area: 0, frame: from };
+  let run = null;
+  counts.forEach((c, i) => {
+    const area = c / pixels;
+    if (area > peak.area) peak = { area, frame: from + i };
+    if (area >= ACCENT_MIN) {
+      on++;
+      if (run) run.end = from + i;
+      else runs.push((run = { start: from + i, end: from + i }));
+    } else run = null;
+  });
+  for (const r of runs) r.len = r.end - r.start + 1;
+  const longest = runs.reduce((m, r) => Math.max(m, r.len), 0);
+  return { runs, longest, on, n: counts.length, peak };
+}
+
 // One renderer thread cannot draw a 32s film in 20s: strokes do not get cheaper at scale 0.25.
 // Split the frame range across separate browsers. A short fixture stays on one.
 function flashWorkerCount(nFrames) {
@@ -409,8 +464,9 @@ function splitFrameRange(from, to, workers) {
 
 // Runs in the page. Returns base64 of linear-light block means. step skips device pixels inside
 // a block; the mean is still dozens of samples, and a flash covering a quarter of the frame
-// cannot hide between them.
-function sampleBlocks({ from, to, cols, rows, fps, step }) {
+// cannot hide between them. With `accent` (a lib.pal row name) it also counts, per frame, the pixels
+// within ACCENT_TOL of that colour on every channel, for check 12: the same draw, no second pass.
+function sampleBlocks({ from, to, cols, rows, fps, step, accent, tol }) {
   step = step > 1 ? step | 0 : 1;
   const lut = new Float64Array(256);
   for (let i = 0; i < 256; i++) {
@@ -437,12 +493,22 @@ function sampleBlocks({ from, to, cols, rows, fps, step }) {
     y0[r] = Math.floor((r * H) / rows);
     y1[r] = Math.max(y0[r] + 1, Math.floor(((r + 1) * H) / rows));
   }
+  const hex = accent && FILM.lib && FILM.lib.pal ? FILM.lib.pal[accent] : null;
+  const acc = typeof hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(hex) ? [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) : null;
+  const accCount = acc ? [] : null;
   FILM.post = false;
   let o = 0;
   for (let f = from; f < to; f++) {
     FILM.errors = [];
     FILM.renderFrame(f / fps);
     const d = FILM.ctx.getImageData(0, 0, W, H).data;
+    if (acc) {
+      let n = 0;
+      for (let p = 0; p < d.length; p += 4) {
+        if (Math.abs(d[p] - acc[0]) <= tol && Math.abs(d[p + 1] - acc[1]) <= tol && Math.abs(d[p + 2] - acc[2]) <= tol) n++;
+      }
+      accCount.push(n);
+    }
     for (let r = 0; r < rows; r++) {
       const ya = y0[r];
       const yb = y1[r];
@@ -473,13 +539,13 @@ function sampleBlocks({ from, to, cols, rows, fps, step }) {
   let bin = '';
   const CH = 0x8000;
   for (let i = 0; i < out.length; i += CH) bin += String.fromCharCode.apply(null, out.subarray(i, Math.min(out.length, i + CH)));
-  return btoa(bin);
+  return { blocks: btoa(bin), accent: accCount, accentHex: acc ? hex : null, pixels: W * H };
 }
 
 // Own browsers, not extra pages in the gate's browser: pages in one browser share a renderer thread.
-async function gatherFlashSamples(loadable, { from, to, shotId, fps, cols, rows, pagesOpened, frameWidth, frameHeight }) {
+async function gatherFlashSamples(loadable, { from, to, shotId, fps, cols, rows, pagesOpened, frameWidth, frameHeight, accent = null }) {
   const ranges = splitFrameRange(from, to, flashWorkerCount(to - from));
-  if (!ranges.length) return Buffer.alloc(0);
+  if (!ranges.length) return { buf: Buffer.alloc(0), accent: null };
   const browsers = await Promise.all(ranges.map(() => C.launch()));
   const pages = [];
   try {
@@ -494,9 +560,12 @@ async function gatherFlashSamples(loadable, { from, to, shotId, fps, cols, rows,
     }
     for (const pg of opened) pg.page.setDefaultTimeout(180000);
     const parts = await Promise.all(opened.map((pg, i) => pg.page.evaluate(sampleBlocks, {
-      from: ranges[i][0], to: ranges[i][1], cols, rows, fps, step: 2,
+      from: ranges[i][0], to: ranges[i][1], cols, rows, fps, step: 2, accent, tol: ACCENT_TOL,
     })));
-    return Buffer.concat(parts.map((b64) => Buffer.from(b64, 'base64')));
+    const buf = Buffer.concat(parts.map((p) => Buffer.from(p.blocks, 'base64')));
+    if (!accent) return { buf, accent: null };
+    if (parts.some((p) => !p.accent)) return { buf, accent: { row: accent, missing: true } };
+    return { buf, accent: { row: accent, hex: parts[0].accentHex, pixels: parts[0].pixels, counts: parts.flatMap((p) => p.accent) } };
   } finally {
     await Promise.all(pages.map((p) => p.close().catch(() => {})));
     await Promise.all(browsers.map((b) => b.close().catch(() => {})));
@@ -809,11 +878,15 @@ async function main() {
     if (!TL.hasDuration) tlProblems.push('timeline has no "duration"');
     if (!(TL.duration > 0)) tlProblems.push(`duration is not positive (${TL.duration})`);
     const ids = new Set();
-    const GRADE_RANGE = { invert: [0, 1], warmth: [-1, 1], fade: [0, 1], vignette: [0, 1], paperAge: [0, 1], tintAmount: [0, 1] };
+    const GRADE_RANGE = { invert: [0, 1], warmth: [-1, 1], fade: [0, 1], vignette: [0, 1], paperAge: [0, 1], tintAmount: [0, 1], duotoneAmount: [0, 1], threshold: [0, 1] };
     const palNames = readPalNames();
     if (!palNames.size) tlProblems.push('could not read colour names from lib.pal');
     // carrier kinds and their numeric fields; keep in step with FILM.defineCarrier in src/core.js
-    const CARRIER_FIELDS = { crt: ['scanlines', 'period', 'mask', 'radius', 'edge', 'hum', 'humPeriod', 'flicker'] };
+    const CARRIER_FIELDS = {
+      crt: ['scanlines', 'period', 'mask', 'radius', 'edge', 'hum', 'humPeriod', 'flicker'],
+      vhs: ['chroma', 'tracking', 'trackPeriod', 'head', 'timecode', 'clock'],
+      film: ['perf', 'weave', 'scratches', 'dust', 'flicker', 'gate'],
+    };
     const carrierProblems = (c, at) => {
       if (c === undefined || c === null || c === false) return;
       if (typeof c !== 'object' || !CARRIER_FIELDS[c.kind]) {
@@ -875,7 +948,7 @@ async function main() {
       if (offGrid(s.start)) tlWarnings.push(`shot '${s.id}' starts at ${s.start}s, off the 16th-note grid at ${TL.bpm} bpm`);
       const tr = s.transitionIn;
       if (tr) {
-        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph', 'crtoff', 'shatter'];
+        const kinds = ['cut', 'fade', 'flash', 'iris', 'wipe', 'whip', 'inkwash', 'morph', 'crtoff', 'shatter', 'tracking'];
         if (!kinds.includes(tr.kind)) tlProblems.push(`shot '${s.id}' transitionIn kind '${tr.kind}' is not one of ${kinds.join(', ')}`);
         if (!(tr.dur >= 0) || tr.dur > s.dur) tlProblems.push(`shot '${s.id}' transitionIn dur ${tr.dur} must be between 0 and the shot length ${s.dur}`);
         if (tr.kind === 'whip' && !['left', 'right', 'up', 'down'].includes(tr.dir)) {
@@ -892,7 +965,7 @@ async function main() {
           tlProblems.push(`shot '${s.id}' grade must be an object`);
         } else {
           for (const key of Object.keys(g)) {
-            if (!Object.prototype.hasOwnProperty.call(GRADE_RANGE, key) && key !== 'tint') {
+            if (!Object.prototype.hasOwnProperty.call(GRADE_RANGE, key) && key !== 'tint' && key !== 'duotone') {
               tlProblems.push(`shot '${s.id}' grade.${key} is not a grade field`);
             }
           }
@@ -905,6 +978,11 @@ async function main() {
           }
           if (g.tint != null && (typeof g.tint !== 'string' || !palNames.has(g.tint))) {
             tlProblems.push(`shot '${s.id}' grade.tint '${g.tint}' is not a colour in lib.pal`);
+          }
+          if (g.duotone != null) {
+            const d = g.duotone;
+            if (!Array.isArray(d) || d.length !== 2) tlProblems.push(`shot '${s.id}' grade.duotone must be [dark, light], two lib.pal names`);
+            else for (const n of d) if (typeof n !== 'string' || !palNames.has(n)) tlProblems.push(`shot '${s.id}' grade.duotone '${n}' is not a colour in lib.pal`);
           }
         }
       }
@@ -1451,6 +1529,9 @@ async function main() {
   // Calibration (check.cjs and common.cjs copied onto the films, src left alone, then reverted):
   //   butterfly-life: PASS, no window over 3 (max 1 general, 0 red), flash 18.3s, gate OK in 107.3s
   //   arctic-tern-life: PASS, no window over 3 (max 2 general, 0 red), flash 6.0s, gate OK in 50.5s
+  const budgetFile = fixtures ? path.join(src.base, 'theme.json') : path.join(C.ROOT, 'docs', 'theme.json');
+  const accentBudget = readAccentBudget(budgetFile);
+  let accentSamples = null;
   if (args['flash-skip']) {
     report(9, 'flash', 'SKIP', 'skipped (--flash-skip)');
   } else {
@@ -1458,7 +1539,9 @@ async function main() {
     try {
       const from = shotId ? Math.ceil(SHOTS[0].start * FPS - 1e-6) : 0;
       const to = shotId ? Math.max(from, Math.ceil(SHOTS[0].end * FPS - 1e-6)) : Math.max(0, Math.round(TL.duration * FPS));
-      const buf = await gatherFlashSamples(loadable, { from, to, shotId, fps: FPS, cols: 8, rows: 14, pagesOpened, frameWidth: TL.width, frameHeight: TL.height });
+      const accentRow = accentBudget && !accentBudget.error ? accentBudget.row : null;
+      const { buf, accent } = await gatherFlashSamples(loadable, { from, to, shotId, fps: FPS, cols: 8, rows: 14, pagesOpened, frameWidth: TL.width, frameHeight: TL.height, accent: accentRow });
+      accentSamples = accent ? Object.assign(accent, { from }) : null;
       const stats = analyzeFlashBlocks(buf, { from, cols: 8, rows: 14, fps: FPS });
       const sec = ((Date.now() - tFlash) / 1000).toFixed(1);
       const gW = worstViolation(stats.general);
@@ -1483,6 +1566,57 @@ async function main() {
     } catch (e) {
       const loadErr = (e.loadErr || []).map((err) => `script error ${err.file}:${err.line}:${err.col} ${err.message}`);
       report(9, 'flash', false, e.loadErr ? e.message : `flash check failed: ${e && e.message ? e.message : e}`, loadErr);
+    }
+  }
+
+  // ---------------------------------------------------------------- 12 accent
+  // WARN only. Reads the check 9 samples, so it costs no extra frames; --flash-skip skips it too.
+  {
+    const where = path.relative(C.ROOT, budgetFile);
+    if (!accentBudget) {
+      report(12, 'accent', true, `no accent budget in ${where}`);
+    } else if (accentBudget.error) {
+      report(12, 'accent', 'WARN', `${where}: ${accentBudget.error}`);
+    } else if (args['flash-skip']) {
+      report(12, 'accent', 'SKIP', 'skipped (--flash-skip: it reads the flash check frames)');
+    } else if (!accentSamples) {
+      report(12, 'accent', 'WARN', 'not measured: the flash check did not finish');
+    } else if (accentSamples.missing) {
+      report(12, 'accent', 'WARN', `lib.pal has no colour row '${accentSamples.row}' (${where} accent)`);
+    } else {
+      const a = analyzeAccent(accentSamples.counts, accentSamples.pixels, accentSamples.from);
+      const b = accentBudget;
+      const shotAt = (f) => {
+        const T = (f + 0.5) / FPS;
+        const s = SHOTS.find((x) => T >= x.start && T < x.end);
+        return s ? s.id : '?';
+      };
+      const tAt = (f) => (f / FPS).toFixed(3);
+      const pct = (x) => `${(x * 100).toFixed(x < 0.01 ? 3 : 2)}%`;
+      const over = [];
+      const details = [];
+      if (b.frames !== undefined) {
+        const long = a.runs.filter((r) => r.len > b.frames);
+        if (long.length) over.push(`${long.length} event(s) over ${b.frames} frames (longest ${a.longest})`);
+        for (const r of long) details.push(`warn: T=${tAt(r.start)}..${tAt(r.end + 1)} ${r.len} frames in '${shotAt(r.start)}'${shotAt(r.end) !== shotAt(r.start) ? ` to '${shotAt(r.end)}'` : ''}`);
+      }
+      if (b.share !== undefined && !shotId && a.n && a.on / a.n > b.share) {
+        over.push(`on ${pct(a.on / a.n)} of the frames (budget ${pct(b.share)})`);
+      }
+      if (b.area !== undefined && a.peak.area > b.area) {
+        over.push(`peak ${pct(a.peak.area)} of the frame (budget ${pct(b.area)})`);
+        details.push(`warn: peak at T=${tAt(a.peak.frame)} in '${shotAt(a.peak.frame)}'`);
+      }
+      const budgetText = ['frames', 'share', 'area'].filter((k) => b[k] !== undefined).map((k) => `${k} ${k === 'frames' ? b[k] : pct(b[k])}`).join(', ');
+      const measured = `longest run ${a.longest} frames, on ${a.on} of ${a.n} frames, peak ${pct(a.peak.area)} of the frame`;
+      if (!over.length) details.push(...a.runs.slice(0, 12).map((r) => `T=${tAt(r.start)}..${tAt(r.end + 1)} ${r.len} frames in '${shotAt(r.start)}'`));
+      report(
+        12,
+        'accent',
+        over.length ? 'WARN' : true,
+        `${b.row} ${accentSamples.hex} (budget ${budgetText}${b.share !== undefined && shotId ? '; share not measured under --shot' : ''}): ${measured}${over.length ? `; over budget: ${over.join('; ')}` : ''}`,
+        details
+      );
     }
   }
 
